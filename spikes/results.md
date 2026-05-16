@@ -34,10 +34,10 @@
 
 ## Weather
 
-- Location source:
-- Forecast endpoint works:
-- Fields used:
-- Decision:
+- Location source: `LEONDIO_LOCATION`, probed with `Shanghai`
+- Forecast endpoint works: yes
+- Fields used: temperature_2m, relative_humidity_2m, precipitation, weather_code, wind_speed_10m
+- Decision: use Open-Meteo with configured city for v1; skip weather context gracefully when geocoding or forecast endpoint fails
 
 ## SQLite Memory
 
