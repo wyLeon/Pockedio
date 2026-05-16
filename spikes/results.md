@@ -10,11 +10,11 @@
 
 ## NetEase Cloud Music
 
-- Search works:
-- Playable URL retrieval works:
-- Auth required:
-- Unavailable track behavior:
-- Decision:
+- Search works: yes
+- Playable URL retrieval works: yes
+- Auth required: no for probed search and standard URL retrieval; unclear for broader catalog and account-restricted tracks
+- Unavailable track behavior: probed track returned code 200 with a playable mp3 URL and freeTrialInfo present
+- Decision: use the local NetEase API server behind a provider adapter; keep unavailable-track fallback mandatory because auth, membership, region, and copyright behavior remain track-dependent
 
 ## Fish TTS
 

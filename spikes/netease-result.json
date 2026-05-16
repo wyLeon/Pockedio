@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "baseUrl": "http://127.0.0.1:3000",
+  "keyword": "坂本龙一",
+  "songCount": 5,
+  "firstSong": {
+    "id": 437715323,
+    "name": "Merry Christmas Mr. Lawrence",
+    "artists": [
+      "坂本龍一"
+    ]
+  },
+  "playable": true,
+  "urlType": "mp3",
+  "code": 200,
+  "freeTrialInfo": true
+}
