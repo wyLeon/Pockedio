@@ -18,12 +18,12 @@
 
 ## Fish TTS
 
-- Local command or Python entrypoint: not found; `fish-speech` missing, `fish-tts` missing, Python `fish_speech` module missing
+- Local command or Python entrypoint: `.cache/mlx-speech-venv/bin/python .cache/mlx-speech/scripts/generate/fish_s2_pro.py`
 - Model path/name: local candidate found at `/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`
-- Output format: not validated
-- Generation latency: not measured because no runnable entrypoint was available
-- Playback command: not validated; intended playback command remains `afplay <file>`
-- Decision: blocker for spoken DJ audio; install or document the Fish/FishAudio runtime that can use the discovered MLX model, then rerun this spike before implementing scheduled DJ voice
+- Output format: wav, 44100 Hz mono PCM
+- Generation latency: 17.075 seconds for `Pockedio is on air.` on the first validated generation; measured in `spikes/fish-tts-latency.txt`
+- Playback command: `afplay spikes/fish-tts-sample.wav`
+- Decision: use FishAudio S2 Pro through MLX for v1 spoken DJ audio; wrap invocation behind a production TTS adapter and keep text fallback for runtime failures
 
 ## Apple Calendar
 
