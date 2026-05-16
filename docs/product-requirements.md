@@ -8,7 +8,7 @@ The user can ask Leondio to play music, either generally or with a specific inte
 
 For the first CLI version, Leondio should create a five-song playlist and start real playback through NetEase Cloud Music.
 
-User-active playback must not trigger DJ voice mode. In this mode, Leondio can show concise text rationale in the terminal, but it should not synthesize or play DJ speech.
+User-active playback must not trigger DJ voice mode by default. In this mode, Leondio can show concise text rationale in the terminal, but it should not synthesize or play DJ speech unless the user explicitly asks Leondio to create a DJ-like audio segment.
 
 ### 2. Leondio-Active Morning DJ
 
@@ -34,9 +34,15 @@ The evening DJ should use:
 - recent mood check-ins and playback feedback
 - diary summaries only when explicitly allowed
 
-The evening segment is the second allowed DJ voice moment. Outside the weekday 8:45 AM and 5:00 PM active DJ windows, Leondio should avoid spoken DJ audio unless the user explicitly changes this rule later.
+The evening segment is the second scheduled DJ voice moment. Outside the weekday 8:45 AM and 5:00 PM active DJ windows, Leondio should avoid spoken DJ audio unless the user explicitly asks Leondio to create a DJ-like audio segment.
 
-### 4. Mood Check-In Suggestions
+### 4. User-Requested DJ Audio
+
+The user can explicitly ask Leondio to create a DJ-like audio segment. This is separate from normal user-active playback.
+
+When this happens, Leondio should generate concise DJ copy, synthesize it through the local Fish TTS model, and play the resulting audio. The audio may introduce a station, summarize a vibe, or create a personal radio-style moment. This mode is opt-in and should not be inferred from a normal "play music" request.
+
+### 5. Mood Check-In Suggestions
 
 When the Leondio server is active, it should check mood on an hourly basis or around meaningful context changes. It should not claim to know the user's real-time mood without a user signal.
 
@@ -92,4 +98,4 @@ The first CLI demo is successful if:
 - Leondio creates a five-song playlist
 - at least three of the five songs feel aligned with the user's stated intent
 - unavailable songs do not crash the session
-- weekday DJ voice is limited to the 8:45 AM and 5:00 PM active DJ moments
+- DJ voice appears only in the weekday 8:45 AM active moment, the weekday 5:00 PM active moment, or when the user explicitly requests DJ-like audio
