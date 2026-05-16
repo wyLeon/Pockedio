@@ -41,10 +41,10 @@
 
 ## SQLite Memory
 
-- Schema creation works:
-- Full transcript storage works:
-- Query shape works:
-- Decision:
+- Schema creation works: yes
+- Full transcript storage works: yes
+- Query shape works: yes
+- Decision: use SQLite for v1 local durable memory; production schema should extend this with playlists, playback results, feedback actions, and summarized context rows
 
 ## Taste Import
 
