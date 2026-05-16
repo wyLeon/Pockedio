@@ -48,9 +48,9 @@ The generated DJ audio is not an artifact for review. It should be played direct
 
 ### 5. Mood Check-In Suggestions
 
-When the Leondio server is active, it should check mood on an hourly basis or around meaningful context changes. It should not claim to know the user's real-time mood without a user signal.
+When the Leondio server is active, it should prompt the user for a mood check on an hourly basis or around meaningful context changes. It should not claim to know the user's real-time mood without a user signal.
 
-Mood check-ins should be lightweight. Leondio can ask the user to choose or describe the current mood, then suggest music based on that answer plus calendar, time, weather, and taste memory.
+Mood check-ins should be lightweight and option-based. Leondio should present a small set of mood options for the user to pick from, with an optional free-text override. After the user chooses, Leondio should suggest music based on that answer plus calendar, time, weather, and taste memory.
 
 Mood check-ins should suggest music first. Playback should require user confirmation unless the user later enables an automatic-play rule.
 
