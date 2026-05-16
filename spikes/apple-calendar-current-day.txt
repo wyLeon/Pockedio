@@ -1,0 +1,6 @@
+status: blocked
+raw_output_path: /tmp/pockedio-apple-calendar-current-day.raw.txt (not committed)
+raw_error_path: /tmp/pockedio-apple-calendar-error.txt (not committed)
+current_day_event_lines: not measured
+fields_requested: calendar name, summary, start date, end date
+permission_behavior: osascript did not return within 16 seconds and produced no stdout/stderr; likely waiting on macOS Calendar/Automation permission or Calendar application response

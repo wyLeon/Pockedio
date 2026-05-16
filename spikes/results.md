@@ -27,10 +27,10 @@
 
 ## Apple Calendar
 
-- Current-date read works:
-- Permission behavior:
-- Event fields available:
-- Decision:
+- Current-date read works: no; probe did not complete
+- Permission behavior: `osascript` hung without stdout/stderr and had to be stopped after waiting; likely blocked by macOS Calendar/Automation permission or Calendar app response
+- Event fields available: script requests calendar name, summary, start date, and end date, but fields were not validated because the read did not complete
+- Decision: AppleScript path is not validated yet; implementation must include setup-time permission guidance and may need an EventKit/native helper if AppleScript remains unreliable
 
 ## Weather
 
