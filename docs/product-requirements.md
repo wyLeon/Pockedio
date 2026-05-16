@@ -2,7 +2,25 @@
 
 ## Core Modes
 
-### 1. User-Active Playback
+### 1. Conversational DJ Session
+
+The primary v1 interface should be a conversational terminal DJ session, not a command-first CLI. The user should be able to talk to Leondio in natural language, share thoughts, describe mood, ask for music, react to the current track, or request a change in direction.
+
+The normal entry point should be `leondio`, which opens the DJ conversation. Fixed commands should exist for setup, background jobs, imports, and status, but the core product experience should feel like talking to a personal DJ.
+
+Leondio should interpret natural language into internal actions such as:
+
+- generating a five-song station
+- adjusting the current vibe
+- skipping, liking, banning, or asking for more like the current track
+- creating a DJ-like audio segment when explicitly requested
+- updating mood and session memory
+- explaining a station choice briefly
+- starting or stopping playback
+
+Leondio should respond with DJ-like written copy in the terminal. It should be concise, music-first, and personal without becoming verbose.
+
+### 2. User-Active Playback
 
 The user can ask Leondio to play music, either generally or with a specific intent, genre, or activity. Example inputs include "play some music", "play some jazz", "play pure meditation music", or "play something for deep work".
 
@@ -10,7 +28,7 @@ For the first CLI version, Leondio should create a five-song playlist and start 
 
 User-active playback must not trigger DJ voice mode by default. In this mode, Leondio can show concise text rationale in the terminal, but it should not synthesize or play DJ speech unless the user explicitly asks Leondio to create a DJ-like audio segment.
 
-### 2. Leondio-Active Morning DJ
+### 3. Leondio-Active Morning DJ
 
 Every weekday at 8:45 AM, Leondio should generate a morning DJ audio segment, play the generated audio file directly, and start the day with music.
 
@@ -25,7 +43,7 @@ The morning segment should feel like a personal radio host: concise, contextual,
 
 The user is the listener, not the reviewer of the generated file. The audio should be treated as the final output and played directly rather than presented for approval.
 
-### 3. Leondio-Active Evening DJ
+### 4. Leondio-Active Evening DJ
 
 Every weekday at 5:00 PM, Leondio should generate an evening DJ audio segment, play the generated audio file directly, and start a station for transition, decompression, commute, or continued focus.
 
@@ -38,7 +56,7 @@ The evening DJ should use:
 
 The evening segment is the second scheduled DJ voice moment. Outside the weekday 8:45 AM and 5:00 PM active DJ windows, Leondio should avoid spoken DJ audio unless the user explicitly asks Leondio to create a DJ-like audio segment.
 
-### 4. User-Requested DJ Audio
+### 5. User-Requested DJ Audio
 
 The user can explicitly ask Leondio to create a DJ-like audio segment. This is separate from normal user-active playback.
 
@@ -46,7 +64,7 @@ When this happens, Leondio should generate concise DJ copy, synthesize it throug
 
 The generated DJ audio is not an artifact for review. It should be played directly for the user as the only intended audience.
 
-### 5. Automatic Mood Check-In Suggestions
+### 6. Automatic Mood Check-In Suggestions
 
 When the Leondio server is active, it should prompt the user for a mood check on an hourly basis or around meaningful context changes. It should not claim to know the user's real-time mood without a user signal.
 
@@ -67,6 +85,18 @@ This applies to:
 - scheduled DJ setup/status text
 
 The product voice should stay music-first. It should not become chatty, sentimental, or verbose. User-active playback still should not synthesize DJ voice audio by default, but terminal copy should carry the DJ personality.
+
+## Command Philosophy
+
+Commands are operational entry points, not the main user experience. The v1 command surface should stay small:
+
+- `leondio`: enter the conversational DJ session
+- `leondio serve`: run scheduled jobs, including weekday 8:45 AM DJ, weekday 5:00 PM DJ, and automatic mood check prompts
+- `leondio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar, weather location, diary permission, and database
+- `leondio import-taste <file>`: import exported music app data
+- `leondio status`: check playback, scheduled jobs, and service health
+
+Natural-language requests inside the DJ session should replace command-first interactions such as `play`, `mood`, or `feedback`.
 
 ## Accepted Additional Requirements
 
