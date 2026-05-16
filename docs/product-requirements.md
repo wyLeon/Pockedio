@@ -20,6 +20,12 @@ Leondio should interpret natural language into internal actions such as:
 
 Leondio should respond with DJ-like written copy in the terminal. It should be concise, music-first, and personal without becoming verbose.
 
+Leondio should also support open conversation about music. The user and Leondio can talk about a song, artist, album, scene, genre, or musical moment, including extended context such as cultural background, politics, philosophy, history, or personal meaning when the conversation naturally goes there.
+
+The user can say "play it directly" or an equivalent phrase to skip discussion and move straight into playback. In that case, Leondio should stop elaborating and start the relevant music as directly as possible.
+
+Leondio should decide whether to ask a follow-up, continue discussion, suggest music, or start playback based on the conversation context. The product should not force every user sentence into a fixed command pattern.
+
 ### 2. User-Active Playback
 
 The user can ask Leondio to play music, either generally or with a specific intent, genre, or activity. Example inputs include "play some music", "play some jazz", "play pure meditation music", or "play something for deep work".
@@ -126,8 +132,11 @@ If NetEase Cloud Music cannot play a track because of API failure, login state, 
 
 ### Session Memory
 
-Leondio should save each station session with:
+Leondio should save every word in every session locally. Text is cheap to store, and the full conversation is part of the product memory.
 
+Each session should store:
+
+- full user messages and Leondio responses
 - user input or trigger reason
 - generated playlist
 - playback results
