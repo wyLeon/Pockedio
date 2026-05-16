@@ -27,7 +27,7 @@ The user is the listener, not the reviewer of the generated file. The audio shou
 
 ### 3. Leondio-Active Evening DJ
 
-Every weekday at 5:00 PM, Leondio should generate an evening DJ audio segment, play the generated audio file directly, and offer or start a station for transition, decompression, commute, or continued focus.
+Every weekday at 5:00 PM, Leondio should generate an evening DJ audio segment, play the generated audio file directly, and start a station for transition, decompression, commute, or continued focus.
 
 The evening DJ should use:
 
