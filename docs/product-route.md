@@ -26,6 +26,10 @@ The first CLI MVP should include real playback rather than a simulated playlist.
 
 DJ voice output should use the Fish TTS model that is already installed locally. The CLI should treat voice generation as a local capability: generate concise DJ speech, synthesize it through Fish TTS, and play it before or between music segments when appropriate. The first version should keep spoken segments short so the station remains music-first.
 
+Schedule context should come from Apple Calendar, because it is the user's primary planning tool. The CLI should use real calendar context to understand the current or upcoming day, then translate that context into station intent such as focus, commute, transition, recovery, or wind-down. The implementation plan must validate the safest local access path for Apple Calendar data before building higher-level scheduling behavior.
+
+Taste learning is tracked separately in [`docs/taste-intelligence.md`](taste-intelligence.md).
+
 ## Web App Milestone
 
 The web app should be built after the CLI proves the product loop. It should preserve the same core behavior while adding a visual station interface, playback controls, history, preference editing, and a more expressive DJ layer.
@@ -34,6 +38,6 @@ The web app should be built after the CLI proves the product loop. It should pre
 
 - Exact NetEase Cloud Music API approach, authentication method, and playback constraints.
 - Local Fish TTS invocation path, model name, voice preset, and expected audio output format.
-- Whether calendar/schedule context is manually entered first or connected to a real calendar later.
+- Exact Apple Calendar integration path and permission model.
 - How much personalization data is explicit onboarding versus learned from feedback.
 - What success means for the first CLI demo.
