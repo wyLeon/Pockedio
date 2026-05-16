@@ -66,7 +66,7 @@
 - Blockers:
   - Fish TTS has a local model candidate but no runnable command or Python entrypoint in the current environment.
   - Apple Calendar AppleScript current-date read did not complete and likely needs macOS Calendar/Automation permission handling or an EventKit/native helper.
-  - npm global cache has root-owned files; NetEase server startup succeeded only with a temporary `npm_config_cache=/tmp/pockedio-npm-cache` workaround.
+  - NetEase local API startup now uses `spikes/scripts/run_netease_api.sh`, which isolates npm cache under `.cache/npm`.
 - Required implementation constraints:
   - NetEase provider must be behind an adapter and handle unavailable tracks.
   - Fish TTS must have text fallback for scheduled jobs until the local runtime is validated.

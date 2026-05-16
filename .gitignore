@@ -6,4 +6,4 @@ build/
 .env.*
 !.env.example
 .superpowers/
-
+.cache/
