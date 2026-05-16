@@ -62,15 +62,13 @@
 
 ## Final Recommendation
 
-- Product implementation can start: no for full v1 implementation; NetEase, weather, SQLite, taste import, and persona schedule are validated, but Fish TTS and Apple Calendar need follow-up before scheduled DJ implementation starts
-- Blockers:
-  - Fish TTS has a local model candidate but no runnable command or Python entrypoint in the current environment.
-  - Apple Calendar AppleScript current-date read did not complete and likely needs macOS Calendar/Automation permission handling or an EventKit/native helper.
-  - NetEase local API startup now uses `spikes/scripts/run_netease_api.sh`, which isolates npm cache under `.cache/npm`.
+- Product implementation can start: yes for the CLI foundation and provider adapters
+- Blockers: none for v1 foundation; scheduled DJ implementation must still keep runtime fallbacks
 - Required implementation constraints:
   - NetEase provider must be behind an adapter and handle unavailable tracks.
-  - Fish TTS must have text fallback for scheduled jobs until the local runtime is validated.
-  - Apple Calendar access must request or document macOS permission during setup.
+  - NetEase local API startup uses `spikes/scripts/run_netease_api.sh`, which isolates npm cache under `.cache/npm`.
+  - Fish TTS must be behind a TTS adapter and keep text fallback for runtime failures.
+  - Apple Calendar access must be configured during setup and never commit raw event text.
   - Weather context must be optional.
   - SQLite is the v1 local database if the memory probe passed.
   - Taste import starts with normalized CSV.
