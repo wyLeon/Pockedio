@@ -2,7 +2,7 @@
 
 ## Goal
 
-Pockedio should understand the user's music taste well enough to choose music at the right moment, not just recommend globally popular or mood-tagged tracks. Taste intelligence should combine explicit music data, written preference memory, diary context, and feedback from actual listening sessions.
+Pockedio should understand the user's music taste well enough to choose music at the right moment, not just recommend globally popular or mood-tagged tracks. Taste intelligence should combine explicit music data, written preference memory, diary context, user personality profile, and feedback from actual listening sessions.
 
 ## Source 1: Exported Music App Data
 
@@ -45,6 +45,19 @@ Diary data should be used carefully. It is not music taste by itself, but it can
 
 The product should not read diary files by default. Diary access should be explicit, local-first, and explainable. When access is granted, Morning DJ should read the latest diary entry and combine it with durable diary memory. The system should summarize relevant patterns into taste and context memory rather than repeatedly exposing raw diary entries to every station-generation step.
 
+## Source 4: User Personality Profile
+
+During setup, Pockedio should optionally record the user's self-declared MBTI type. This should shape how the DJ interacts with the user, not what the user is assumed to like musically.
+
+The MBTI type should act as a high-weight conversational preference signal for:
+
+- how much rationale the DJ gives before playback
+- whether the DJ frames choices with structure, feeling, exploration, or direct action
+- how it asks follow-up questions
+- how scheduled DJ moments balance practical agenda context with emotional atmosphere
+
+The MBTI type should not override actual listening history, explicit feedback, current mood checks, or direct user instructions. Pockedio should not infer MBTI without permission.
+
 ## Product Stance
 
 Pockedio should not rely on a single taste source. The strongest approach is layered:
@@ -52,7 +65,8 @@ Pockedio should not rely on a single taste source. The strongest approach is lay
 1. Use exported music data to learn what the user actually saves and returns to.
 2. Use `taste.md` as the editable taste contract.
 3. Use diary-derived summaries to understand life context and emotional fit.
-4. Use listening feedback to correct mistakes over time.
+4. Use the self-declared personality profile to tune DJ interaction style.
+5. Use listening feedback to correct mistakes over time.
 
 This creates a system that can answer both "what do I like?" and "what would fit me right now?"
 
@@ -61,6 +75,6 @@ This creates a system that can answer both "what do I like?" and "what would fit
 - Which music apps and export formats should be supported first.
 - Where `taste.md` should live in the project.
 - Whether diary summaries should be generated manually on demand or maintained as an indexed local memory.
-- What database-backed memory schema should store agenda memory, diary memory, taste memory, session memory, and feedback.
+- What database-backed memory schema should store agenda memory, diary memory, taste memory, user personality profile, session memory, and feedback.
 - What privacy guardrails are required before reading diary files.
 - How the CLI should ask for and apply feedback during playback.

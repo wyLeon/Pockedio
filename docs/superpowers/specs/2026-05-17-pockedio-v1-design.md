@@ -21,6 +21,7 @@ V1 builds a local, single-user product for Leon. It includes:
 - Apple Calendar current-date context
 - weather context for the user's living location
 - diary access after explicit permission, including latest diary use for Morning DJ
+- optional self-declared MBTI type as a user personality profile
 - taste import from exported music app data
 - editable `taste.md` as a human-readable taste surface
 - local database-backed long-term memory
@@ -56,7 +57,7 @@ The v1 command surface stays small:
 
 - `pockedio`: enter the conversational DJ session.
 - `pockedio serve`: run scheduled jobs, including weekday 8:45 AM DJ, weekday 5:00 PM DJ, and automatic mood check prompts.
-- `pockedio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar permission, weather location, diary permission, and the local database.
+- `pockedio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar permission, weather location, diary permission, user personality profile, and the local database.
 - `pockedio import-taste <file>`: import exported music app data and update taste memory.
 - `pockedio status`: show playback state, scheduled job state, and service health.
 
@@ -121,6 +122,14 @@ Each persona should define:
 Scheduled Morning DJ and Evening DJ jobs should select the active persona from a fixed weekly schedule. This makes different days feel intentional and gives the product a radio-programming rhythm.
 
 V1 does not need a large persona library. It needs the model and configuration shape to support multiple personas from the start.
+
+## User Personality Profile
+
+Pockedio should support an optional user personality profile collected during setup. The first profile field should be the user's self-declared MBTI type.
+
+The MBTI type is not a music taste source by itself. It should be a major interaction reference for the DJ: how direct the DJ should be, how much context it should offer, whether it should lead with practical structure or emotional atmosphere, and how exploratory the conversation should feel.
+
+MBTI must stay subordinate to explicit user instructions, recent session context, mood checks, playback feedback, and imported taste data. Pockedio should never infer MBTI from diary entries, messages, or listening behavior unless the user explicitly asks for that kind of reflection later.
 
 ## Playback Behavior
 
@@ -252,6 +261,7 @@ The local database should permanently store:
 - agenda memory
 - diary memory
 - taste memory
+- user personality profile
 - generated summaries
 - DJ audio metadata
 

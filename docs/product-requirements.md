@@ -108,7 +108,7 @@ Commands are operational entry points, not the main user experience. The v1 comm
 
 - `pockedio`: enter the conversational DJ session
 - `pockedio serve`: run scheduled jobs, including weekday 8:45 AM DJ, weekday 5:00 PM DJ, and automatic mood check prompts
-- `pockedio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar, weather location, diary permission, and database
+- `pockedio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar, weather location, diary permission, user personality profile, and database
 - `pockedio import-taste <file>`: import exported music app data
 - `pockedio status`: check playback, scheduled jobs, and service health
 
@@ -153,6 +153,14 @@ Each session should store:
 - feedback actions
 - summarized calendar, weather, and mood context used for the session
 
+### User Personality Profile
+
+During setup, Pockedio should optionally record the user's self-declared MBTI type. This is not required for the first working playback demo, but it should be part of the long-term personalization model.
+
+MBTI should be treated as a strong interaction reference for DJ behavior: how much explanation to give, how direct or exploratory the DJ should be, how it frames choices, and how it balances emotional resonance against practical usefulness. It should not override explicit user instructions, recent mood, playback feedback, or actual taste data.
+
+Pockedio should not infer or assign an MBTI type without the user providing it. The user should be able to leave it unset, update it, or remove it later.
+
 ### Context And Long-Term Memory
 
 Apple Calendar should be read for the current date in both the morning and afternoon active DJ scenes. Pockedio should not treat the two reads as identical: the user's status, attitude, and remaining agenda may change between morning and afternoon.
@@ -161,7 +169,7 @@ Pockedio should maintain memory about the user's agendas over time. Session memo
 
 Morning DJ should read the latest diary entry when diary access is granted. Pockedio should also maintain memory about diary themes over time, so it can understand recent emotional context without repeatedly exposing raw diary text to every generation step.
 
-Long-term context should be stored permanently in the database. This includes agenda memory, diary memory, taste memory, session memory, playback feedback, and generated summaries. Human-readable files such as `taste.md` can remain editable surfaces, but the product should not rely on files alone for durable memory.
+Long-term context should be stored permanently in the database. This includes agenda memory, diary memory, taste memory, user personality profile, session memory, playback feedback, and generated summaries. Human-readable files such as `taste.md` can remain editable surfaces, but the product should not rely on files alone for durable memory.
 
 ### Interrupt Rules
 
