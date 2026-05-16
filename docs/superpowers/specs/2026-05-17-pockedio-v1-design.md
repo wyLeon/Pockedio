@@ -1,8 +1,8 @@
-# Leondio v1 Design
+# Pockedio v1 Design
 
 ## Purpose
 
-Leondio v1 is a CLI-first personal AI music radio. The product should feel like talking to an LLM-powered personal DJ in the terminal, not like operating a cold command-line utility. The first version exists to prove the core loop: understand the user's intent and context, generate a five-song station, play real music, remember the session, and use that memory to improve future choices.
+Pockedio v1 is a CLI-first personal AI music radio. The product should feel like talking to an LLM-powered personal DJ in the terminal, not like operating a cold command-line utility. The first version exists to prove the core loop: understand the user's intent and context, generate a five-song station, play real music, remember the session, and use that memory to improve future choices.
 
 The later web app should preserve the same behavior contract. The CLI is the proving ground for the product experience, not a throwaway technical demo.
 
@@ -15,6 +15,8 @@ V1 builds a local, single-user product for Leon. It includes:
 - five-song station generation
 - scheduled weekday DJ moments at 8:45 AM and 5:00 PM
 - explicit user-requested DJ audio through local Fish TTS
+- multiple configurable DJ personas with fixed day schedules
+- English as the default DJ language
 - automatic mood check prompts while the app server is active
 - Apple Calendar current-date context
 - weather context for the user's living location
@@ -41,10 +43,10 @@ V1 does not build:
 
 ## Product Model
 
-Leondio has two layers:
+Pockedio has two layers:
 
 1. **Conversation layer**: what the user experiences. The user talks naturally with a personal DJ, can discuss music and its wider context, can request playback, can react to tracks, and can say "play it directly" to skip discussion.
-2. **Action layer**: what the system performs internally. Leondio searches for songs, builds a station, plays audio, records feedback, reads context, updates memory, generates DJ copy, synthesizes DJ audio, and handles scheduled jobs.
+2. **Action layer**: what the system performs internally. Pockedio searches for songs, builds a station, plays audio, records feedback, reads context, updates memory, generates DJ copy, synthesizes DJ audio, and handles scheduled jobs.
 
 The user should mostly live in the conversation layer. Fixed CLI commands exist for operational entry points only.
 
@@ -52,17 +54,17 @@ The user should mostly live in the conversation layer. Fixed CLI commands exist 
 
 The v1 command surface stays small:
 
-- `leondio`: enter the conversational DJ session.
-- `leondio serve`: run scheduled jobs, including weekday 8:45 AM DJ, weekday 5:00 PM DJ, and automatic mood check prompts.
-- `leondio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar permission, weather location, diary permission, and the local database.
-- `leondio import-taste <file>`: import exported music app data and update taste memory.
-- `leondio status`: show playback state, scheduled job state, and service health.
+- `pockedio`: enter the conversational DJ session.
+- `pockedio serve`: run scheduled jobs, including weekday 8:45 AM DJ, weekday 5:00 PM DJ, and automatic mood check prompts.
+- `pockedio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar permission, weather location, diary permission, and the local database.
+- `pockedio import-taste <file>`: import exported music app data and update taste memory.
+- `pockedio status`: show playback state, scheduled job state, and service health.
 
-Commands such as `play`, `mood`, and `feedback` are not primary commands. They are natural-language intents inside the `leondio` DJ session.
+Commands such as `play`, `mood`, and `feedback` are not primary commands. They are natural-language intents inside the `pockedio` DJ session.
 
 ## Conversational DJ Session
 
-The normal user experience starts with `leondio`. Inside the session, the user can:
+The normal user experience starts with `pockedio`. Inside the session, the user can:
 
 - ask for music directly
 - describe mood or intent
@@ -74,7 +76,7 @@ The normal user experience starts with `leondio`. Inside the session, the user c
 - ask for a vibe change
 - ask for a DJ-like audio segment
 
-Leondio should decide from context whether to:
+Pockedio should decide from context whether to:
 
 - continue conversation
 - ask one follow-up question
@@ -88,7 +90,7 @@ It should not force every user sentence into a rigid command pattern.
 
 ## Product Voice
 
-Leondio should write like a concise personal radio DJ. It should be warm, musical, and intentional without becoming verbose or sentimental. It can use music language, scene-setting, and light rationale, but the product remains music-first.
+Pockedio should write like a concise personal radio DJ. It should be warm, musical, and intentional without becoming verbose or sentimental. It can use music language, scene-setting, and light rationale, but the product remains music-first.
 
 This voice applies to:
 
@@ -101,17 +103,36 @@ This voice applies to:
 
 Ordinary text personality does not imply spoken DJ audio. Fish TTS DJ voice audio is limited to specific allowed cases.
 
+English is the default language for spoken DJ audio and terminal DJ copy. The user can write naturally in another language, but unless a later preference overrides it, Pockedio's DJ output should default to English.
+
+## DJ Personas
+
+Pockedio should support multiple DJ personas. A persona is a scheduled DJ style that shapes tone, references, music framing, and spoken delivery without changing the core product rules.
+
+Each persona should define:
+
+- name
+- default language
+- tone notes
+- music bias notes
+- contextual reference style
+- scheduled days
+
+Scheduled Morning DJ and Evening DJ jobs should select the active persona from a fixed weekly schedule. This makes different days feel intentional and gives the product a radio-programming rhythm.
+
+V1 does not need a large persona library. It needs the model and configuration shape to support multiple personas from the start.
+
 ## Playback Behavior
 
-For user-active playback, Leondio generates a five-song station and starts real playback through NetEase Cloud Music. User-active playback does not synthesize spoken DJ voice by default.
+For user-active playback, Pockedio generates a five-song station and starts real playback through NetEase Cloud Music. User-active playback does not synthesize spoken DJ voice by default.
 
 The target acceptance behavior is:
 
 - user asks naturally for music
-- Leondio understands the intent
-- Leondio generates five tracks
-- Leondio starts playback within 30 seconds in the successful path
-- Leondio records session context and playback results
+- Pockedio understands the intent
+- Pockedio generates five tracks
+- Pockedio starts playback within 30 seconds in the successful path
+- Pockedio records session context and playback results
 
 During playback, natural user replies can become feedback:
 
@@ -130,46 +151,50 @@ Spoken DJ audio is allowed only in three cases:
 
 1. Weekday 8:45 AM Morning DJ.
 2. Weekday 5:00 PM Evening DJ.
-3. The user explicitly asks Leondio to create a DJ-like audio segment.
+3. The user explicitly asks Pockedio to create a DJ-like audio segment.
 
-When DJ audio is generated, it is final output for the user, not an artifact for review. Leondio should synthesize it through the local Fish TTS model and play the generated audio file directly.
+When DJ audio is generated, it is final output for the user, not an artifact for review. Pockedio should synthesize it through the local Fish TTS model and play the generated audio file directly.
+
+The generated DJ copy should use the active persona. For user-requested DJ audio, the current session persona should be used unless the user asks for a specific style.
 
 ## Scheduled DJ Jobs
 
-Scheduled DJ jobs are cron-like behavior managed by `leondio serve`, not normal commands the user types.
+Scheduled DJ jobs are cron-like behavior managed by `pockedio serve`, not normal commands the user types.
 
 ### Morning DJ
 
-Every weekday at 8:45 AM, Leondio should:
+Every weekday at 8:45 AM, Pockedio should:
 
 1. Read current-date Apple Calendar context.
 2. Read weather for the user's living location.
 3. Read the latest diary entry if diary access is granted.
 4. Combine durable diary memory, agenda memory, taste memory, and recent feedback.
-5. Generate concise morning DJ copy.
-6. Synthesize the copy through Fish TTS.
-7. Play the generated DJ audio directly.
-8. Start music.
+5. Select the scheduled DJ persona for the day.
+6. Generate concise morning DJ copy in English by default.
+7. Synthesize the copy through Fish TTS.
+8. Play the generated DJ audio directly.
+9. Start music.
 
 ### Evening DJ
 
-Every weekday at 5:00 PM, Leondio should:
+Every weekday at 5:00 PM, Pockedio should:
 
 1. Read current-date Apple Calendar context again.
 2. Treat afternoon context as different from morning context because the user's status, attitude, and remaining agenda may have changed.
 3. Read weather and time-of-day context.
 4. Use recent mood check-ins and playback feedback.
 5. Use diary summaries only when explicitly allowed.
-6. Generate concise evening DJ copy.
-7. Synthesize the copy through Fish TTS.
-8. Play the generated DJ audio directly.
-9. Start music for transition, decompression, commute, or continued focus.
+6. Select the scheduled DJ persona for the day.
+7. Generate concise evening DJ copy in English by default.
+8. Synthesize the copy through Fish TTS.
+9. Play the generated DJ audio directly.
+10. Start music for transition, decompression, commute, or continued focus.
 
 ## Mood Check Jobs
 
-When `leondio serve` is active, Leondio should prompt the user for mood check-ins hourly or around meaningful context changes. Mood checks are app-initiated jobs, not typed commands.
+When `pockedio serve` is active, Pockedio should prompt the user for mood check-ins hourly or around meaningful context changes. Mood checks are app-initiated jobs, not typed commands.
 
-The prompt should offer a small set of mood options with an optional free-text override. Leondio should not claim to know the user's real-time mood without a user signal. After the user chooses, Leondio suggests music based on mood, calendar, time, weather, taste memory, and recent session memory.
+The prompt should offer a small set of mood options with an optional free-text override. Pockedio should not claim to know the user's real-time mood without a user signal. After the user chooses, Pockedio suggests music based on mood, calendar, time, weather, taste memory, and recent session memory.
 
 Mood check suggestions require confirmation before playback unless the user later enables an automatic-play rule.
 
@@ -185,6 +210,7 @@ V1 uses these sources:
 - `taste.md` as editable human-readable taste memory.
 - Diary files after explicit permission.
 - Local database for durable memory.
+- DJ persona schedule configuration.
 
 ## Taste Intelligence
 
@@ -204,15 +230,15 @@ Raw imports should be kept separate from derived summaries so taste memory can b
 
 ## Diary And Calendar Memory
 
-Apple Calendar should be read for the current date in both scheduled DJ scenes. Leondio should also maintain agenda memory over time, using session memory and generated summaries to understand recurring work patterns, meeting-heavy days, important projects, and transitions between obligations.
+Apple Calendar should be read for the current date in both scheduled DJ scenes. Pockedio should also maintain agenda memory over time, using session memory and generated summaries to understand recurring work patterns, meeting-heavy days, important projects, and transitions between obligations.
 
-Morning DJ should read the latest diary entry when diary access is granted. Leondio should also maintain durable diary memory, so it can understand recent emotional context without repeatedly exposing raw diary text to every generation step.
+Morning DJ should read the latest diary entry when diary access is granted. Pockedio should also maintain durable diary memory, so it can understand recent emotional context without repeatedly exposing raw diary text to every generation step.
 
-Diary access is explicit and local-first. Leondio should prefer diary summaries and memory over raw diary reuse whenever possible.
+Diary access is explicit and local-first. Pockedio should prefer diary summaries and memory over raw diary reuse whenever possible.
 
 ## Memory Contract
 
-Leondio stores every word in every session locally. Full user messages and Leondio responses are part of the product memory.
+Pockedio stores every word in every session locally. Full user messages and Pockedio responses are part of the product memory.
 
 The local database should permanently store:
 
@@ -233,20 +259,20 @@ Human-readable files such as `taste.md` can remain editable surfaces, but they a
 
 ## Privacy Rules
 
-Leondio is local-first. Sensitive sources should not be read silently.
+Pockedio is local-first. Sensitive sources should not be read silently.
 
 Rules:
 
 - Diary access requires explicit permission.
 - Raw diary text should not be repeatedly passed into generation when a summary or durable memory is enough.
 - Calendar context should be summarized for station generation.
-- Leondio should be able to explain which source categories influenced a recommendation.
+- Pockedio should be able to explain which source categories influenced a recommendation.
 - Full session transcripts are stored locally because the user explicitly wants every word saved.
 - External service failures should not leak private context in logs.
 
 ## Failure Behavior
 
-Leondio should degrade gracefully:
+Pockedio should degrade gracefully:
 
 - If NetEase search fails, explain briefly and do not crash the session.
 - If a song URL is unavailable because of copyright, membership, region, login, or API failure, skip or replace it when possible.
@@ -272,6 +298,7 @@ The design implies these boundaries for later implementation planning:
 - taste importer
 - memory store
 - Fish TTS adapter
+- DJ persona scheduler
 - product voice layer
 
 The exact file structure and library choices are deferred to the implementation plan after technical spikes.
@@ -286,20 +313,22 @@ Before full implementation, validate:
 4. Weather API and location configuration.
 5. Local database choice and transcript storage format.
 6. First supported music app export format for taste import.
+7. DJ persona schedule configuration shape and default persona set.
 
 ## Acceptance Criteria
 
 V1 is acceptable when:
 
-- `leondio` opens a conversational DJ session.
-- The user can ask naturally for music and Leondio starts a five-song station.
+- `pockedio` opens a conversational DJ session.
+- The user can ask naturally for music and Pockedio starts a five-song station.
 - In the happy path, playback begins within 30 seconds of a simple request.
 - At least three of five generated songs feel aligned with the stated intent.
 - User-active playback does not synthesize DJ voice unless explicitly requested.
 - Explicit DJ audio requests generate and directly play Fish TTS audio.
 - Weekday 8:45 AM and 5:00 PM scheduled jobs generate DJ audio, play it directly, and start music.
+- Scheduled DJ jobs use the persona assigned to that day.
+- DJ spoken output defaults to English.
 - Mood checks are automatic app prompts with options, not user-typed commands.
 - Calendar, weather, diary, taste, mood, playback, and feedback context are captured in memory.
 - Every session message is stored locally.
 - Unavailable songs and failed external context sources do not crash the session.
-

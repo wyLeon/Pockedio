@@ -1,10 +1,10 @@
-# Leondio v1 Technical Spikes Implementation Plan
+# Pockedio v1 Technical Spikes Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Validate the external dependencies and local persistence choices required before implementing Leondio v1.
+**Goal:** Validate the external dependencies, local persistence choices, and persona configuration shape required before implementing Pockedio v1.
 
-**Architecture:** This plan creates a temporary `spikes/` workspace with small probe scripts and a single results document. Each probe validates one risky dependency from the approved v1 design: NetEase playback, Fish TTS, Apple Calendar, weather, SQLite memory, and taste import shape.
+**Architecture:** This plan creates a temporary `spikes/` workspace with small probe scripts and a single results document. Each probe validates one risky dependency from the approved v1 design: NetEase playback, Fish TTS, Apple Calendar, weather, SQLite memory, taste import shape, and DJ persona schedule shape.
 
 **Tech Stack:** Shell, Node.js 18, AppleScript via `osascript`, SQLite 3, `curl`, `afplay`, and short disposable probe scripts.
 
@@ -12,7 +12,7 @@
 
 ## Scope Check
 
-The approved design covers multiple independent subsystems. This plan intentionally does not implement the product. It validates the risky dependencies and records decisions so the next plan can implement Leondio with fewer open risks.
+The approved design covers multiple independent subsystems. This plan intentionally does not implement the product. It validates the risky dependencies and records decisions so the next plan can implement Pockedio with fewer open risks.
 
 ## Files Created By This Plan
 
@@ -24,6 +24,7 @@ The approved design covers multiple independent subsystems. This plan intentiona
 - `spikes/scripts/sqlite_memory_probe.sql`: validates the local memory schema shape in SQLite.
 - `spikes/scripts/taste_import_probe.mjs`: validates a normalized CSV import shape for taste data.
 - `spikes/fixtures/taste-normalized.csv`: sample taste import data.
+- `spikes/fixtures/dj-personas.json`: sample DJ persona schedule.
 
 ## Task 1: Create Spike Workspace
 
@@ -46,9 +47,9 @@ Expected: command exits with code `0`.
 Write this exact content:
 
 ```markdown
-# Leondio Technical Spikes
+# Pockedio Technical Spikes
 
-This directory contains disposable probes for Leondio v1 dependencies.
+This directory contains disposable probes for Pockedio v1 dependencies.
 
 Rules:
 
@@ -63,7 +64,7 @@ Rules:
 Write this exact content:
 
 ```markdown
-# Leondio v1 Spike Results
+# Pockedio v1 Spike Results
 
 ## Environment
 
@@ -116,6 +117,13 @@ Write this exact content:
 - First supported format:
 - Required fields:
 - Derived taste summary possible:
+- Decision:
+
+## DJ Personas
+
+- Config shape works:
+- Default language:
+- Scheduled days:
 - Decision:
 
 ## Final Recommendation
@@ -305,7 +313,7 @@ spikes/fish-tts-sample.wav
 The spoken text must be:
 
 ```text
-Leondio is on air.
+Pockedio is on air.
 ```
 
 Expected: `spikes/fish-tts-sample.wav` exists and is playable.
@@ -530,7 +538,7 @@ CREATE TABLE sessions (
 CREATE TABLE messages (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL REFERENCES sessions(id),
-  role TEXT NOT NULL CHECK (role IN ('user', 'leondio', 'system')),
+  role TEXT NOT NULL CHECK (role IN ('user', 'pockedio', 'system')),
   content TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
@@ -552,7 +560,7 @@ INSERT INTO sessions VALUES (
 
 INSERT INTO messages VALUES
   ('msg_001', 'session_001', 'user', 'I feel scattered. Play it directly.', '2026-05-17T09:00:01+08:00'),
-  ('msg_002', 'session_001', 'leondio', 'Copy that. Clean lines, no detour. Starting a five-track set.', '2026-05-17T09:00:04+08:00');
+  ('msg_002', 'session_001', 'pockedio', 'Copy that. Clean lines, no detour. Starting a five-track set.', '2026-05-17T09:00:04+08:00');
 
 INSERT INTO memory_items VALUES (
   'mem_001',
@@ -573,7 +581,7 @@ SELECT role || ': ' || content FROM messages ORDER BY created_at;
 Run:
 
 ```bash
-sqlite3 spikes/leondio-memory.sqlite < spikes/scripts/sqlite_memory_probe.sql | tee spikes/sqlite-memory-result.txt
+sqlite3 spikes/pockedio-memory.sqlite < spikes/scripts/sqlite_memory_probe.sql | tee spikes/sqlite-memory-result.txt
 ```
 
 Expected: output includes:
@@ -606,7 +614,7 @@ git add spikes/scripts/sqlite_memory_probe.sql spikes/sqlite-memory-result.txt s
 git commit -m "spike: validate sqlite memory store"
 ```
 
-Expected: commit succeeds. Do not commit `spikes/leondio-memory.sqlite`.
+Expected: commit succeeds. Do not commit `spikes/pockedio-memory.sqlite`.
 
 ## Task 7: Taste Import Shape Spike
 
@@ -699,7 +707,101 @@ git commit -m "spike: validate taste import shape"
 
 Expected: commit succeeds.
 
-## Task 8: Final Spike Recommendation
+## Task 8: DJ Persona Schedule Shape Spike
+
+**Files:**
+- Create: `spikes/fixtures/dj-personas.json`
+- Modify: `spikes/results.md`
+
+- [ ] **Step 1: Create `spikes/fixtures/dj-personas.json`**
+
+Write this exact content:
+
+```json
+{
+  "defaultLanguage": "en",
+  "weeklySchedule": {
+    "monday": "quiet_archivist",
+    "tuesday": "late_night_jazz_host",
+    "wednesday": "philosophy_selector",
+    "thursday": "city_radio_companion",
+    "friday": "weekend_warmup"
+  },
+  "personas": {
+    "quiet_archivist": {
+      "name": "Quiet Archivist",
+      "language": "en",
+      "tone": "precise, reflective, restrained",
+      "musicBias": "ambient, piano, minimal electronic, soft jazz",
+      "contextStyle": "connects songs to memory, place, and time without overexplaining"
+    },
+    "late_night_jazz_host": {
+      "name": "Late Night Jazz Host",
+      "language": "en",
+      "tone": "warm, smoky, conversational",
+      "musicBias": "jazz, soul, blue-note textures, mellow grooves",
+      "contextStyle": "frames the set like a radio hour after the city slows down"
+    },
+    "philosophy_selector": {
+      "name": "Philosophy Selector",
+      "language": "en",
+      "tone": "curious, concise, lightly philosophical",
+      "musicBias": "textural, contemplative, art pop, modern classical",
+      "contextStyle": "links music to ideas, attention, work, and inner weather"
+    },
+    "city_radio_companion": {
+      "name": "City Radio Companion",
+      "language": "en",
+      "tone": "grounded, urban, direct",
+      "musicBias": "indie, electronic, city pop, rhythmic focus music",
+      "contextStyle": "uses weather, commute, schedule, and city atmosphere"
+    },
+    "weekend_warmup": {
+      "name": "Weekend Warmup",
+      "language": "en",
+      "tone": "lighter, optimistic, still tasteful",
+      "musicBias": "groove, funk, bright jazz, warm electronic",
+      "contextStyle": "helps the week land and opens a softer transition"
+    }
+  }
+}
+```
+
+- [ ] **Step 2: Validate the persona schedule JSON**
+
+Run:
+
+```bash
+node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("spikes/fixtures/dj-personas.json","utf8")); const days=Object.keys(p.weeklySchedule); const missing=days.filter(day=>!p.personas[p.weeklySchedule[day]]); if(missing.length){throw new Error(`Missing personas for ${missing.join(",")}`)}; if(p.defaultLanguage!=="en"){throw new Error("defaultLanguage must be en")}; console.log(JSON.stringify({ok:true,days,personas:Object.keys(p.personas),defaultLanguage:p.defaultLanguage},null,2))' | tee spikes/dj-personas-result.json
+```
+
+Expected: JSON output includes `"ok": true` and `"defaultLanguage": "en"`.
+
+- [ ] **Step 3: Update `spikes/results.md`**
+
+Record:
+
+```markdown
+## DJ Personas
+
+- Config shape works: yes/no
+- Default language: en
+- Scheduled days: monday, tuesday, wednesday, thursday, friday
+- Decision: use JSON-backed persona schedule for v1; scheduled DJ jobs select the persona by weekday
+```
+
+- [ ] **Step 4: Commit DJ persona spike**
+
+Run:
+
+```bash
+git add spikes/fixtures/dj-personas.json spikes/dj-personas-result.json spikes/results.md
+git commit -m "spike: validate dj persona schedule"
+```
+
+Expected: commit succeeds.
+
+## Task 9: Final Spike Recommendation
 
 **Files:**
 - Modify: `spikes/results.md`
@@ -730,6 +832,7 @@ Use this exact shape:
   - Weather context must be optional.
   - SQLite is the v1 local database if the memory probe passed.
   - Taste import starts with normalized CSV.
+  - DJ persona schedule starts as JSON config with English default output.
 ```
 
 - [ ] **Step 3: Commit final recommendation**
@@ -745,8 +848,8 @@ Expected: commit succeeds.
 
 ## Self-Review Checklist
 
-- The plan covers every technical spike required by `docs/superpowers/specs/2026-05-17-leondio-v1-design.md`.
+- The plan covers every technical spike required by `docs/superpowers/specs/2026-05-17-pockedio-v1-design.md`.
 - The plan avoids product implementation and focuses on dependency validation.
 - Every task produces a concrete artifact or recorded decision.
-- NetEase, Fish TTS, Apple Calendar, weather, SQLite memory, and taste import each have a pass/fail decision.
+- NetEase, Fish TTS, Apple Calendar, weather, SQLite memory, taste import, and DJ persona schedule each have a pass/fail decision.
 - The next implementation plan can use `spikes/results.md` as input.

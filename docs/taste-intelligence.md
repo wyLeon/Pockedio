@@ -1,8 +1,8 @@
-# Leondio Taste Intelligence
+# Pockedio Taste Intelligence
 
 ## Goal
 
-Leondio should understand the user's music taste well enough to choose music at the right moment, not just recommend globally popular or mood-tagged tracks. Taste intelligence should combine explicit music data, written preference memory, diary context, and feedback from actual listening sessions.
+Pockedio should understand the user's music taste well enough to choose music at the right moment, not just recommend globally popular or mood-tagged tracks. Taste intelligence should combine explicit music data, written preference memory, diary context, and feedback from actual listening sessions.
 
 ## Source 1: Exported Music App Data
 
@@ -20,7 +20,7 @@ The first version should treat exported music data as the primary taste seed. Th
 
 ## Source 2: `taste.md`
 
-Leondio should maintain a human-readable `taste.md`, similar in spirit to a product `design.md`. This file should describe the user's music taste in language that both the user and the system can inspect.
+Pockedio should maintain a human-readable `taste.md`, similar in spirit to a product `design.md`. This file should describe the user's music taste in language that both the user and the system can inspect.
 
 It should include:
 
@@ -36,7 +36,7 @@ The `taste.md` file should not be treated as static truth. It should be a curate
 
 The user's diary under `/Users/leonw/openclaw/area/diary` may be an important source for understanding emotional context, recurring life patterns, work intensity, projects, and personal seasons.
 
-Diary data should be used carefully. It is not music taste by itself, but it can help Leondio understand when certain music is appropriate. For example, it may help distinguish:
+Diary data should be used carefully. It is not music taste by itself, but it can help Pockedio understand when certain music is appropriate. For example, it may help distinguish:
 
 - deep focus versus anxious overwork
 - celebratory energy versus forced high energy
@@ -47,7 +47,7 @@ The product should not read diary files by default. Diary access should be expli
 
 ## Product Stance
 
-Leondio should not rely on a single taste source. The strongest approach is layered:
+Pockedio should not rely on a single taste source. The strongest approach is layered:
 
 1. Use exported music data to learn what the user actually saves and returns to.
 2. Use `taste.md` as the editable taste contract.
