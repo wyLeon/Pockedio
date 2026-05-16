@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "days": [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday"
+  ],
+  "personas": [
+    "quiet_archivist",
+    "late_night_jazz_host",
+    "philosophy_selector",
+    "city_radio_companion",
+    "weekend_warmup"
+  ],
+  "defaultLanguage": "en"
+}

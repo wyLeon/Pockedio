@@ -55,10 +55,10 @@
 
 ## DJ Personas
 
-- Config shape works:
-- Default language:
-- Scheduled days:
-- Decision:
+- Config shape works: yes
+- Default language: en
+- Scheduled days: monday, tuesday, wednesday, thursday, friday
+- Decision: use JSON-backed persona schedule for v1; scheduled DJ jobs select the persona by weekday and default DJ output to English
 
 ## Final Recommendation
 
