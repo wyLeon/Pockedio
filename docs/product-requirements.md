@@ -46,13 +46,27 @@ When this happens, Leondio should generate concise DJ copy, synthesize it throug
 
 The generated DJ audio is not an artifact for review. It should be played directly for the user as the only intended audience.
 
-### 5. Mood Check-In Suggestions
+### 5. Automatic Mood Check-In Suggestions
 
 When the Leondio server is active, it should prompt the user for a mood check on an hourly basis or around meaningful context changes. It should not claim to know the user's real-time mood without a user signal.
 
 Mood check-ins should be lightweight and option-based. Leondio should present a small set of mood options for the user to pick from, with an optional free-text override. After the user chooses, Leondio should suggest music based on that answer plus calendar, time, weather, and taste memory.
 
-Mood check-ins should suggest music first. Playback should require user confirmation unless the user later enables an automatic-play rule.
+Mood check-ins are automatic app jobs, not commands the user has to type manually. They should suggest music first. Playback should require user confirmation unless the user later enables an automatic-play rule.
+
+## Product Voice
+
+Leondio should behave and write like a personal radio DJ, not a cold terminal utility. Even in the CLI, its text should feel concise, warm, and intentional.
+
+This applies to:
+
+- playlist introductions
+- mood check prompts
+- playback feedback confirmations
+- fallback messages when a song cannot play
+- scheduled DJ setup/status text
+
+The product voice should stay music-first. It should not become chatty, sentimental, or verbose. User-active playback still should not synthesize DJ voice audio by default, but terminal copy should carry the DJ personality.
 
 ## Accepted Additional Requirements
 
