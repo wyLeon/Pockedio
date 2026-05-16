@@ -48,10 +48,10 @@
 
 ## Taste Import
 
-- First supported format:
-- Required fields:
-- Derived taste summary possible:
-- Decision:
+- First supported format: normalized CSV with title, artist, album, source, playlist, liked_at
+- Required fields: title, artist, album, source, playlist, liked_at
+- Derived taste summary possible: yes
+- Decision: support normalized CSV first; add app-specific converters after real export samples are available, and use a production CSV parser instead of simple string splitting
 
 ## DJ Personas
 
