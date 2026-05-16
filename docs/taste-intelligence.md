@@ -43,7 +43,7 @@ Diary data should be used carefully. It is not music taste by itself, but it can
 - calm recovery versus melancholy
 - nostalgia, transition, closure, or momentum
 
-The product should not read diary files by default. Diary access should be explicit, local-first, and explainable. The system should summarize relevant patterns into taste and context memory rather than repeatedly exposing raw diary entries to every station-generation step.
+The product should not read diary files by default. Diary access should be explicit, local-first, and explainable. When access is granted, Morning DJ should read the latest diary entry and combine it with durable diary memory. The system should summarize relevant patterns into taste and context memory rather than repeatedly exposing raw diary entries to every station-generation step.
 
 ## Product Stance
 
@@ -61,5 +61,6 @@ This creates a system that can answer both "what do I like?" and "what would fit
 - Which music apps and export formats should be supported first.
 - Where `taste.md` should live in the project.
 - Whether diary summaries should be generated manually on demand or maintained as an indexed local memory.
+- What database-backed memory schema should store agenda memory, diary memory, taste memory, session memory, and feedback.
 - What privacy guardrails are required before reading diary files.
 - How the CLI should ask for and apply feedback during playback.

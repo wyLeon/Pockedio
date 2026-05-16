@@ -17,8 +17,8 @@ Every weekday at 8:45 AM, Leondio should generate a morning DJ audio segment, pl
 The morning DJ should use:
 
 - weather for the user's living location
-- Apple Calendar context for the day
-- diary summaries from the past few days, if the user has granted diary access
+- current-date Apple Calendar context
+- the latest diary entry plus diary memory, if the user has granted diary access
 - taste memory from imported music data, `taste.md`, and listening feedback
 
 The morning segment should feel like a personal radio host: concise, contextual, and musically useful. It should not over-explain private source material.
@@ -31,7 +31,7 @@ Every weekday at 5:00 PM, Leondio should generate an evening DJ audio segment, p
 
 The evening DJ should use:
 
-- the day's Apple Calendar context
+- current-date Apple Calendar context
 - weather and time-of-day context
 - recent mood check-ins and playback feedback
 - diary summaries only when explicitly allowed
@@ -89,6 +89,16 @@ Leondio should save each station session with:
 - playback results
 - feedback actions
 - summarized calendar, weather, and mood context used for the session
+
+### Context And Long-Term Memory
+
+Apple Calendar should be read for the current date in both the morning and afternoon active DJ scenes. Leondio should not treat the two reads as identical: the user's status, attitude, and remaining agenda may change between morning and afternoon.
+
+Leondio should maintain memory about the user's agendas over time. Session memory can be one source for this, but agenda memory should become a durable long-term context layer so Leondio can understand recurring work patterns, important projects, meeting-heavy days, and transitions between obligations.
+
+Morning DJ should read the latest diary entry when diary access is granted. Leondio should also maintain memory about diary themes over time, so it can understand recent emotional context without repeatedly exposing raw diary text to every generation step.
+
+Long-term context should be stored permanently in the database. This includes agenda memory, diary memory, taste memory, session memory, playback feedback, and generated summaries. Human-readable files such as `taste.md` can remain editable surfaces, but the product should not rely on files alone for durable memory.
 
 ### Interrupt Rules
 
