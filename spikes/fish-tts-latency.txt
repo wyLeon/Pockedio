@@ -1,0 +1,5 @@
+Fish TTS latency was not measured.
+
+Reason: no runnable Fish TTS command or Python entrypoint was available in the current environment.
+Discovered model candidate: /Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e
+Discovered runtime state: fish-speech command missing, fish-tts command missing, Python fish_speech module missing, mlx present, mlx_audio missing.

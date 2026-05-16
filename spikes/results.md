@@ -18,12 +18,12 @@
 
 ## Fish TTS
 
-- Local command or Python entrypoint:
-- Model path/name:
-- Output format:
-- Generation latency:
-- Playback command:
-- Decision:
+- Local command or Python entrypoint: not found; `fish-speech` missing, `fish-tts` missing, Python `fish_speech` module missing
+- Model path/name: local candidate found at `/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`
+- Output format: not validated
+- Generation latency: not measured because no runnable entrypoint was available
+- Playback command: not validated; intended playback command remains `afplay <file>`
+- Decision: blocker for spoken DJ audio; install or document the Fish/FishAudio runtime that can use the discovered MLX model, then rerun this spike before implementing scheduled DJ voice
 
 ## Apple Calendar
 
