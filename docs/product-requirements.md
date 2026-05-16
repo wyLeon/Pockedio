@@ -12,7 +12,7 @@ User-active playback must not trigger DJ voice mode by default. In this mode, Le
 
 ### 2. Leondio-Active Morning DJ
 
-Every weekday at 8:45 AM, Leondio should generate a morning DJ audio segment and start the day with music.
+Every weekday at 8:45 AM, Leondio should generate a morning DJ audio segment, play the generated audio file directly, and start the day with music.
 
 The morning DJ should use:
 
@@ -23,9 +23,11 @@ The morning DJ should use:
 
 The morning segment should feel like a personal radio host: concise, contextual, and musically useful. It should not over-explain private source material.
 
+The user is the listener, not the reviewer of the generated file. The audio should be treated as the final output and played directly rather than presented for approval.
+
 ### 3. Leondio-Active Evening DJ
 
-Every weekday at 5:00 PM, Leondio should generate an evening DJ audio segment and offer or start a station for transition, decompression, commute, or continued focus.
+Every weekday at 5:00 PM, Leondio should generate an evening DJ audio segment, play the generated audio file directly, and offer or start a station for transition, decompression, commute, or continued focus.
 
 The evening DJ should use:
 
@@ -41,6 +43,8 @@ The evening segment is the second scheduled DJ voice moment. Outside the weekday
 The user can explicitly ask Leondio to create a DJ-like audio segment. This is separate from normal user-active playback.
 
 When this happens, Leondio should generate concise DJ copy, synthesize it through the local Fish TTS model, and play the resulting audio. The audio may introduce a station, summarize a vibe, or create a personal radio-style moment. This mode is opt-in and should not be inferred from a normal "play music" request.
+
+The generated DJ audio is not an artifact for review. It should be played directly for the user as the only intended audience.
 
 ### 5. Mood Check-In Suggestions
 
@@ -99,3 +103,4 @@ The first CLI demo is successful if:
 - at least three of the five songs feel aligned with the user's stated intent
 - unavailable songs do not crash the session
 - DJ voice appears only in the weekday 8:45 AM active moment, the weekday 5:00 PM active moment, or when the user explicitly requests DJ-like audio
+- DJ audio outputs are played directly and do not require a user review step
