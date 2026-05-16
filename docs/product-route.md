@@ -28,7 +28,7 @@ DJ voice output should use the Fish TTS model that is already installed locally.
 
 Schedule context should come from Apple Calendar, because it is the user's primary planning tool. The CLI should use real calendar context to understand the current or upcoming day, then translate that context into station intent such as focus, commute, transition, recovery, or wind-down. The implementation plan must validate the safest local access path for Apple Calendar data before building higher-level scheduling behavior.
 
-Taste learning is tracked separately in [`docs/taste-intelligence.md`](taste-intelligence.md).
+Product requirements are tracked in [`docs/product-requirements.md`](product-requirements.md). Taste learning is tracked separately in [`docs/taste-intelligence.md`](taste-intelligence.md).
 
 ## Web App Milestone
 
