@@ -1,0 +1,30 @@
+{
+  "name": "pockedio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pockedio": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "commander": "^13.1.0",
+    "csv-parse": "^5.6.0",
+    "inquirer": "^12.5.0",
+    "openai": "^4.100.0",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}
