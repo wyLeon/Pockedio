@@ -1,0 +1,65 @@
+export type Weekday = "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
+
+export type DjPersona = {
+  name: string;
+  language: "en";
+  tone: string;
+  musicBias: string;
+  contextStyle: string;
+};
+
+export type DjPersonaConfig = {
+  defaultLanguage: "en";
+  weeklySchedule: Record<Weekday, string>;
+  personas: Record<string, DjPersona>;
+};
+
+export const weekdayOrder: Weekday[] = ["monday", "tuesday", "wednesday", "thursday", "friday"];
+
+export const defaultPersonaConfig: DjPersonaConfig = {
+  defaultLanguage: "en",
+  weeklySchedule: {
+    monday: "quiet_archivist",
+    tuesday: "late_night_jazz_host",
+    wednesday: "philosophy_selector",
+    thursday: "city_radio_companion",
+    friday: "weekend_warmup"
+  },
+  personas: {
+    quiet_archivist: {
+      name: "Quiet Archivist",
+      language: "en",
+      tone: "precise, reflective, restrained",
+      musicBias: "ambient, piano, minimal electronic, soft jazz",
+      contextStyle: "connects songs to memory, place, and time without overexplaining"
+    },
+    late_night_jazz_host: {
+      name: "Late Night Jazz Host",
+      language: "en",
+      tone: "warm, smoky, conversational",
+      musicBias: "jazz, soul, blue-note textures, mellow grooves",
+      contextStyle: "frames the set like a radio hour after the city slows down"
+    },
+    philosophy_selector: {
+      name: "Philosophy Selector",
+      language: "en",
+      tone: "curious, concise, lightly philosophical",
+      musicBias: "textural, contemplative, art pop, modern classical",
+      contextStyle: "links music to ideas, attention, work, and inner weather"
+    },
+    city_radio_companion: {
+      name: "City Radio Companion",
+      language: "en",
+      tone: "grounded, urban, direct",
+      musicBias: "indie, electronic, city pop, rhythmic focus music",
+      contextStyle: "uses weather, commute, schedule, and city atmosphere"
+    },
+    weekend_warmup: {
+      name: "Weekend Warmup",
+      language: "en",
+      tone: "lighter, optimistic, still tasteful",
+      musicBias: "groove, funk, bright jazz, warm electronic",
+      contextStyle: "helps the week land and opens a softer transition"
+    }
+  }
+};
