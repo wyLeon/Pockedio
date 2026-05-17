@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { runSetup } from "./config/setup.js";
 import { pockedioVersion } from "./index.js";
+import { importTaste } from "./taste/importTaste.js";
 
 function printScaffoldMessage(commandName: string): void {
   console.log(`Pockedio ${commandName} is wired; implementation continues in the next task.`);
@@ -28,8 +29,11 @@ program
   .command("import-taste")
   .description("Import normalized music taste data")
   .argument("<file>", "normalized taste CSV file")
-  .action((_file: string) => {
-    printScaffoldMessage("import-taste");
+  .action((file: string) => {
+    const result = importTaste(file);
+    console.log(`Imported ${result.trackCount} tracks into ${result.tastePath}.`);
+    console.log(`Artists: ${result.artists.join(", ") || "none"}`);
+    console.log(`Playlists: ${result.playlists.join(", ") || "none"}`);
   });
 
 program
