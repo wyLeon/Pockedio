@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { runSetup } from "./config/setup.js";
 import { pockedioVersion } from "./index.js";
+import { printStatus } from "./status/status.js";
 import { importTaste } from "./taste/importTaste.js";
 
 function printScaffoldMessage(commandName: string): void {
@@ -47,8 +48,8 @@ program
 program
   .command("status")
   .description("Show Pockedio health and runtime status")
-  .action(() => {
-    printScaffoldMessage("status");
+  .action(async () => {
+    await printStatus();
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
