@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { runSetup } from "./config/setup.js";
 import { pockedioVersion } from "./index.js";
 
 function printScaffoldMessage(commandName: string): void {
@@ -19,8 +20,8 @@ program
 program
   .command("setup")
   .description("Configure local Pockedio integrations and memory")
-  .action(() => {
-    printScaffoldMessage("setup");
+  .action(async () => {
+    await runSetup();
   });
 
 program
