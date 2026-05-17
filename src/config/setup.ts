@@ -1,4 +1,5 @@
 import inquirer from "inquirer";
+import { runMigrations } from "../db/migrations.js";
 import { ensureRuntimeDirs, loadConfig, saveConfig } from "./load.js";
 import { mbtiTypes, pockedioConfigSchema, type MbtiType, type PockedioConfig } from "./schema.js";
 
@@ -21,6 +22,7 @@ export async function runSetup(): Promise<void> {
   const config = buildConfigFromAnswers(current, answers);
   ensureRuntimeDirs(config);
   saveConfig(config);
+  runMigrations(config);
   console.log("Pockedio setup saved.");
 }
 
