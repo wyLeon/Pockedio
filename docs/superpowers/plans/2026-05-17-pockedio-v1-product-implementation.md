@@ -997,7 +997,7 @@ git commit -m "feat: add status command"
 - Create: `src/scheduler/serve.ts`
 - Modify: `src/cli.ts`
 
-- [ ] **Step 1: Implement scheduled job decision logic**
+- [x] **Step 1: Implement scheduled job decision logic**
 
 `src/scheduler/jobs.ts` should expose:
 
@@ -1006,7 +1006,7 @@ git commit -m "feat: add status command"
 - `isEveningDjTime(date)` for 5:00 PM.
 - `shouldPromptMoodCheck(lastPromptAt, now)` hourly.
 
-- [ ] **Step 2: Implement Morning DJ job**
+- [x] **Step 2: Implement Morning DJ job**
 
 Morning job should:
 
@@ -1019,11 +1019,11 @@ Morning job should:
 - Store all text/audio/playback metadata.
 - If FishAudio fails, show text and continue to music when appropriate.
 
-- [ ] **Step 3: Implement Evening DJ job**
+- [x] **Step 3: Implement Evening DJ job**
 
 Evening job should follow Morning DJ but emphasize remaining agenda, decompression, commute, continued focus, or transition.
 
-- [ ] **Step 4: Implement mood check prompt**
+- [x] **Step 4: Implement mood check prompt**
 
 Mood check should:
 
@@ -1033,7 +1033,7 @@ Mood check should:
 - Suggest music.
 - Require confirmation before playback.
 
-- [ ] **Step 5: Wire `pockedio serve`**
+- [x] **Step 5: Wire `pockedio serve`**
 
 `src/scheduler/serve.ts` should:
 
@@ -1045,7 +1045,7 @@ Mood check should:
   - `--run-once evening`
   - `--run-once mood-check`
 
-- [ ] **Step 6: Manual acceptance checks**
+- [x] **Step 6: Manual acceptance checks**
 
 Run:
 
@@ -1060,7 +1060,7 @@ Expected:
 - Morning/evening generate DJ copy, attempt FishAudio, and do not ask for audio review.
 - Mood check prompts with options and requires confirmation before playback.
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify and commit**
 
 Run:
 

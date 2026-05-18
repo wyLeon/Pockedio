@@ -2,13 +2,10 @@
 import { Command } from "commander";
 import { runSetup } from "./config/setup.js";
 import { pockedioVersion } from "./index.js";
+import { runServe } from "./scheduler/serve.js";
 import { runInteractiveSession } from "./session/sessionRunner.js";
 import { printStatus } from "./status/status.js";
 import { importTaste } from "./taste/importTaste.js";
-
-function printScaffoldMessage(commandName: string): void {
-  console.log(`Pockedio ${commandName} is wired; implementation continues in the next task.`);
-}
 
 const program = new Command();
 
@@ -42,8 +39,8 @@ program
   .command("serve")
   .description("Run scheduled DJ jobs and mood checks")
   .option("--run-once <job>", "run one implementation test job")
-  .action(() => {
-    printScaffoldMessage("serve");
+  .action(async (options: { runOnce?: string }) => {
+    await runServe({ runOnce: options.runOnce });
   });
 
 program
