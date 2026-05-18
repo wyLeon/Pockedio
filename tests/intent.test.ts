@@ -51,4 +51,15 @@ describe("parseIntent", () => {
       confidence: "high"
     });
   });
+
+  it("classifies playback status requests", async () => {
+    await expect(parseIntent("what's playing?")).resolves.toEqual({
+      type: "playback_status",
+      confidence: "high"
+    });
+    await expect(parseIntent("show queue")).resolves.toEqual({
+      type: "playback_status",
+      confidence: "high"
+    });
+  });
 });

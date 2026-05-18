@@ -9,6 +9,7 @@ export type SessionIntentType =
   | "feedback_ban"
   | "feedback_more_like_this"
   | "feedback_change_vibe"
+  | "playback_status"
   | "stop"
   | "explicit_dj_audio_request";
 
@@ -31,6 +32,7 @@ const intentTypes = new Set<SessionIntentType>([
   "feedback_ban",
   "feedback_more_like_this",
   "feedback_change_vibe",
+  "playback_status",
   "stop",
   "explicit_dj_audio_request"
 ]);
@@ -84,6 +86,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   }
   if (/\b(change the vibe|different vibe|switch the mood|change mood)\b/.test(text)) {
     return { type: "feedback_change_vibe", confidence: "high" };
+  }
+  if (/\b(what's playing|what is playing|current song|current track|show queue|where are we|what are we listening to)\b/.test(text)) {
+    return { type: "playback_status", confidence: "high" };
   }
   if (/\b(like this|love this|good pick|nice pick)\b/.test(text)) {
     return { type: "feedback_like", confidence: "high" };

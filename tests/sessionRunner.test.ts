@@ -118,7 +118,7 @@ describe("runSessionTurn", () => {
       writeOutput: (text) => output.push(text),
       startUrlPlayback: async (url) => ({
         target: url,
-        done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+        done: new Promise(() => undefined),
         stop: () => undefined
       })
     });
@@ -148,7 +148,7 @@ describe("runSessionTurn", () => {
         started.push(url);
         return {
           target: url,
-          done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+          done: new Promise(() => undefined),
           stop: () => {
             stopCalls += 1;
           }
@@ -169,6 +169,83 @@ describe("runSessionTurn", () => {
     expect(playbackState.currentIndex).toBe(1);
   });
 
+  it("reports current station status with elapsed time", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const startedAt = new Date("2026-05-18T10:00:00.000Z");
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      now: () => startedAt,
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "what's playing?",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      now: () => new Date("2026-05-18T10:02:05.000Z")
+    });
+
+    expect(result.response).toContain("Now playing: 1.");
+    expect(result.response).toContain("(02:05 elapsed)");
+    expect(result.response).toContain("> 1.");
+    expect(result.response).toContain("  2.");
+  });
+
+  it("auto-advances to the next playable track when playback finishes", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    let finishFirst: ((value: { ok: boolean; target: string; exitCode: number; signal: null }) => void) | undefined;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            finishFirst = resolve;
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    finishFirst?.({ ok: true, target: started[0], exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(started).toHaveLength(2);
+    expect(playbackState.currentIndex).toBe(1);
+    const rows = withDatabase(config, (db) => db.prepare(`
+      SELECT position, playback_status as playbackStatus
+      FROM station_tracks
+      ORDER BY position
+      LIMIT 2
+    `).all());
+    expect(rows).toEqual([
+      { position: 1, playbackStatus: "played" },
+      { position: 2, playbackStatus: "playing" }
+    ]);
+  });
+
   it("attaches feedback to the current playing track", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -182,7 +259,7 @@ describe("runSessionTurn", () => {
       buildContext: async () => ({ personality: config.personality }),
       startUrlPlayback: async (url) => ({
         target: url,
-        done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+        done: new Promise(() => undefined),
         stop: () => undefined
       })
     });

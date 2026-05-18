@@ -31,6 +31,7 @@ import { parseIntent, type SessionIntent } from "./intent.js";
 
 type OutputWriter = (text: string) => void;
 type StartUrlPlayback = (url: string) => Promise<PlaybackHandle>;
+type NowProvider = () => Date;
 
 type StoredPlaybackTrack = {
   dbId: string;
@@ -42,6 +43,7 @@ export type InteractivePlaybackState = {
   storedTracks?: StoredPlaybackTrack[];
   currentIndex?: number;
   currentTrackId?: string;
+  currentStartedAt?: Date;
   activePlayback?: PlaybackHandle;
   startUrlPlayback?: StartUrlPlayback;
 };
@@ -58,6 +60,7 @@ export type SessionTurnInput = {
   playUrl?: (url: string) => Promise<PlayerResult>;
   startUrlPlayback?: StartUrlPlayback;
   playbackState?: InteractivePlaybackState;
+  now?: NowProvider;
   playFile?: (filePath: string) => Promise<PlayerResult>;
   synthesizeFishAudio?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
 };
@@ -90,6 +93,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   const startUrlPlayback = input.startUrlPlayback ?? createDefaultInteractiveStartUrlPlayback();
   const playFile = input.playFile ?? ((filePath) => playAudioFile(filePath, 60_000));
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
+  const now = input.now ?? (() => new Date());
   const userText = input.input.trim();
   const sessionId = input.sessionId ?? store.createSession("conversation", userText);
   const shouldEndSession = input.endSession ?? !input.sessionId;
@@ -119,8 +123,15 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       const action = feedbackActionForIntent(intent.type);
       store.addFeedback(sessionId, input.playbackState?.currentTrackId ?? null, action, userText);
       const response = intent.type === "feedback_skip" && input.playbackState?.station
-        ? await advancePlayback(input.playbackState, store, input.playbackState.startUrlPlayback ?? startUrlPlayback)
+        ? await advancePlayback(input.playbackState, config, store, input.playbackState.startUrlPlayback ?? startUrlPlayback)
         : formatFeedbackConfirmation(action);
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
+    if (intent.type === "playback_status") {
+      const response = formatPlaybackStatus(input.playbackState, now());
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -149,7 +160,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       if (input.playbackState) {
         input.playbackState.station = station;
         input.playbackState.storedTracks = storedTracks;
-        nowPlaying = await startTrackAt(input.playbackState, store, 0, startUrlPlayback);
+        nowPlaying = await startTrackAt(input.playbackState, config, store, 0, startUrlPlayback, now);
       } else if (firstPlayable?.playable.available) {
         const playback = await playUrl(firstPlayable.playable.playableUrl);
         if (!playback.ok) {
@@ -318,6 +329,7 @@ function formatUnavailableTrackFallbackForResponse(tracks: StationTrack[]): stri
 
 async function advancePlayback(
   playbackState: InteractivePlaybackState,
+  config: PockedioConfig,
   store: MemoryStore,
   startUrlPlayback: StartUrlPlayback
 ): Promise<string> {
@@ -325,20 +337,23 @@ async function advancePlayback(
   if (playbackState.currentTrackId) {
     store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
   }
-  return startTrackAt(playbackState, store, (playbackState.currentIndex ?? -1) + 1, startUrlPlayback);
+  return startTrackAt(playbackState, config, store, (playbackState.currentIndex ?? -1) + 1, startUrlPlayback, () => new Date());
 }
 
 async function startTrackAt(
   playbackState: InteractivePlaybackState,
+  config: PockedioConfig,
   store: MemoryStore,
   startIndex: number,
-  startUrlPlayback: StartUrlPlayback
+  startUrlPlayback: StartUrlPlayback,
+  now: NowProvider
 ): Promise<string> {
   const storedTracks = playbackState.storedTracks ?? [];
   const nextIndex = storedTracks.findIndex((entry, index) => index >= startIndex && entry.track.playable.available);
   if (nextIndex === -1) {
     playbackState.currentIndex = undefined;
     playbackState.currentTrackId = undefined;
+    playbackState.currentStartedAt = undefined;
     playbackState.activePlayback = undefined;
     return "No playable tracks remain.";
   }
@@ -351,9 +366,32 @@ async function startTrackAt(
   const handle = await startUrlPlayback(entry.track.playable.playableUrl);
   playbackState.currentIndex = nextIndex;
   playbackState.currentTrackId = entry.dbId;
+  playbackState.currentStartedAt = now();
   playbackState.activePlayback = handle;
+  handle.done.then((result) => {
+    if (playbackState.activePlayback !== handle || !result.ok) {
+      return;
+    }
+    void autoAdvancePlayback(playbackState, config, entry.dbId, nextIndex + 1, startUrlPlayback);
+  }).catch(() => undefined);
   store.updateTrackPlayback(entry.dbId, "playing");
   return `Now playing: ${entry.track.title} by ${entry.track.artist}.`;
+}
+
+async function autoAdvancePlayback(
+  playbackState: InteractivePlaybackState,
+  config: PockedioConfig,
+  completedTrackId: string,
+  startIndex: number,
+  startUrlPlayback: StartUrlPlayback
+): Promise<void> {
+  const store = new MemoryStore(config);
+  try {
+    store.updateTrackPlayback(completedTrackId, "played");
+    await startTrackAt(playbackState, config, store, startIndex, startUrlPlayback, () => new Date());
+  } finally {
+    store.close();
+  }
 }
 
 function formatQueue(station: GeneratedStation): string {
@@ -364,4 +402,39 @@ function formatQueue(station: GeneratedStation): string {
       return `${track.position}. ${track.title} - ${track.artist}${suffix}`;
     })
   ].join("\n");
+}
+
+function formatPlaybackStatus(playbackState: InteractivePlaybackState | undefined, now: Date): string {
+  if (!playbackState) {
+    return "No station is playing.";
+  }
+  const storedTracks = playbackState.storedTracks ?? [];
+  const currentIndex = playbackState.currentIndex;
+  if (storedTracks.length === 0 || currentIndex === undefined) {
+    return "No station is playing.";
+  }
+
+  const current = storedTracks[currentIndex]?.track;
+  if (!current) {
+    return "No station is playing.";
+  }
+
+  return [
+    `Now playing: ${current.position}. ${current.title} - ${current.artist} (${formatElapsed(playbackState.currentStartedAt, now)} elapsed)`,
+    "Queue:",
+    ...storedTracks.map((entry, index) => {
+      const marker = index === currentIndex ? ">" : " ";
+      return `${marker} ${entry.track.position}. ${entry.track.title} - ${entry.track.artist}`;
+    })
+  ].join("\n");
+}
+
+function formatElapsed(startedAt: Date | undefined, now: Date): string {
+  if (!startedAt) {
+    return "00:00";
+  }
+  const seconds = Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / 1_000));
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
