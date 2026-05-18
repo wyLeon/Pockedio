@@ -108,6 +108,7 @@ npm run dev -- serve
 - Apple Calendar permission when Calendar context is enabled.
 - Open-Meteo network access for weather context.
 - `OPENAI_API_KEY` for full LLM station planning and DJ copy. Without it, Pockedio uses deterministic fallback paths where available.
+- OpenAI-compatible LLMs can be used by setting `llm.baseUrl` and `llm.apiKeyEnv` in `~/.pockedio/config.json`, for example DeepSeek with `baseUrl: "https://api.deepseek.com"` and `apiKeyEnv: "DEEPSEEK_API_KEY"`.
 
 ## V1 Behavior
 

@@ -116,7 +116,9 @@ export function buildConfigFromAnswers(current: PockedioConfig, answers: SetupAn
     },
     llm: {
       provider: "openai",
-      model: answers.llmModel
+      model: answers.llmModel,
+      baseUrl: current.llm.baseUrl,
+      apiKeyEnv: current.llm.apiKeyEnv
     },
     fishAudio: {
       pythonPath: answers.fishAudioPythonPath,

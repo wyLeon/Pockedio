@@ -39,7 +39,7 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
   const llm = input.llm ?? createLlmClient(input.config);
   const tasteSummary = readTasteSummary(input.config.paths.taste);
   const plan = await planTracks(input, llm, tasteSummary);
-  const tracks = await Promise.all(plan.tracks.map((track, index) => resolveTrack(track, index + 1, provider)));
+  const tracks = await Promise.all(plan.tracks.map((track, index) => resolveTrack(track, index + 1, provider, input.request)));
 
   return {
     request: input.request,
@@ -115,19 +115,84 @@ function fallbackRationale(request: string, tasteSummary: string): string {
   return `Deterministic fallback for "${request}" using local taste signals${tasteSummary ? "." : " when LLM is unavailable."}`;
 }
 
-async function resolveTrack(track: PlannedStationTrack, position: number, provider: MusicProvider): Promise<StationTrack> {
+async function resolveTrack(
+  track: PlannedStationTrack,
+  position: number,
+  provider: MusicProvider,
+  request: string
+): Promise<StationTrack> {
   const keyword = track.artist === "NetEase search" ? track.title : `${track.title} ${track.artist}`.trim();
   try {
-    const candidates = await provider.search({ keyword }, 1);
-    const candidate = candidates[0];
-    if (!candidate) {
+    const candidates = await provider.search({ keyword }, shouldUseStrictQuietScoring(request) ? 10 : 1);
+    if (candidates.length === 0) {
       return unavailableStationTrack(track, position, "No provider search result.");
     }
-    const playable = await provider.getPlayableUrl(candidate.providerTrackId);
-    return stationTrackFromCandidate(track, position, candidate, playable);
+    const resolved = await resolveBestPlayableCandidate(track, position, candidates, provider, request);
+    if (resolved) {
+      return resolved;
+    }
+    const firstCandidate = candidates[0];
+    const playable = await provider.getPlayableUrl(firstCandidate.providerTrackId);
+    return stationTrackFromCandidate(track, position, firstCandidate, playable);
   } catch (error) {
     return unavailableStationTrack(track, position, error instanceof Error ? error.message : String(error));
   }
+}
+
+async function resolveBestPlayableCandidate(
+  planned: PlannedStationTrack,
+  position: number,
+  candidates: MusicTrackCandidate[],
+  provider: MusicProvider,
+  request: string
+): Promise<StationTrack | null> {
+  if (!shouldUseStrictQuietScoring(request)) {
+    const candidate = candidates[0];
+    const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+    return stationTrackFromCandidate(planned, position, candidate, playable);
+  }
+
+  let best: { candidate: MusicTrackCandidate; playable: PlayableTrack; score: number } | null = null;
+  for (const candidate of candidates) {
+    const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+    if (!playable.available) {
+      continue;
+    }
+    const score = scoreCandidateForRequest(candidate, request);
+    if (!best || score > best.score) {
+      best = { candidate, playable, score };
+    }
+  }
+
+  return best ? stationTrackFromCandidate(planned, position, best.candidate, best.playable) : null;
+}
+
+function shouldUseStrictQuietScoring(request: string): boolean {
+  return /\b(meditation|meditate|calm|sleep|relax|deep work|focus|pure music|instrumental)\b/i.test(request);
+}
+
+function scoreCandidateForRequest(candidate: MusicTrackCandidate, request: string): number {
+  const text = [
+    candidate.title,
+    candidate.artists.join(" "),
+    candidate.album ?? ""
+  ].join(" ").toLowerCase();
+  let score = 0;
+
+  for (const term of ["古琴", "古筝", "纯音乐", "冥想", "禅", "meditation", "healing", "instrumental", "ambient", "calm", "relax"]) {
+    if (text.includes(term.toLowerCase())) {
+      score += 4;
+    }
+  }
+  for (const term of ["new year", "春节", "festival", "dj", "remix", "dance", "party", "edm", "live", "club"]) {
+    if (text.includes(term.toLowerCase())) {
+      score -= 6;
+    }
+  }
+  if (/\b(chinese|traditional|guqin|guzheng|erhu)\b/i.test(request) && /古琴|古筝|古风|chinese|guqin|guzheng|erhu/.test(text)) {
+    score += 3;
+  }
+  return score;
 }
 
 function stationTrackFromCandidate(

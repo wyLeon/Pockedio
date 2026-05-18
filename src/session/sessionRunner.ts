@@ -46,6 +46,7 @@ export type InteractivePlaybackState = {
   currentStartedAt?: Date;
   activePlayback?: PlaybackHandle;
   startUrlPlayback?: StartUrlPlayback;
+  writeOutput?: OutputWriter;
 };
 
 export type SessionTurnInput = {
@@ -99,6 +100,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   const shouldEndSession = input.endSession ?? !input.sessionId;
   if (input.playbackState && input.startUrlPlayback) {
     input.playbackState.startUrlPlayback = input.startUrlPlayback;
+  }
+  if (input.playbackState) {
+    input.playbackState.writeOutput = writeOutput;
   }
 
   try {
@@ -388,7 +392,10 @@ async function autoAdvancePlayback(
   const store = new MemoryStore(config);
   try {
     store.updateTrackPlayback(completedTrackId, "played");
-    await startTrackAt(playbackState, config, store, startIndex, startUrlPlayback, () => new Date());
+    const response = await startTrackAt(playbackState, config, store, startIndex, startUrlPlayback, () => new Date());
+    if (response !== "No playable tracks remain.") {
+      playbackState.writeOutput?.(response);
+    }
   } finally {
     store.close();
   }

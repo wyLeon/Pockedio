@@ -89,6 +89,45 @@ describe("generateStation", () => {
     expect(provider.searches.map((query) => query.keyword).join("\n")).not.toContain("Miles Davis");
   });
 
+  it("prefers quiet playable candidates over noisy top search results for meditation", async () => {
+    const provider = new FakeProvider();
+    provider.search = async (query: MusicSearchQuery, limit: number): Promise<MusicTrackCandidate[]> => {
+      provider.searches.push(query);
+      expect(limit).toBeGreaterThanOrEqual(5);
+      return [
+        {
+          provider: "netease",
+          providerTrackId: "noisy",
+          title: "Chinese New Year",
+          artists: ["AS-LHY"],
+          album: "Festival"
+        },
+        {
+          provider: "netease",
+          providerTrackId: "calm",
+          title: "古琴冥想",
+          artists: ["Calm Artist"],
+          album: "纯音乐"
+        }
+      ];
+    };
+    const config = makeConfig();
+    const llm = createLlmClient(config, {});
+
+    const station = await generateStation({
+      request: "I want some Chinese traditional style pure music to help me meditation.",
+      config,
+      provider,
+      llm
+    });
+
+    expect(station.tracks[0]).toMatchObject({
+      title: "古琴冥想",
+      artist: "Calm Artist",
+      providerTrackId: "calm"
+    });
+  });
+
   it("uses LLM JSON plans when available", async () => {
     const provider = new FakeProvider();
     const llm: StationLlmClient = {

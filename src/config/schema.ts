@@ -29,7 +29,9 @@ export const pockedioConfigSchema = z.object({
   }).default({}),
   llm: z.object({
     provider: z.literal("openai").default("openai"),
-    model: z.string().min(1).default("gpt-4.1-mini")
+    model: z.string().min(1).default("gpt-4.1-mini"),
+    baseUrl: z.string().url().optional(),
+    apiKeyEnv: z.string().min(1).default("OPENAI_API_KEY")
   }).default({}),
   fishAudio: z.object({
     pythonPath: z.string().min(1).default(".cache/mlx-speech-venv/bin/python"),

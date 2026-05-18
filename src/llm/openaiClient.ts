@@ -4,7 +4,7 @@ import type { LlmClient, LlmResult } from "./llmClient.js";
 import { UnavailableLlmClient } from "./llmClient.js";
 
 export function createLlmClient(config: PockedioConfig, env: NodeJS.ProcessEnv = process.env): LlmClient {
-  const apiKey = env.OPENAI_API_KEY;
+  const apiKey = env[config.llm.apiKeyEnv];
   if (!apiKey) {
     return new UnavailableLlmClient();
   }
@@ -17,7 +17,7 @@ export class OpenAiLlmClient implements LlmClient {
   private readonly model: string;
 
   constructor(config: PockedioConfig, apiKey: string) {
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({ apiKey, baseURL: config.llm.baseUrl });
     this.model = config.llm.model;
   }
 

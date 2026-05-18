@@ -246,6 +246,37 @@ describe("runSessionTurn", () => {
     ]);
   });
 
+  it("announces the next track when playback auto-advances", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    let finishFirst: ((value: { ok: boolean; target: string; exitCode: number; signal: null }) => void) | undefined;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          if (!finishFirst) {
+            finishFirst = resolve;
+          }
+        }),
+        stop: () => undefined
+      })
+    });
+
+    finishFirst?.({ ok: true, target: "first", exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(output.filter((text) => text.includes("Now playing:"))).toHaveLength(2);
+  });
+
   it("attaches feedback to the current playing track", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};

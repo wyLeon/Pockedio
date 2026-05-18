@@ -41,6 +41,27 @@ describe("config load and save", () => {
     expect(config.diary.enabled).toBe(false);
     expect(config.personality.mbti).toBeUndefined();
     expect(config.llm.model).toBe("gpt-4.1-mini");
+    expect(config.llm.baseUrl).toBeUndefined();
+    expect(config.llm.apiKeyEnv).toBe("OPENAI_API_KEY");
+  });
+
+  it("loads OpenAI-compatible LLM endpoint settings", () => {
+    const env = makeEnv();
+    const configPath = getConfigPath(env);
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      llm: {
+        model: "deepseek-v4-flash",
+        baseUrl: "https://api.deepseek.com",
+        apiKeyEnv: "DEEPSEEK_API_KEY"
+      }
+    }));
+
+    const config = loadConfig(env);
+
+    expect(config.llm.model).toBe("deepseek-v4-flash");
+    expect(config.llm.baseUrl).toBe("https://api.deepseek.com");
+    expect(config.llm.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
   });
 
   it("saves and loads a valid MBTI type", () => {
