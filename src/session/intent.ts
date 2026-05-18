@@ -94,7 +94,7 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(play it directly|play directly|direct playback|start playback|just play|no discussion)\b/.test(text)) {
     return { type: "direct_playback_request", confidence: "high" };
   }
-  if (/\b(play|put on|give me|queue|start)\b/.test(text)) {
+  if (/\b(play|put on|give me|queue|start)\b/.test(text) || /\b(listen|hear)\b.*\b(music|musics|song|songs|track|tracks|playlist|set)\b/.test(text)) {
     return { type: "playback_request", confidence: "high" };
   }
 

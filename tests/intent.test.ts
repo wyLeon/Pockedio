@@ -30,6 +30,13 @@ describe("parseIntent", () => {
     })).toBe(false);
   });
 
+  it("maps conversational listening requests to playback", async () => {
+    await expect(parseIntent("Want to listen some pure musics to calm me down.")).resolves.toEqual({
+      type: "playback_request",
+      confidence: "high"
+    });
+  });
+
   it("classifies common playback feedback", async () => {
     await expect(parseIntent("more like this one")).resolves.toEqual({
       type: "feedback_more_like_this",
