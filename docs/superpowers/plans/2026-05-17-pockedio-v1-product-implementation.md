@@ -741,7 +741,7 @@ git commit -m "feat: add local context adapters"
 - Create: `src/dj/voiceRules.ts`
 - Test: `tests/voiceRules.test.ts`
 
-- [ ] **Step 1: Implement voice rules**
+- [x] **Step 1: Implement voice rules**
 
 `src/dj/voiceRules.ts` should expose:
 
@@ -755,7 +755,7 @@ Return `true` only for:
 
 Return `false` for normal playback requests.
 
-- [ ] **Step 2: Implement FishAudio adapter**
+- [x] **Step 2: Implement FishAudio adapter**
 
 `src/tts/fishAudio.ts` should:
 
@@ -766,7 +766,7 @@ Return `false` for normal playback requests.
 - Never require user review before playback.
 - Let caller decide text fallback if generation fails.
 
-- [ ] **Step 3: Add tests**
+- [x] **Step 3: Add tests**
 
 Cover:
 
@@ -775,7 +775,7 @@ Cover:
 - Explicit request triggers voice.
 - Failed TTS returns structured failure.
 
-- [ ] **Step 4: Add manual FishAudio check**
+- [x] **Step 4: Add manual FishAudio check**
 
 Run:
 
@@ -785,7 +785,7 @@ npm run dev -- status
 
 Expected: status reports FishAudio paths present.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 
