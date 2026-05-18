@@ -136,6 +136,7 @@ describe("runSessionTurn", () => {
     expect(result.station?.tracks).toHaveLength(5);
     expect(output.join("\n")).toContain("Queue:");
     expect(output.join("\n")).toContain("Now playing:");
+    expect(output.join("\n")).toContain("[>...................] 00:00 elapsed");
     expect(playbackState.station?.tracks).toHaveLength(5);
     expect(playbackState.currentIndex).toBe(0);
     expect(playbackState.currentTrackId).toEqual(expect.any(String));
@@ -209,7 +210,7 @@ describe("runSessionTurn", () => {
     });
 
     expect(result.response).toContain("Now playing: 1.");
-    expect(result.response).toContain("(02:05 elapsed)");
+    expect(result.response).toContain("[====>...............] 02:05 elapsed");
     expect(result.response).toContain("> 1.");
     expect(result.response).toContain("  2.");
   });

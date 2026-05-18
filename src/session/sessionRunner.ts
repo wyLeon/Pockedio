@@ -387,7 +387,7 @@ async function startTrackAt(
     void autoAdvancePlayback(playbackState, config, entry.dbId, nextIndex + 1, startUrlPlayback);
   }).catch(() => undefined);
   store.updateTrackPlayback(entry.dbId, "playing");
-  return `Now playing: ${entry.track.title} by ${entry.track.artist}.`;
+  return formatNowPlayingLine(entry.track, playbackState.currentStartedAt, now());
 }
 
 async function autoAdvancePlayback(
@@ -435,13 +435,18 @@ function formatPlaybackStatus(playbackState: InteractivePlaybackState | undefine
   }
 
   return [
-    `Now playing: ${current.position}. ${current.title} - ${current.artist} (${formatElapsed(playbackState.currentStartedAt, now)} elapsed)`,
+    formatNowPlayingLine(current, playbackState.currentStartedAt, now, true),
     "Queue:",
     ...storedTracks.map((entry, index) => {
       const marker = index === currentIndex ? ">" : " ";
       return `${marker} ${entry.track.position}. ${entry.track.title} - ${entry.track.artist}`;
     })
   ].join("\n");
+}
+
+function formatNowPlayingLine(track: StationTrack, startedAt: Date | undefined, now: Date, includePosition = false): string {
+  const title = includePosition ? `${track.position}. ${track.title}` : track.title;
+  return `Now playing: ${title} - ${track.artist}\n${formatElapsedBar(startedAt, now)}`;
 }
 
 function formatElapsed(startedAt: Date | undefined, now: Date): string {
@@ -452,4 +457,10 @@ function formatElapsed(startedAt: Date | undefined, now: Date): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+}
+
+function formatElapsedBar(startedAt: Date | undefined, now: Date): string {
+  const seconds = startedAt ? Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / 1_000)) : 0;
+  const filled = Math.min(19, Math.floor(seconds / 30));
+  return `[${"=".repeat(filled)}>${".".repeat(19 - filled)}] ${formatElapsed(startedAt, now)} elapsed`;
 }
