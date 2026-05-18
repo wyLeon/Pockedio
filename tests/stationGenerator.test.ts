@@ -71,6 +71,24 @@ describe("generateStation", () => {
     expect(station.tracks.every((track) => track.playable.available)).toBe(true);
   });
 
+  it("uses descriptive music search queries for conversational fallback requests", async () => {
+    const provider = new FakeProvider();
+    const config = makeConfig();
+    const llm = createLlmClient(config, {});
+
+    await generateStation({
+      request: "I want some Chinese traditional style pure music to help me meditation.",
+      config,
+      provider,
+      llm
+    });
+
+    expect(provider.searches).toHaveLength(5);
+    expect(provider.searches[0].keyword).toBe("Chinese traditional pure music meditation");
+    expect(provider.searches.map((query) => query.keyword).join("\n")).not.toContain("Ryuichi Sakamoto");
+    expect(provider.searches.map((query) => query.keyword).join("\n")).not.toContain("Miles Davis");
+  });
+
   it("uses LLM JSON plans when available", async () => {
     const provider = new FakeProvider();
     const llm: StationLlmClient = {

@@ -103,11 +103,10 @@ function parseStationTracks(value: StationJsonResponse): PlannedStationTrack[] {
 }
 
 function fallbackTracks(request: string, tasteSummary: string): PlannedStationTrack[] {
-  const seeds = extractTasteSeeds(tasteSummary);
-  const base = seeds.length > 0 ? seeds : ["Ryuichi Sakamoto", "Miles Davis", "Brian Eno", "Nujabes", "Bill Evans"];
+  const base = fallbackSearchQueries(request, tasteSummary);
   return Array.from({ length: 5 }, (_, index) => ({
-    title: request,
-    artist: base[index % base.length],
+    title: base[index % base.length],
+    artist: "NetEase search",
     rationale: fallbackRationale(request, tasteSummary)
   }));
 }
@@ -117,7 +116,7 @@ function fallbackRationale(request: string, tasteSummary: string): string {
 }
 
 async function resolveTrack(track: PlannedStationTrack, position: number, provider: MusicProvider): Promise<StationTrack> {
-  const keyword = `${track.title} ${track.artist}`.trim();
+  const keyword = track.artist === "NetEase search" ? track.title : `${track.title} ${track.artist}`.trim();
   try {
     const candidates = await provider.search({ keyword }, 1);
     const candidate = candidates[0];
@@ -179,6 +178,54 @@ function extractTasteSeeds(tasteSummary: string): string[] {
     .map((line) => line.match(/^- (.+)$/)?.[1]?.trim())
     .filter((value): value is string => Boolean(value) && value !== "No signals yet.")
     .slice(0, 5);
+}
+
+function fallbackSearchQueries(request: string, tasteSummary: string): string[] {
+  const normalized = normalizeRequestForSearch(request);
+  if (/\b(chinese|traditional|guqin|guzheng|erhu|meditation)\b/i.test(request)) {
+    return [
+      "Chinese traditional pure music meditation",
+      "古风 纯音乐 冥想",
+      "古琴 纯音乐",
+      "古筝 轻音乐",
+      "Chinese guqin meditation music"
+    ];
+  }
+
+  const seeds = extractTasteSeeds(tasteSummary);
+  const base = normalized.length > 0 ? normalized : "calm focus music";
+  return [
+    base,
+    `${base} instrumental`,
+    `${base} calm`,
+    `${base} focus`,
+    seeds[0] ? `${base} ${seeds[0]}` : `${base} ambient`
+  ];
+}
+
+function normalizeRequestForSearch(request: string): string {
+  return request
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((word) => ![
+      "i",
+      "want",
+      "need",
+      "would",
+      "like",
+      "some",
+      "to",
+      "help",
+      "me",
+      "for",
+      "please",
+      "play",
+      "listen",
+      "hear",
+      "style"
+    ].includes(word.toLowerCase()))
+    .join(" ")
+    .trim();
 }
 
 function stringValue(value: unknown): string | null {
