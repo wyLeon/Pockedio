@@ -14,7 +14,13 @@ import { shouldUseSpokenDjAudio } from "../dj/voiceRules.js";
 import { createLlmClient } from "../llm/openaiClient.js";
 import type { LlmClient } from "../llm/llmClient.js";
 import { MemoryStore, type FeedbackAction } from "../memory/store.js";
-import { playFile as playAudioFile, playUrl as playAudioUrl, type PlayerResult } from "../player/afplay.js";
+import {
+  playFile as playAudioFile,
+  playUrl as playAudioUrl,
+  startUrlPlayback as startAudioUrlPlayback,
+  type PlaybackHandle,
+  type PlayerResult
+} from "../player/afplay.js";
 import type { MusicProvider } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
 import { generateStation } from "../station/stationGenerator.js";
@@ -23,6 +29,21 @@ import { synthesizeFishAudio as synthesizeFishAudioDefault, type FishAudioResult
 import { parseIntent, type SessionIntent } from "./intent.js";
 
 type OutputWriter = (text: string) => void;
+type StartUrlPlayback = (url: string) => Promise<PlaybackHandle>;
+
+type StoredPlaybackTrack = {
+  dbId: string;
+  track: StationTrack;
+};
+
+export type InteractivePlaybackState = {
+  station?: GeneratedStation;
+  storedTracks?: StoredPlaybackTrack[];
+  currentIndex?: number;
+  currentTrackId?: string;
+  activePlayback?: PlaybackHandle;
+  startUrlPlayback?: StartUrlPlayback;
+};
 
 export type SessionTurnInput = {
   input: string;
@@ -34,6 +55,8 @@ export type SessionTurnInput = {
   buildContext?: (config: PockedioConfig) => Promise<Partial<PockedioContext>>;
   writeOutput?: OutputWriter;
   playUrl?: (url: string) => Promise<PlayerResult>;
+  startUrlPlayback?: StartUrlPlayback;
+  playbackState?: InteractivePlaybackState;
   playFile?: (filePath: string) => Promise<PlayerResult>;
   synthesizeFishAudio?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
 };
@@ -56,17 +79,28 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   const store = new MemoryStore(config);
   const writeOutput = input.writeOutput ?? (() => undefined);
   const playUrl = input.playUrl ?? ((url) => playAudioUrl(url, 30_000));
+  const startUrlPlayback = input.startUrlPlayback ?? ((url) => startAudioUrlPlayback(url, 30_000));
   const playFile = input.playFile ?? ((filePath) => playAudioFile(filePath, 60_000));
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
   const userText = input.input.trim();
   const sessionId = input.sessionId ?? store.createSession("conversation", userText);
   const shouldEndSession = input.endSession ?? !input.sessionId;
+  if (input.playbackState && input.startUrlPlayback) {
+    input.playbackState.startUrlPlayback = input.startUrlPlayback;
+  }
 
   try {
     store.addMessage(sessionId, "user", userText);
     const intent = await parseIntent(userText, llm);
 
     if (intent.type === "stop") {
+      if (input.playbackState?.activePlayback) {
+        input.playbackState.activePlayback.stop();
+        if (input.playbackState.currentTrackId) {
+          store.updateTrackPlayback(input.playbackState.currentTrackId, "skipped");
+        }
+        input.playbackState.activePlayback = undefined;
+      }
       const response = "Stopping cleanly.";
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
@@ -75,8 +109,10 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
     if (isFeedbackIntent(intent.type)) {
       const action = feedbackActionForIntent(intent.type);
-      store.addFeedback(sessionId, null, action, userText);
-      const response = formatFeedbackConfirmation(action);
+      store.addFeedback(sessionId, input.playbackState?.currentTrackId ?? null, action, userText);
+      const response = intent.type === "feedback_skip" && input.playbackState?.station
+        ? await advancePlayback(input.playbackState, store, input.playbackState.startUrlPlayback ?? startUrlPlayback)
+        : formatFeedbackConfirmation(action);
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -98,10 +134,15 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         personality: context.personality ?? config.personality
       });
       const station = await generateStation({ request: userText, config, context, provider, llm });
-      storeStation(sessionId, store, station);
+      const storedTracks = storeStation(sessionId, store, station, input.playbackState === undefined);
       const firstPlayable = station.tracks.find((track) => track.playable.available);
       let playbackFailure: string | undefined;
-      if (firstPlayable?.playable.available) {
+      let nowPlaying = "";
+      if (input.playbackState) {
+        input.playbackState.station = station;
+        input.playbackState.storedTracks = storedTracks;
+        nowPlaying = await startTrackAt(input.playbackState, store, 0, startUrlPlayback);
+      } else if (firstPlayable?.playable.available) {
         const playback = await playUrl(firstPlayable.playable.playableUrl);
         if (!playback.ok) {
           playbackFailure = playback.error ?? "Playback failed.";
@@ -110,6 +151,8 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
       const response = [
         intent.type === "direct_playback_request" ? formatDirectPlaybackConfirmation(station) : formatStationIntro(station),
+        formatQueue(station),
+        nowPlaying,
         formatUnavailableTrackFallbackForResponse(station.tracks),
         playbackFailure ? `Playback detail: ${playbackFailure}` : ""
       ].filter(Boolean).join("\n");
@@ -145,6 +188,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
   const store = new MemoryStore(config);
   const sessionId = store.createSession("conversation", "interactive session");
   store.close();
+  const playbackState: InteractivePlaybackState = {};
   try {
     console.log("Pockedio is listening.");
     while (true) {
@@ -162,6 +206,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
         config,
         sessionId,
         endSession: false,
+        playbackState,
         writeOutput: (text) => console.log(text)
       });
       if (result.shouldExit) {
@@ -169,6 +214,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
       }
     }
   } finally {
+    playbackState.activePlayback?.stop();
     const endStore = new MemoryStore(config);
     try {
       endStore.endSession(sessionId);
@@ -179,9 +225,15 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
   }
 }
 
-function storeStation(sessionId: string, store: MemoryStore, station: GeneratedStation): void {
+function storeStation(
+  sessionId: string,
+  store: MemoryStore,
+  station: GeneratedStation,
+  markFirstPlayableAsPlaying: boolean
+): StoredPlaybackTrack[] {
+  const storedTracks: StoredPlaybackTrack[] = [];
   for (const track of station.tracks) {
-    store.addStationTrack(sessionId, {
+    const dbId = store.addStationTrack(sessionId, {
       position: track.position,
       title: track.title,
       artist: track.artist,
@@ -189,10 +241,12 @@ function storeStation(sessionId: string, store: MemoryStore, station: GeneratedS
       provider: track.provider,
       providerTrackId: track.providerTrackId,
       playableUrl: track.playable.available ? track.playable.playableUrl : null,
-      playbackStatus: track.playable.available ? (track.position === 1 ? "playing" : "planned") : "unavailable",
+      playbackStatus: track.playable.available && markFirstPlayableAsPlaying && track.position === 1 ? "playing" : track.playable.available ? "planned" : "unavailable",
       failureReason: track.playable.available ? null : track.playable.reason
     });
+    storedTracks.push({ dbId, track });
   }
+  return storedTracks;
 }
 
 async function generateDjAudioResponse(input: {
@@ -252,4 +306,54 @@ function formatUnavailableTrackFallbackForResponse(tracks: StationTrack[]): stri
   return tracks.some((track) => !track.playable.available)
     ? `${tracks.filter((track) => !track.playable.available).length} unavailable track(s) kept in the station.`
     : "";
+}
+
+async function advancePlayback(
+  playbackState: InteractivePlaybackState,
+  store: MemoryStore,
+  startUrlPlayback: StartUrlPlayback
+): Promise<string> {
+  playbackState.activePlayback?.stop();
+  if (playbackState.currentTrackId) {
+    store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
+  }
+  return startTrackAt(playbackState, store, (playbackState.currentIndex ?? -1) + 1, startUrlPlayback);
+}
+
+async function startTrackAt(
+  playbackState: InteractivePlaybackState,
+  store: MemoryStore,
+  startIndex: number,
+  startUrlPlayback: StartUrlPlayback
+): Promise<string> {
+  const storedTracks = playbackState.storedTracks ?? [];
+  const nextIndex = storedTracks.findIndex((entry, index) => index >= startIndex && entry.track.playable.available);
+  if (nextIndex === -1) {
+    playbackState.currentIndex = undefined;
+    playbackState.currentTrackId = undefined;
+    playbackState.activePlayback = undefined;
+    return "No playable tracks remain.";
+  }
+
+  const entry = storedTracks[nextIndex];
+  if (!entry.track.playable.available) {
+    return "No playable tracks remain.";
+  }
+
+  const handle = await startUrlPlayback(entry.track.playable.playableUrl);
+  playbackState.currentIndex = nextIndex;
+  playbackState.currentTrackId = entry.dbId;
+  playbackState.activePlayback = handle;
+  store.updateTrackPlayback(entry.dbId, "playing");
+  return `Now playing: ${entry.track.title} by ${entry.track.artist}.`;
+}
+
+function formatQueue(station: GeneratedStation): string {
+  return [
+    "Queue:",
+    ...station.tracks.map((track) => {
+      const suffix = track.playable.available ? "" : " (unavailable)";
+      return `${track.position}. ${track.title} - ${track.artist}${suffix}`;
+    })
+  ].join("\n");
 }

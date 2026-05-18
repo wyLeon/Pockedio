@@ -7,7 +7,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { runSessionTurn } from "../src/session/sessionRunner.js";
+import { runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 
 function makeConfig() {
@@ -82,6 +82,105 @@ describe("runSessionTurn", () => {
     expect(rows.messages.some((row) => (row as { role: string }).role === "pockedio")).toBe(true);
     expect(rows.tracks).toHaveLength(5);
     expect(rows.tracks[0]).toMatchObject({ playbackStatus: "playing" });
+  });
+
+  it("prints the five-song queue and starts playback without blocking when state is provided", async () => {
+    const config = makeConfig();
+    const output: string[] = [];
+    const playbackState: InteractivePlaybackState = {};
+
+    const result = await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+        stop: () => undefined
+      })
+    });
+
+    expect(result.station?.tracks).toHaveLength(5);
+    expect(output.join("\n")).toContain("Queue:");
+    expect(output.join("\n")).toContain("Now playing:");
+    expect(playbackState.station?.tracks).toHaveLength(5);
+    expect(playbackState.currentIndex).toBe(0);
+    expect(playbackState.currentTrackId).toEqual(expect.any(String));
+  });
+
+  it("next stops the current track and starts the next playable track", async () => {
+    const config = makeConfig();
+    let stopCalls = 0;
+    const started: string[] = [];
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+    const result = await runSessionTurn({
+      input: "next",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.response).toContain("Now playing:");
+    expect(stopCalls).toBe(1);
+    expect(started).toHaveLength(2);
+    expect(playbackState.currentIndex).toBe(1);
+  });
+
+  it("attaches feedback to the current playing track", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+        stop: () => undefined
+      })
+    });
+    await runSessionTurn({
+      input: "more like this",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    const rows = withDatabase(config, (db) => db.prepare(`
+      SELECT f.action, st.position
+      FROM feedback f
+      JOIN station_tracks st ON st.id = f.track_id
+    `).all());
+    expect(rows).toEqual([{ action: "more_like_this", position: 1 }]);
   });
 
   it("generates and records FishAudio only for explicit DJ audio", async () => {

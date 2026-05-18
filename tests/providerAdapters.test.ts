@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
-import { playFile, playUrl, type ProcessRunner } from "../src/player/afplay.js";
+import { playFile, playUrl, startUrlPlayback, type PlaybackHandle, type ProcessRunner, type ProcessStarter } from "../src/player/afplay.js";
 import { NetEaseProvider } from "../src/providers/netease.js";
 
 function makeConfig() {
@@ -118,5 +118,26 @@ describe("afplay adapter", () => {
       signal: null,
       error: "unsupported file"
     });
+  });
+
+  it("returns a stoppable playback handle for remote URLs", async () => {
+    let stopped = false;
+    const starter: ProcessStarter = (_command, args): PlaybackHandle => ({
+      target: args[0],
+      done: Promise.resolve({ ok: true, target: args[0], exitCode: 0, signal: null }),
+      stop: () => {
+        stopped = true;
+      }
+    });
+    const fetchImpl: typeof fetch = async () => new Response("audio-bytes", {
+      status: 200,
+      headers: { "content-type": "audio/mpeg" }
+    });
+
+    const handle = await startUrlPlayback("https://example.com/song.mp3", undefined, starter, fetchImpl);
+    handle.stop();
+
+    expect(handle.target).toMatch(/pockedio-playback-.*\.mp3$/);
+    expect(stopped).toBe(true);
   });
 });

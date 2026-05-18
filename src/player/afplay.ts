@@ -14,14 +14,32 @@ export type PlayerResult = {
 
 export type ProcessRunner = (command: string, args: string[], timeoutMs?: number) => Promise<PlayerResult>;
 
+export type PlaybackHandle = {
+  target: string;
+  done: Promise<PlayerResult>;
+  stop: () => void;
+};
+
+export type ProcessStarter = (command: string, args: string[], timeoutMs?: number) => PlaybackHandle;
+
 export async function playUrl(
   url: string,
   timeoutMs?: number,
   runner: ProcessRunner = runProcess,
   fetchImpl: typeof fetch = fetch
 ): Promise<PlayerResult> {
+  const handle = await startUrlPlayback(url, timeoutMs, starterFromRunner(runner), fetchImpl);
+  return handle.done;
+}
+
+export async function startUrlPlayback(
+  url: string,
+  timeoutMs?: number,
+  starter: ProcessStarter = startProcess,
+  fetchImpl: typeof fetch = fetch
+): Promise<PlaybackHandle> {
   const target = isRemoteUrl(url) ? await downloadRemoteAudio(url, fetchImpl) : url;
-  return runner("afplay", [target], timeoutMs);
+  return starter("afplay", [target], timeoutMs);
 }
 
 export async function playFile(filePath: string, timeoutMs?: number, runner: ProcessRunner = runProcess): Promise<PlayerResult> {
@@ -66,16 +84,24 @@ function extensionForResponse(url: string, response: Response): string {
 }
 
 export function runProcess(command: string, args: string[], timeoutMs = 0): Promise<PlayerResult> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
+  return startProcess(command, args, timeoutMs).done;
+}
+
+export function startProcess(command: string, args: string[], timeoutMs = 0): PlaybackHandle {
+  const target = args[0] ?? "";
+  const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
+  let settled = false;
+  let timer: NodeJS.Timeout | undefined;
+  let forceKillTimer: NodeJS.Timeout | undefined;
+
+  const done = new Promise<PlayerResult>((resolve) => {
     let stderr = "";
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
 
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
         child.kill("SIGTERM");
-        setTimeout(() => child.kill("SIGKILL"), 1_000).unref();
+        forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+        forceKillTimer.unref();
       }, timeoutMs);
     }
 
@@ -91,9 +117,12 @@ export function runProcess(command: string, args: string[], timeoutMs = 0): Prom
       if (timer) {
         clearTimeout(timer);
       }
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
       resolve({
         ok: false,
-        target: args[0] ?? "",
+        target,
         exitCode: null,
         signal: null,
         error: error.message
@@ -108,13 +137,37 @@ export function runProcess(command: string, args: string[], timeoutMs = 0): Prom
       if (timer) {
         clearTimeout(timer);
       }
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
       resolve({
         ok: exitCode === 0,
-        target: args[0] ?? "",
+        target,
         exitCode,
         signal,
         error: exitCode === 0 ? undefined : stderr.trim() || `Process exited with code ${exitCode ?? "null"}`
       });
     });
+  });
+
+  return {
+    target,
+    done,
+    stop: () => {
+      if (settled) {
+        return;
+      }
+      child.kill("SIGTERM");
+      forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+      forceKillTimer.unref();
+    }
+  };
+}
+
+function starterFromRunner(runner: ProcessRunner): ProcessStarter {
+  return (command, args, timeoutMs) => ({
+    target: args[0] ?? "",
+    done: runner(command, args, timeoutMs),
+    stop: () => undefined
   });
 }

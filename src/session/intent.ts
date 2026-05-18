@@ -76,7 +76,7 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(never play|ban|block|don't play this artist|do not play this artist)\b/.test(text)) {
     return { type: "feedback_ban", confidence: "high" };
   }
-  if (/\b(skip|next song|next track)\b/.test(text)) {
+  if (/\b(skip|next|next song|next track)\b/.test(text)) {
     return { type: "feedback_skip", confidence: "high" };
   }
   if (/\b(more like this|similar to this|keep this vibe)\b/.test(text)) {
