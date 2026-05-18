@@ -7,7 +7,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { createDefaultInteractiveStartUrlPlayback, runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 
 function makeConfig() {
@@ -48,6 +48,25 @@ function fakeLlm(): LlmClient {
 }
 
 describe("runSessionTurn", () => {
+  it("starts interactive playback without an automatic timeout", async () => {
+    let observedTimeout: number | undefined = 30_000;
+    const startPlayback = createDefaultInteractiveStartUrlPlayback((_command, args, timeoutMs) => {
+      observedTimeout = timeoutMs;
+      return {
+        target: args[0],
+        done: Promise.resolve({ ok: true, target: args[0], exitCode: 0, signal: null }),
+        stop: () => undefined
+      };
+    }, async () => new Response("audio-bytes", {
+      status: 200,
+      headers: { "content-type": "audio/mpeg" }
+    }));
+
+    await startPlayback("https://example.com/song.mp3");
+
+    expect(observedTimeout).toBeUndefined();
+  });
+
   it("stores playback input, response, five tracks, and does not call FishAudio", async () => {
     const config = makeConfig();
     let fishAudioCalls = 0;

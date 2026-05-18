@@ -19,7 +19,8 @@ import {
   playUrl as playAudioUrl,
   startUrlPlayback as startAudioUrlPlayback,
   type PlaybackHandle,
-  type PlayerResult
+  type PlayerResult,
+  type ProcessStarter
 } from "../player/afplay.js";
 import type { MusicProvider } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
@@ -70,6 +71,13 @@ export type SessionTurnResult = {
   djAudio?: FishAudioResult;
 };
 
+export function createDefaultInteractiveStartUrlPlayback(
+  starter?: ProcessStarter,
+  fetchImpl?: typeof fetch
+): StartUrlPlayback {
+  return (url) => startAudioUrlPlayback(url, undefined, starter, fetchImpl);
+}
+
 export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTurnResult> {
   const config = input.config ?? loadConfig();
   runMigrations(config);
@@ -78,8 +86,8 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   const llm = input.llm ?? createLlmClient(config);
   const store = new MemoryStore(config);
   const writeOutput = input.writeOutput ?? (() => undefined);
-  const playUrl = input.playUrl ?? ((url) => playAudioUrl(url, 30_000));
-  const startUrlPlayback = input.startUrlPlayback ?? ((url) => startAudioUrlPlayback(url, 30_000));
+  const playUrl = input.playUrl ?? ((url) => playAudioUrl(url));
+  const startUrlPlayback = input.startUrlPlayback ?? createDefaultInteractiveStartUrlPlayback();
   const playFile = input.playFile ?? ((filePath) => playAudioFile(filePath, 60_000));
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
   const userText = input.input.trim();

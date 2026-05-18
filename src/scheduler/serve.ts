@@ -76,7 +76,7 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
   const provider = input.provider ?? new NetEaseProvider(config);
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
   const playFile = input.playFile ?? ((filePath) => playAudioFile(filePath, 60_000));
-  const playUrl = input.playUrl ?? ((url) => playAudioUrl(url, 30_000));
+  const playUrl = input.playUrl ?? ((url) => playAudioUrl(url));
   const writeOutput = input.writeOutput ?? (() => undefined);
   const store = new MemoryStore(config);
   const triggerType = input.kind === "morning" ? "scheduled_morning" : "scheduled_evening";
@@ -143,7 +143,7 @@ export async function runMoodCheckOnce(input: MoodCheckInput = {}): Promise<Mood
 
   const provider = input.provider ?? new NetEaseProvider(config);
   const llm = input.llm ?? createLlmClient(config);
-  const playUrl = input.playUrl ?? ((url) => playAudioUrl(url, 30_000));
+  const playUrl = input.playUrl ?? ((url) => playAudioUrl(url));
   const station = await generateStation({
     request: `suggest music for feeling ${result.mood}${result.note ? `: ${result.note}` : ""}`,
     config,
