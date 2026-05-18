@@ -35,6 +35,10 @@ describe("parseIntent", () => {
       type: "playback_request",
       confidence: "high"
     });
+    await expect(parseIntent("I want some Chinese traditional style pure music to help me meditation.")).resolves.toEqual({
+      type: "playback_request",
+      confidence: "high"
+    });
   });
 
   it("classifies common playback feedback", async () => {
