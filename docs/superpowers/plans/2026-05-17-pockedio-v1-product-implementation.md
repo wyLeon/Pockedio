@@ -957,7 +957,7 @@ git commit -m "feat: add conversational dj session"
 - Test: `tests/status.test.ts`
 - Modify: `src/cli.ts`
 
-- [ ] **Step 1: Implement health checks**
+- [x] **Step 1: Implement health checks**
 
 `src/status/status.ts` should report:
 
@@ -971,15 +971,15 @@ git commit -m "feat: add conversational dj session"
 - persona config present
 - latest session timestamp
 
-- [ ] **Step 2: Wire status command**
+- [x] **Step 2: Wire status command**
 
 `pockedio status` should print concise text, not JSON by default.
 
-- [ ] **Step 3: Add tests**
+- [x] **Step 3: Add tests**
 
 Cover missing config and healthy configured home.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run:
 
