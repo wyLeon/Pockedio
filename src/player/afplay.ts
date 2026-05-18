@@ -1,4 +1,8 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 export type PlayerResult = {
   ok: boolean;
@@ -10,12 +14,55 @@ export type PlayerResult = {
 
 export type ProcessRunner = (command: string, args: string[], timeoutMs?: number) => Promise<PlayerResult>;
 
-export async function playUrl(url: string, timeoutMs?: number, runner: ProcessRunner = runProcess): Promise<PlayerResult> {
-  return runner("afplay", [url], timeoutMs);
+export async function playUrl(
+  url: string,
+  timeoutMs?: number,
+  runner: ProcessRunner = runProcess,
+  fetchImpl: typeof fetch = fetch
+): Promise<PlayerResult> {
+  const target = isRemoteUrl(url) ? await downloadRemoteAudio(url, fetchImpl) : url;
+  return runner("afplay", [target], timeoutMs);
 }
 
 export async function playFile(filePath: string, timeoutMs?: number, runner: ProcessRunner = runProcess): Promise<PlayerResult> {
   return runner("afplay", [filePath], timeoutMs);
+}
+
+async function downloadRemoteAudio(url: string, fetchImpl: typeof fetch): Promise<string> {
+  const response = await fetchImpl(url);
+  if (!response.ok) {
+    throw new Error(`Audio download failed with HTTP ${response.status}.`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const filePath = path.join(os.tmpdir(), `pockedio-playback-${randomUUID()}${extensionForResponse(url, response)}`);
+  fs.writeFileSync(filePath, bytes);
+  return filePath;
+}
+
+function isRemoteUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function extensionForResponse(url: string, response: Response): string {
+  const pathname = new URL(url).pathname;
+  const ext = path.extname(pathname);
+  if (ext) {
+    return ext;
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("mpeg") || contentType.includes("mp3")) {
+    return ".mp3";
+  }
+  if (contentType.includes("wav")) {
+    return ".wav";
+  }
+  if (contentType.includes("aac")) {
+    return ".aac";
+  }
+  if (contentType.includes("mp4") || contentType.includes("m4a")) {
+    return ".m4a";
+  }
+  return ".audio";
 }
 
 export function runProcess(command: string, args: string[], timeoutMs = 0): Promise<PlayerResult> {

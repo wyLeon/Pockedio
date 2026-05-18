@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
 import { playFile, playUrl, type ProcessRunner } from "../src/player/afplay.js";
@@ -76,20 +77,29 @@ describe("NetEaseProvider", () => {
 });
 
 describe("afplay adapter", () => {
-  it("plays URLs through the process runner", async () => {
+  it("downloads remote URLs before playing through afplay", async () => {
+    const playedTargets: string[] = [];
     const runner: ProcessRunner = async (command, args) => ({
       ok: true,
       target: args[0],
-      exitCode: command === "afplay" ? 0 : 1,
+      exitCode: command === "afplay" && !args[0].startsWith("https://") ? 0 : 1,
       signal: null
     });
+    const fetchImpl: typeof fetch = async () => new Response("audio-bytes", {
+      status: 200,
+      headers: { "content-type": "audio/mpeg" }
+    });
 
-    await expect(playUrl("https://example.com/song.mp3", undefined, runner)).resolves.toEqual({
+    const result = await playUrl("https://example.com/song.mp3", undefined, runner, fetchImpl);
+    playedTargets.push(result.target);
+
+    expect(result).toMatchObject({
       ok: true,
-      target: "https://example.com/song.mp3",
       exitCode: 0,
       signal: null
     });
+    expect(playedTargets[0]).toMatch(/pockedio-playback-.*\.mp3$/);
+    expect(fs.existsSync(playedTargets[0])).toBe(true);
   });
 
   it("wraps non-zero file playback exits", async () => {
