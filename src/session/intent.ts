@@ -99,13 +99,28 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(play it directly|play directly|direct playback|start playback|just play|no discussion)\b/.test(text)) {
     return { type: "direct_playback_request", confidence: "high" };
   }
-  if (
-    /\b(play|put on|give me|queue|start)\b/.test(text)
-    || /\b(listen|hear)\b.*\b(music|musics|song|songs|track|tracks|playlist|set)\b/.test(text)
-    || /\b(want|need|would like)\b.*\b(music|musics|song|songs|track|tracks|playlist|set)\b/.test(text)
-  ) {
+  if (isPlaybackRequestText(text)) {
     return { type: "playback_request", confidence: "high" };
   }
 
   return { type: "conversation", confidence: "medium" };
+}
+
+function isPlaybackRequestText(text: string): boolean {
+  return hasPlaybackCommand(text)
+    || hasMusicSubjectWithAction(text)
+    || hasMusicSubjectWithUseCase(text);
+}
+
+function hasPlaybackCommand(text: string): boolean {
+  return /\b(play|put on|give me|queue|start)\b/.test(text);
+}
+
+function hasMusicSubjectWithAction(text: string): boolean {
+  return /\b(listen|hear|want|need|would like)\b.*\b(music|musics|song|songs|track|tracks|playlist|set)\b/.test(text);
+}
+
+function hasMusicSubjectWithUseCase(text: string): boolean {
+  return /\b(music|musics|song|songs|track|tracks|playlist|set|instrumental|instrumentals|pure music|guqin|guzheng|piano|jazz|ambient)\b/.test(text)
+    && /\b(calm|calming|meditation|meditate|focus|deep work|reading|sleep|relax|relaxing|study|work|quiet|peaceful)\b/.test(text);
 }

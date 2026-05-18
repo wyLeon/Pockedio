@@ -31,14 +31,18 @@ describe("parseIntent", () => {
   });
 
   it("maps conversational listening requests to playback", async () => {
-    await expect(parseIntent("Want to listen some pure musics to calm me down.")).resolves.toEqual({
-      type: "playback_request",
-      confidence: "high"
-    });
-    await expect(parseIntent("I want some Chinese traditional style pure music to help me meditation.")).resolves.toEqual({
-      type: "playback_request",
-      confidence: "high"
-    });
+    for (const input of [
+      "Want to listen some pure musics to calm me down.",
+      "I want some Chinese traditional style pure music to help me meditation.",
+      "Some pure music helps me meditation.",
+      "Chinese guqin music for deep focus.",
+      "Need quiet instrumental tracks for reading."
+    ]) {
+      await expect(parseIntent(input)).resolves.toEqual({
+        type: "playback_request",
+        confidence: "high"
+      });
+    }
   });
 
   it("classifies common playback feedback", async () => {
