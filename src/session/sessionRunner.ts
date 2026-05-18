@@ -82,6 +82,14 @@ export function createDefaultInteractiveStartUrlPlayback(
   return (url) => startAudioUrlPlayback(url, undefined, starter, fetchImpl);
 }
 
+export function formatInteractiveStartupGuide(): string {
+  return [
+    "Pockedio is listening.",
+    "Try: play calm guqin music for meditation",
+    "While playing: next, stop, what's playing?, show queue, more like this"
+  ].join("\n");
+}
+
 export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTurnResult> {
   const config = input.config ?? loadConfig();
   runMigrations(config);
@@ -213,7 +221,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
   store.close();
   const playbackState: InteractivePlaybackState = {};
   try {
-    console.log("Pockedio is listening.");
+    console.log(formatInteractiveStartupGuide());
     while (true) {
       let line: string;
       try {

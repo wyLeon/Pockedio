@@ -7,7 +7,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { createDefaultInteractiveStartUrlPlayback, runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { createDefaultInteractiveStartUrlPlayback, formatInteractiveStartupGuide, runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 
 function makeConfig() {
@@ -48,6 +48,16 @@ function fakeLlm(): LlmClient {
 }
 
 describe("runSessionTurn", () => {
+  it("formats a concise startup guide for the interactive CLI", () => {
+    const guide = formatInteractiveStartupGuide();
+
+    expect(guide).toContain("Pockedio is listening.");
+    expect(guide).toContain("play calm guqin music for meditation");
+    expect(guide).toContain("next");
+    expect(guide).toContain("stop");
+    expect(guide).toContain("what's playing?");
+  });
+
   it("starts interactive playback without an automatic timeout", async () => {
     let observedTimeout: number | undefined = 30_000;
     const startPlayback = createDefaultInteractiveStartUrlPlayback((_command, args, timeoutMs) => {
