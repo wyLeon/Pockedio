@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { runSetup } from "./config/setup.js";
 import { pockedioVersion } from "./index.js";
+import { runInteractiveSession } from "./session/sessionRunner.js";
 import { printStatus } from "./status/status.js";
 import { importTaste } from "./taste/importTaste.js";
 
@@ -15,8 +16,8 @@ program
   .name("pockedio")
   .description("CLI-first personal AI music radio")
   .version(pockedioVersion)
-  .action(() => {
-    printScaffoldMessage("session");
+  .action(async () => {
+    await runInteractiveSession();
   });
 
 program

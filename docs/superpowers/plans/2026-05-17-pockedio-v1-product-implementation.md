@@ -883,7 +883,7 @@ git commit -m "feat: add intent and station generation"
 - Create: `src/dj/productVoice.ts`
 - Modify: `src/cli.ts`
 
-- [ ] **Step 1: Implement product voice helpers**
+- [x] **Step 1: Implement product voice helpers**
 
 `src/dj/productVoice.ts` should format:
 
@@ -895,7 +895,7 @@ git commit -m "feat: add intent and station generation"
 
 Default output language: English.
 
-- [ ] **Step 2: Implement session runner**
+- [x] **Step 2: Implement session runner**
 
 `src/session/sessionRunner.ts` should:
 
@@ -909,15 +909,15 @@ Default output language: English.
 - Store every Pockedio response.
 - Exit cleanly on `stop`, `quit`, or Ctrl-C.
 
-- [ ] **Step 3: Enforce voice rule**
+- [x] **Step 3: Enforce voice rule**
 
 Normal user-active playback must not call FishAudio unless intent is explicit DJ audio.
 
-- [ ] **Step 4: Wire default `pockedio` command**
+- [x] **Step 4: Wire default `pockedio` command**
 
 Update `src/cli.ts` so no subcommand runs the session.
 
-- [ ] **Step 5: Manual acceptance check**
+- [x] **Step 5: Manual acceptance check**
 
 Run:
 
@@ -939,7 +939,7 @@ Expected:
 - Pockedio starts playback or reports unavailable tracks gracefully.
 - No FishAudio voice plays.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run:
 
