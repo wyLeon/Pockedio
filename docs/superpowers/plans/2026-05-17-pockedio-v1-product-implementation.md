@@ -807,7 +807,7 @@ git commit -m "feat: add fishaudio tts adapter"
 - Test: `tests/intent.test.ts`
 - Test: `tests/stationGenerator.test.ts`
 
-- [ ] **Step 1: Define LLM interface**
+- [x] **Step 1: Define LLM interface**
 
 `src/llm/llmClient.ts` should expose:
 
@@ -816,7 +816,7 @@ git commit -m "feat: add fishaudio tts adapter"
 
 If no API key is configured, return a structured `llm_unavailable` result.
 
-- [ ] **Step 2: Implement OpenAI-compatible client**
+- [x] **Step 2: Implement OpenAI-compatible client**
 
 `src/llm/openaiClient.ts` should use the `openai` package and configured model.
 
@@ -826,7 +826,7 @@ Behavior:
 - Keep prompts free of raw diary text unless diary context is already summarized.
 - Request JSON for station planning.
 
-- [ ] **Step 3: Implement intent parser**
+- [x] **Step 3: Implement intent parser**
 
 `src/session/intent.ts` should classify:
 
@@ -843,7 +843,7 @@ Behavior:
 
 Use lightweight deterministic rules first, then LLM fallback when available.
 
-- [ ] **Step 4: Implement station generator**
+- [x] **Step 4: Implement station generator**
 
 `src/station/stationGenerator.ts` should:
 
@@ -854,7 +854,7 @@ Use lightweight deterministic rules first, then LLM fallback when available.
 - Resolve each query through NetEase provider.
 - Return station with unavailable-track entries included, not thrown.
 
-- [ ] **Step 5: Add tests**
+- [x] **Step 5: Add tests**
 
 Cover:
 
@@ -865,7 +865,7 @@ Cover:
 - Missing LLM key uses fallback path.
 - Unavailable provider result does not crash station generation.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run:
 
