@@ -1077,7 +1077,7 @@ git commit -m "feat: add scheduled dj jobs"
 - Modify: `README.md`
 - Create: `docs/v1-acceptance.md`
 
-- [ ] **Step 1: Document local setup**
+- [x] **Step 1: Document local setup**
 
 Update `README.md` with:
 
@@ -1091,11 +1091,11 @@ Update `README.md` with:
 - `pockedio serve`
 - `pockedio status`
 
-- [ ] **Step 2: Create acceptance checklist**
+- [x] **Step 2: Create acceptance checklist**
 
 Create `docs/v1-acceptance.md` with checks for every acceptance criterion in the design spec.
 
-- [ ] **Step 3: Run full automated verification**
+- [x] **Step 3: Run full automated verification**
 
 Run:
 
@@ -1107,7 +1107,7 @@ npm run build
 
 Expected: all pass.
 
-- [ ] **Step 4: Run manual smoke test**
+- [x] **Step 4: Run manual smoke test**
 
 Run:
 
@@ -1149,7 +1149,7 @@ Expected:
 - FishAudio generates and plays DJ audio directly
 - audio metadata is stored
 
-- [ ] **Step 5: Commit docs and acceptance**
+- [x] **Step 5: Commit docs and acceptance**
 
 Run:
 
