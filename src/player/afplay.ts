@@ -18,6 +18,7 @@ export type PlaybackHandle = {
   target: string;
   done: Promise<PlayerResult>;
   stop: () => void;
+  introResult?: PlayerResult;
 };
 
 export type ProcessStarter = (command: string, args: string[], timeoutMs?: number) => PlaybackHandle;
@@ -59,12 +60,16 @@ export async function startDuckedUrlWithIntro(
   const runner = options.runner ?? runProcess;
   const target = isRemoteUrl(url) ? await downloadRemoteAudio(url, options.fetchImpl ?? fetch) : url;
   const quietHandle = starter("afplay", ["-v", String(options.musicVolume ?? 0.18), target]);
+  let introResult: PlayerResult;
   try {
-    await runner("afplay", [introFilePath], options.introTimeoutMs);
+    introResult = await runner("afplay", [introFilePath], options.introTimeoutMs);
   } finally {
     quietHandle.stop();
   }
-  return starter("afplay", [target]);
+  return {
+    ...starter("afplay", [target]),
+    introResult
+  };
 }
 
 export async function playFile(filePath: string, timeoutMs?: number, runner: ProcessRunner = runProcess): Promise<PlayerResult> {

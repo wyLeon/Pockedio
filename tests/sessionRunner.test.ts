@@ -961,6 +961,7 @@ describe("runSessionTurn", () => {
         started.push(url);
         return {
           target: url,
+          introResult: { ok: true, target: `/tmp/${"Pockedio here. I’ll open this softly, then let the first track carry the room.".length}.wav`, exitCode: 0, signal: null },
           done: new Promise(() => undefined),
           stop: () => undefined
         };
@@ -1020,6 +1021,7 @@ describe("runSessionTurn", () => {
         duckedStarts.push({ url, introFilePath });
         return {
           target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
           done: new Promise(() => undefined),
           stop: () => undefined
         };
@@ -1029,6 +1031,9 @@ describe("runSessionTurn", () => {
     expect(duckedStarts).toEqual([{ url: expect.stringContaining("https://example.com/"), introFilePath: "/tmp/pockedio-dj-intro.wav" }]);
     expect(directStarts).toEqual([]);
     expect(playedFiles).toEqual([]);
+
+    const rows = withDatabase(config, (db) => db.prepare("SELECT status, audio_path as audioPath FROM dj_audio ORDER BY created_at DESC LIMIT 1").all());
+    expect(rows).toEqual([{ status: "played", audioPath: "/tmp/pockedio-dj-intro.wav" }]);
   });
 
   it("keeps explicit mood playback requests as playback", async () => {

@@ -31,6 +31,8 @@ type NetEaseUrlItem = {
   url?: unknown;
   type?: unknown;
   code?: unknown;
+  time?: unknown;
+  freeTrialInfo?: unknown;
 };
 
 type NetEaseUrlResponse = {
@@ -77,6 +79,7 @@ export class NetEaseProvider implements MusicProvider {
     const item = Array.isArray(json.data) ? json.data[0] : undefined;
     const playableUrl = valueToString(item?.url);
     const code = valueToNumber(item?.code);
+    const timeMs = valueToNumber(item?.time);
 
     if (!playableUrl) {
       return {
@@ -84,6 +87,16 @@ export class NetEaseProvider implements MusicProvider {
         provider: "netease",
         providerTrackId: trackId,
         reason: "NetEase returned no playable URL.",
+        code
+      };
+    }
+
+    if (isNetEasePreview(item, timeMs)) {
+      return {
+        available: false,
+        provider: "netease",
+        providerTrackId: trackId,
+        reason: "NetEase returned a 30-second preview URL. Log in with an eligible account or choose another track.",
         code
       };
     }
@@ -121,6 +134,10 @@ export class NetEaseProvider implements MusicProvider {
       throw new Error("NetEase request returned invalid JSON.");
     }
   }
+}
+
+function isNetEasePreview(item: NetEaseUrlItem | undefined, timeMs: number | null): boolean {
+  return isRecord(item?.freeTrialInfo) || (timeMs !== null && timeMs > 0 && timeMs <= 45_000);
 }
 
 function normalizeArtists(song: NetEaseSong): string[] {

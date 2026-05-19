@@ -52,6 +52,7 @@ export type InteractivePlaybackState = {
   currentTrackId?: string;
   currentStartedAt?: Date;
   activePlayback?: PlaybackHandle;
+  lastIntroPlaybackResult?: PlayerResult;
   startUrlPlayback?: StartUrlPlayback;
   startDuckedIntroPlayback?: StartDuckedIntroPlayback;
   writeOutput?: OutputWriter;
@@ -432,7 +433,7 @@ async function handlePlaybackRequest(input: {
   let playbackFailure: string | undefined;
   let nowPlaying = "";
   let djProgramIntro = "";
-  let djProgramIntroAudioPath: string | undefined;
+  let djProgramIntroAudio: GeneratedDjProgramIntro | undefined;
   let stationIntro = input.intentType === "direct_playback_request"
     ? formatDirectPlaybackConfirmation(station)
     : await generateStationIntroResponse({ config: input.config, llm: input.llm, userText: input.requestText, station, context });
@@ -448,16 +449,31 @@ async function handlePlaybackRequest(input: {
       playFile: input.startDuckedIntroPlayback ? undefined : input.playFile!
     }));
     djProgramIntro = intro.text;
-    djProgramIntroAudioPath = intro.audioPath;
+    djProgramIntroAudio = intro;
   }
   if (input.playbackState) {
     input.playbackState.station = station;
     input.playbackState.storedTracks = storedTracks;
     stopActivePlayback(input.playbackState, input.store);
     nowPlaying = await withStatus(input.writeStatus, "Starting playback...", () => startTrackAt(input.playbackState!, input.config, input.store, 0, input.startUrlPlayback, input.now, {
-      introAudioPath: djProgramIntroAudioPath,
+      introAudioPath: djProgramIntroAudio?.audioPath,
       startDuckedIntroPlayback: input.startDuckedIntroPlayback
     }));
+    if (djProgramIntroAudio?.audioPath) {
+      const introPlayback = input.playbackState.lastIntroPlaybackResult;
+      const status = introPlayback?.ok ? "played" : "failed";
+      input.store.recordDjAudio(input.sessionId, "explicit", null, djProgramIntroAudio.rawText, djProgramIntroAudio.audioPath, status, {
+        cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
+        latencyMs: djProgramIntroAudio.latencyMs,
+        fileSizeBytes: djProgramIntroAudio.fileSizeBytes
+      });
+      if (introPlayback && !introPlayback.ok) {
+        djProgramIntro = [
+          djProgramIntro,
+          `Playback detail: ${introPlayback.error ?? "DJ intro playback failed."}`
+        ].join("\n");
+      }
+    }
   } else if (firstPlayable?.playable.available) {
     const playableUrl = firstPlayable.playable.playableUrl;
     const playback = await withStatus(input.writeStatus, "Starting playback...", () => input.playUrl(playableUrl));
@@ -912,7 +928,7 @@ async function generateStationDjProgramIntro(input: {
   requestText: string;
   synthesize: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
   playFile?: (filePath: string) => Promise<PlayerResult>;
-}): Promise<{ text: string; audioPath?: string }> {
+}): Promise<GeneratedDjProgramIntro> {
   const textResult = await input.llm.generateText([
     `You are ${input.config.dj.displayName}, Pockedio's spoken DJ.`,
     "Write a warm, concise opening for a five-track DJ program.",
@@ -938,21 +954,19 @@ async function generateStationDjProgramIntro(input: {
       cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
       latencyMs: djAudio.latencyMs
     });
-    return { text: formatDjAudioFallbackText(text, djAudio.error) };
+    return { text: formatDjAudioFallbackText(text, djAudio.error), rawText: text };
   }
 
   if (!input.playFile) {
-    input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath, "generated", {
-      cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
-      latencyMs: djAudio.latencyMs,
-      fileSizeBytes: getFileSize(djAudio.audioPath)
-    });
     return {
       text: [
         "DJ program intro:",
         text
       ].join("\n"),
-      audioPath: djAudio.audioPath
+      rawText: text,
+      audioPath: djAudio.audioPath,
+      latencyMs: djAudio.latencyMs,
+      fileSizeBytes: getFileSize(djAudio.audioPath)
     };
   }
 
@@ -969,9 +983,20 @@ async function generateStationDjProgramIntro(input: {
       text,
       playback.ok ? "" : `Playback detail: ${playback.error ?? "DJ intro playback failed."}`
     ].filter(Boolean).join("\n"),
-    audioPath: playback.ok ? undefined : djAudio.audioPath
+    rawText: text,
+    audioPath: playback.ok ? undefined : djAudio.audioPath,
+    latencyMs: djAudio.latencyMs,
+    fileSizeBytes: getFileSize(djAudio.audioPath)
   };
 }
+
+type GeneratedDjProgramIntro = {
+  text: string;
+  rawText: string;
+  audioPath?: string;
+  latencyMs?: number;
+  fileSizeBytes?: number | null;
+};
 
 function getExplicitDjAudioCacheExpiresAt(): string {
   return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -1069,6 +1094,7 @@ async function startTrackAt(
   const handle = options.introAudioPath && options.startDuckedIntroPlayback
     ? await options.startDuckedIntroPlayback(entry.track.playable.playableUrl, options.introAudioPath)
     : await startUrlPlayback(entry.track.playable.playableUrl);
+  playbackState.lastIntroPlaybackResult = handle.introResult;
   playbackState.currentIndex = nextIndex;
   playbackState.currentTrackId = entry.dbId;
   playbackState.currentStartedAt = now();

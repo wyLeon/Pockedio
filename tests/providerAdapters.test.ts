@@ -74,6 +74,27 @@ describe("NetEaseProvider", () => {
       code: 404
     });
   });
+
+  it("rejects NetEase free-trial preview URLs as unavailable", async () => {
+    const provider = new NetEaseProvider(makeConfig(), async () => jsonResponse({
+      data: [{
+        id: 1,
+        url: "https://example.com/preview.mp3",
+        type: "mp3",
+        code: 200,
+        time: 30040,
+        freeTrialInfo: { start: 0, end: 30 }
+      }]
+    }));
+
+    await expect(provider.getPlayableUrl("1")).resolves.toEqual({
+      available: false,
+      provider: "netease",
+      providerTrackId: "1",
+      reason: "NetEase returned a 30-second preview URL. Log in with an eligible account or choose another track.",
+      code: 200
+    });
+  });
 });
 
 describe("afplay adapter", () => {
@@ -176,5 +197,6 @@ describe("afplay adapter", () => {
     ]);
     expect(stopped[0]).toMatch(/pockedio-playback-.*\.mp3$/);
     expect(handle.target).toMatch(/pockedio-playback-.*\.mp3$/);
+    expect(handle.introResult).toMatchObject({ ok: true, target: "/tmp/intro.wav" });
   });
 });
