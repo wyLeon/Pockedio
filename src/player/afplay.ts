@@ -22,6 +22,14 @@ export type PlaybackHandle = {
 
 export type ProcessStarter = (command: string, args: string[], timeoutMs?: number) => PlaybackHandle;
 
+export type DuckedIntroOptions = {
+  musicVolume?: number;
+  introTimeoutMs?: number;
+  starter?: ProcessStarter;
+  runner?: ProcessRunner;
+  fetchImpl?: typeof fetch;
+};
+
 export async function playUrl(
   url: string,
   timeoutMs?: number,
@@ -40,6 +48,23 @@ export async function startUrlPlayback(
 ): Promise<PlaybackHandle> {
   const target = isRemoteUrl(url) ? await downloadRemoteAudio(url, fetchImpl) : url;
   return starter("afplay", [target], timeoutMs);
+}
+
+export async function startDuckedUrlWithIntro(
+  url: string,
+  introFilePath: string,
+  options: DuckedIntroOptions = {}
+): Promise<PlaybackHandle> {
+  const starter = options.starter ?? startProcess;
+  const runner = options.runner ?? runProcess;
+  const target = isRemoteUrl(url) ? await downloadRemoteAudio(url, options.fetchImpl ?? fetch) : url;
+  const quietHandle = starter("afplay", ["-v", String(options.musicVolume ?? 0.18), target]);
+  try {
+    await runner("afplay", [introFilePath], options.introTimeoutMs);
+  } finally {
+    quietHandle.stop();
+  }
+  return starter("afplay", [target]);
 }
 
 export async function playFile(filePath: string, timeoutMs?: number, runner: ProcessRunner = runProcess): Promise<PlayerResult> {
@@ -88,7 +113,7 @@ export function runProcess(command: string, args: string[], timeoutMs = 0): Prom
 }
 
 export function startProcess(command: string, args: string[], timeoutMs = 0): PlaybackHandle {
-  const target = args[0] ?? "";
+  const target = args.at(-1) ?? "";
   const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
   let settled = false;
   let timer: NodeJS.Timeout | undefined;

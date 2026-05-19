@@ -935,7 +935,6 @@ describe("runSessionTurn", () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
     const started: string[] = [];
-    const playedFiles: string[] = [];
 
     await runSessionTurn({
       input: "I'm exhausted now, want some relaxation.",
@@ -958,11 +957,7 @@ describe("runSessionTurn", () => {
         audioPath: `/tmp/${text.length}.wav`,
         latencyMs: 15
       }),
-      playFile: async (filePath) => {
-        playedFiles.push(filePath);
-        return { ok: true, target: filePath, exitCode: 0, signal: null };
-      },
-      startUrlPlayback: async (url) => {
+      startDuckedIntroPlayback: async (url) => {
         started.push(url);
         return {
           target: url,
@@ -977,9 +972,63 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain("Pockedio here.");
     expect(result.response).toContain("Queue:");
     expect(result.response).toContain("Now playing:");
-    expect(playedFiles).toHaveLength(1);
     expect(started).toHaveLength(1);
     expect(playbackState.pendingStationRequest).toBeUndefined();
+  });
+
+  it("starts a pending DJ program with ducked music under the spoken intro", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
+    const directStarts: string[] = [];
+    const playedFiles: string[] = [];
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    await runSessionTurn({
+      input: "dj",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Pockedio here. I’ll open this softly, then let the first track carry the room."),
+      buildContext: async () => ({ personality: config.personality }),
+      synthesizeFishAudio: async () => ({
+        ok: true,
+        audioPath: "/tmp/pockedio-dj-intro.wav",
+        latencyMs: 15
+      }),
+      playFile: async (filePath) => {
+        playedFiles.push(filePath);
+        return { ok: true, target: filePath, exitCode: 0, signal: null };
+      },
+      startUrlPlayback: async (url) => {
+        directStarts.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(duckedStarts).toEqual([{ url: expect.stringContaining("https://example.com/"), introFilePath: "/tmp/pockedio-dj-intro.wav" }]);
+    expect(directStarts).toEqual([]);
+    expect(playedFiles).toEqual([]);
   });
 
   it("keeps explicit mood playback requests as playback", async () => {

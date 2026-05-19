@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
-import { playFile, playUrl, startUrlPlayback, type PlaybackHandle, type ProcessRunner, type ProcessStarter } from "../src/player/afplay.js";
+import { playFile, playUrl, startDuckedUrlWithIntro, startUrlPlayback, type PlaybackHandle, type ProcessRunner, type ProcessStarter } from "../src/player/afplay.js";
 import { NetEaseProvider } from "../src/providers/netease.js";
 
 function makeConfig() {
@@ -139,5 +139,42 @@ describe("afplay adapter", () => {
 
     expect(handle.target).toMatch(/pockedio-playback-.*\.mp3$/);
     expect(stopped).toBe(true);
+  });
+
+  it("starts music quietly under a DJ intro before handing off to full playback", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const stopped: string[] = [];
+    const starter: ProcessStarter = (command, args): PlaybackHandle => {
+      calls.push({ command, args });
+      return {
+        target: args.at(-1) ?? "",
+        done: Promise.resolve({ ok: true, target: args.at(-1) ?? "", exitCode: 0, signal: null }),
+        stop: () => {
+          stopped.push(args.at(-1) ?? "");
+        }
+      };
+    };
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      return { ok: true, target: args.at(-1) ?? "", exitCode: 0, signal: null };
+    };
+    const fetchImpl: typeof fetch = async () => new Response("audio-bytes", {
+      status: 200,
+      headers: { "content-type": "audio/mpeg" }
+    });
+
+    const handle = await startDuckedUrlWithIntro("https://example.com/song.mp3", "/tmp/intro.wav", {
+      starter,
+      runner,
+      fetchImpl
+    });
+
+    expect(calls.map((call) => call.args)).toEqual([
+      ["-v", "0.18", expect.stringMatching(/pockedio-playback-.*\.mp3$/)],
+      ["/tmp/intro.wav"],
+      [expect.stringMatching(/pockedio-playback-.*\.mp3$/)]
+    ]);
+    expect(stopped[0]).toMatch(/pockedio-playback-.*\.mp3$/);
+    expect(handle.target).toMatch(/pockedio-playback-.*\.mp3$/);
   });
 });

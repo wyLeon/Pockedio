@@ -18,6 +18,7 @@ import { MemoryStore, type FeedbackAction } from "../memory/store.js";
 import {
   playFile as playAudioFile,
   playUrl as playAudioUrl,
+  startDuckedUrlWithIntro,
   startUrlPlayback as startAudioUrlPlayback,
   type PlaybackHandle,
   type PlayerResult,
@@ -34,6 +35,7 @@ type OutputWriter = (text: string) => void;
 type StatusDone = () => void;
 type StatusWriter = (text: string) => StatusDone;
 type StartUrlPlayback = (url: string) => Promise<PlaybackHandle>;
+type StartDuckedIntroPlayback = (url: string, introFilePath: string) => Promise<PlaybackHandle>;
 type NowProvider = () => Date;
 
 type StoredPlaybackTrack = {
@@ -51,6 +53,7 @@ export type InteractivePlaybackState = {
   currentStartedAt?: Date;
   activePlayback?: PlaybackHandle;
   startUrlPlayback?: StartUrlPlayback;
+  startDuckedIntroPlayback?: StartDuckedIntroPlayback;
   writeOutput?: OutputWriter;
 };
 
@@ -69,6 +72,7 @@ export type SessionTurnInput = {
   playbackState?: InteractivePlaybackState;
   now?: NowProvider;
   playFile?: (filePath: string) => Promise<PlayerResult>;
+  startDuckedIntroPlayback?: StartDuckedIntroPlayback;
   synthesizeFishAudio?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
 };
 
@@ -121,6 +125,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   const writeOutput = input.writeOutput ?? (() => undefined);
   const playUrl = input.playUrl ?? ((url) => playAudioUrl(url));
   const startUrlPlayback = input.startUrlPlayback ?? createDefaultInteractiveStartUrlPlayback();
+  const startDuckedIntroPlayback = input.startDuckedIntroPlayback ?? ((url, introFilePath) => startDuckedUrlWithIntro(url, introFilePath));
   const playFile = input.playFile ?? ((filePath) => playAudioFile(filePath, 60_000));
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
   const writeStatus = input.writeStatus ?? (() => () => undefined);
@@ -133,6 +138,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   }
   if (input.playbackState) {
     input.playbackState.writeOutput = writeOutput;
+    input.playbackState.startDuckedIntroPlayback = input.startDuckedIntroPlayback;
   }
 
   try {
@@ -249,7 +255,8 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         now,
         djProgramIntro: true,
         synthesize,
-        playFile
+        playFile,
+        startDuckedIntroPlayback
       });
       store.addMessage(sessionId, "pockedio", playback.response);
       writeOutput(playback.response);
@@ -311,7 +318,8 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         playbackState: input.playbackState,
         now,
         synthesize,
-        playFile
+        playFile,
+        startDuckedIntroPlayback
       });
       store.addMessage(sessionId, "pockedio", playback.response);
       writeOutput(playback.response);
@@ -403,6 +411,7 @@ async function handlePlaybackRequest(input: {
   djProgramIntro?: boolean;
   synthesize?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
   playFile?: (filePath: string) => Promise<PlayerResult>;
+  startDuckedIntroPlayback?: StartDuckedIntroPlayback;
 }): Promise<{ response: string; station: GeneratedStation }> {
   const context = await withStatus(input.writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(input.config));
   input.store.addContextSnapshot(input.sessionId, {
@@ -423,11 +432,12 @@ async function handlePlaybackRequest(input: {
   let playbackFailure: string | undefined;
   let nowPlaying = "";
   let djProgramIntro = "";
+  let djProgramIntroAudioPath: string | undefined;
   let stationIntro = input.intentType === "direct_playback_request"
     ? formatDirectPlaybackConfirmation(station)
     : await generateStationIntroResponse({ config: input.config, llm: input.llm, userText: input.requestText, station, context });
   if (input.djProgramIntro && input.synthesize && input.playFile) {
-    djProgramIntro = await withStatus(input.writeStatus, "Preparing DJ voice...", () => generateStationDjProgramIntro({
+    const intro = await withStatus(input.writeStatus, "Preparing DJ voice...", () => generateStationDjProgramIntro({
       config: input.config,
       sessionId: input.sessionId,
       store: input.store,
@@ -435,14 +445,19 @@ async function handlePlaybackRequest(input: {
       station,
       requestText: input.requestText,
       synthesize: input.synthesize!,
-      playFile: input.playFile!
+      playFile: input.startDuckedIntroPlayback ? undefined : input.playFile!
     }));
+    djProgramIntro = intro.text;
+    djProgramIntroAudioPath = intro.audioPath;
   }
   if (input.playbackState) {
     input.playbackState.station = station;
     input.playbackState.storedTracks = storedTracks;
     stopActivePlayback(input.playbackState, input.store);
-    nowPlaying = await withStatus(input.writeStatus, "Starting playback...", () => startTrackAt(input.playbackState!, input.config, input.store, 0, input.startUrlPlayback, input.now));
+    nowPlaying = await withStatus(input.writeStatus, "Starting playback...", () => startTrackAt(input.playbackState!, input.config, input.store, 0, input.startUrlPlayback, input.now, {
+      introAudioPath: djProgramIntroAudioPath,
+      startDuckedIntroPlayback: input.startDuckedIntroPlayback
+    }));
   } else if (firstPlayable?.playable.available) {
     const playableUrl = firstPlayable.playable.playableUrl;
     const playback = await withStatus(input.writeStatus, "Starting playback...", () => input.playUrl(playableUrl));
@@ -896,8 +911,8 @@ async function generateStationDjProgramIntro(input: {
   station: GeneratedStation;
   requestText: string;
   synthesize: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
-  playFile: (filePath: string) => Promise<PlayerResult>;
-}): Promise<string> {
+  playFile?: (filePath: string) => Promise<PlayerResult>;
+}): Promise<{ text: string; audioPath?: string }> {
   const textResult = await input.llm.generateText([
     `You are ${input.config.dj.displayName}, Pockedio's spoken DJ.`,
     "Write a warm, concise opening for a five-track DJ program.",
@@ -923,7 +938,22 @@ async function generateStationDjProgramIntro(input: {
       cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
       latencyMs: djAudio.latencyMs
     });
-    return formatDjAudioFallbackText(text, djAudio.error);
+    return { text: formatDjAudioFallbackText(text, djAudio.error) };
+  }
+
+  if (!input.playFile) {
+    input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath, "generated", {
+      cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
+      latencyMs: djAudio.latencyMs,
+      fileSizeBytes: getFileSize(djAudio.audioPath)
+    });
+    return {
+      text: [
+        "DJ program intro:",
+        text
+      ].join("\n"),
+      audioPath: djAudio.audioPath
+    };
   }
 
   const playback = await input.playFile(djAudio.audioPath);
@@ -933,11 +963,14 @@ async function generateStationDjProgramIntro(input: {
     fileSizeBytes: getFileSize(djAudio.audioPath)
   });
 
-  return [
-    "DJ program intro:",
-    text,
-    playback.ok ? "" : `Playback detail: ${playback.error ?? "DJ intro playback failed."}`
-  ].filter(Boolean).join("\n");
+  return {
+    text: [
+      "DJ program intro:",
+      text,
+      playback.ok ? "" : `Playback detail: ${playback.error ?? "DJ intro playback failed."}`
+    ].filter(Boolean).join("\n"),
+    audioPath: playback.ok ? undefined : djAudio.audioPath
+  };
 }
 
 function getExplicitDjAudioCacheExpiresAt(): string {
@@ -1012,7 +1045,11 @@ async function startTrackAt(
   store: MemoryStore,
   startIndex: number,
   startUrlPlayback: StartUrlPlayback,
-  now: NowProvider
+  now: NowProvider,
+  options: {
+    introAudioPath?: string;
+    startDuckedIntroPlayback?: StartDuckedIntroPlayback;
+  } = {}
 ): Promise<string> {
   const storedTracks = playbackState.storedTracks ?? [];
   const nextIndex = storedTracks.findIndex((entry, index) => index >= startIndex && entry.track.playable.available);
@@ -1029,7 +1066,9 @@ async function startTrackAt(
     return "No playable tracks remain.";
   }
 
-  const handle = await startUrlPlayback(entry.track.playable.playableUrl);
+  const handle = options.introAudioPath && options.startDuckedIntroPlayback
+    ? await options.startDuckedIntroPlayback(entry.track.playable.playableUrl, options.introAudioPath)
+    : await startUrlPlayback(entry.track.playable.playableUrl);
   playbackState.currentIndex = nextIndex;
   playbackState.currentTrackId = entry.dbId;
   playbackState.currentStartedAt = now();

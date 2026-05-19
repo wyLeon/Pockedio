@@ -1144,7 +1144,7 @@ dj
 play it as a DJ program
 ```
 
-This should be explicit. In the first implementation, DJ program mode plays one spoken opening before the station starts. Later versions may alternate spoken DJ audio with songs like a radio show. Normal station mode should remain text-first and fast.
+This should be explicit. In the first implementation, DJ program mode prepares one spoken opening, starts the first song quietly under that DJ voice, then hands off to normal-volume playback. Later versions may prepare a spoken break for each next song while the current song is playing. Normal station mode should remain text-first and fast.
 
 ## 3.7 Explicit Playback Request
 
