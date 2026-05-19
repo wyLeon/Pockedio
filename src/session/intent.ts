@@ -5,6 +5,8 @@ export type SessionIntentType =
   | "identity_capability"
   | "music_recommendation"
   | "pending_station_confirmation"
+  | "pending_station_decline"
+  | "pending_station_refinement"
   | "playback_request"
   | "direct_playback_request"
   | "feedback_like"
@@ -31,6 +33,8 @@ const intentTypes = new Set<SessionIntentType>([
   "identity_capability",
   "music_recommendation",
   "pending_station_confirmation",
+  "pending_station_decline",
+  "pending_station_refinement",
   "playback_request",
   "direct_playback_request",
   "feedback_like",

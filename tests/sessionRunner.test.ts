@@ -604,6 +604,208 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain("Now playing:");
   });
 
+  it("treats Enter as confirmation only when a station is pending", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    const result = await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("pending_station_confirmation");
+    expect(result.station?.request).toBe("I'm exhausted now, want some relaxation.");
+    expect(started).toHaveLength(1);
+    expect(playbackState.pendingStationRequest).toBeUndefined();
+  });
+
+  it("does not treat Enter as playback consent when nothing is pending", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    const result = await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: unavailableLlm()
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.station).toBeUndefined();
+    expect(result.response).toContain("Tell me what you want to hear");
+  });
+
+  it("reshapes a pending station before playback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    const refinement = await runSessionTurn({
+      input: "make it softer and less piano",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Got it. I’ll make it softer and less piano-driven.\n\nPlay this version?"),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(refinement.intent.type).toBe("pending_station_refinement");
+    expect(refinement.station).toBeUndefined();
+    expect(started).toEqual([]);
+    expect(playbackState.pendingStationRequest).toContain("I'm exhausted now, want some relaxation.");
+    expect(playbackState.pendingStationRequest).toContain("Refinement: make it softer and less piano");
+    expect(refinement.response).toContain("Play this version?");
+
+    const result = await runSessionTurn({
+      input: "yes",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.station?.request).toContain("Refinement: make it softer and less piano");
+    expect(started).toHaveLength(1);
+  });
+
+  it("answers pending station questions without clearing the pending station", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    const result = await runSessionTurn({
+      input: "what kind of tracks would it include?",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Mostly warm ambient, slow instrumental pieces, and soft downtempo.\n\nPlay this version?")
+    });
+
+    expect(result.intent.type).toBe("pending_station_refinement");
+    expect(result.station).toBeUndefined();
+    expect(result.response).toContain("Play this version?");
+    expect(playbackState.pendingStationRequest).toBe("I'm exhausted now, want some relaxation.");
+  });
+
+  it("clears pending station when the user declines", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    const result = await runSessionTurn({
+      input: "not now",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("pending_station_decline");
+    expect(result.station).toBeUndefined();
+    expect(playbackState.pendingStationRequest).toBeUndefined();
+  });
+
+  it("lets explicit playback replace a pending station", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    const result = await runSessionTurn({
+      input: "actually play jazz for work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.station?.request).toBe("actually play jazz for work");
+    expect(started).toHaveLength(1);
+    expect(playbackState.pendingStationRequest).toBeUndefined();
+  });
+
   it("keeps explicit mood playback requests as playback", async () => {
     const config = makeConfig();
     const playedUrls: string[] = [];

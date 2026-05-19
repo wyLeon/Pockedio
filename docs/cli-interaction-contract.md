@@ -965,10 +965,90 @@ Examples:
 
 ```text
 yes
+<press Enter>
 no
 make it softer
 actually something energetic
 ```
+
+Flow name:
+  Pending station confirmation and refinement.
+
+User entry:
+  Command:
+    `pockedio`
+  User input:
+    A response after Pockedio has asked whether to build or play a suggested station.
+
+Preconditions:
+  A pending station request exists from 3.4.
+
+Processing display:
+
+```text
+Thinking...
+```
+
+Use no visible spinner for simple confirm/decline. Use `Thinking...` when interpreting a refinement or answering a question.
+
+Decision map:
+
+```text
+Enter / yes / sure / play it -> build and play pending station
+no / not now                 -> clear pending station, stay in conversation
+make it softer               -> update pending station, ask again
+more energetic               -> update pending station, ask again
+what kind of tracks?         -> answer, keep pending station alive, ask again
+actually play jazz for work  -> replace pending station with explicit playback request
+```
+
+Confirmation output:
+
+```text
+> <press Enter>
+
+Reading your context...
+Building a station...
+Starting playback...
+```
+
+Decline output:
+
+```text
+> not now
+
+No problem. We can keep talking, or you can point me toward a different mood.
+```
+
+Refinement output:
+
+```text
+> make it softer
+
+Got it. I’ll keep it softer and more spacious.
+
+Play this version?
+```
+
+Question output:
+
+```text
+> what kind of tracks would it include?
+
+Mostly warm ambient, slow instrumental pieces, and soft downtempo.
+
+Play this version?
+```
+
+Rules:
+
+- Empty Enter means consent only when a pending station exists.
+- Empty Enter outside pending confirmation should not start playback.
+- Do not generate a station for refinements until the user confirms.
+- Do not show queue before confirmation.
+- Keep the pending station alive after refinements and questions.
+- Clear the pending station after confirmation, decline, explicit playback replacement, or session exit.
+- A new explicit playback request replaces the pending station and routes to 3.7.
 
 ## 3.6 Station Building And Playback Start
 

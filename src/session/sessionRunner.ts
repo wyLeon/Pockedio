@@ -45,6 +45,7 @@ export type InteractivePlaybackState = {
   station?: GeneratedStation;
   storedTracks?: StoredPlaybackTrack[];
   pendingStationRequest?: string;
+  pendingStationOriginalRequest?: string;
   currentIndex?: number;
   currentTrackId?: string;
   currentStartedAt?: Date;
@@ -136,7 +137,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
   try {
     store.addMessage(sessionId, "user", userText);
-    const intent = input.playbackState?.pendingStationRequest && isPendingStationConfirmation(userText)
+    const intent = input.playbackState?.pendingStationRequest && isPendingStationConfirmation(input.input)
       ? { type: "pending_station_confirmation" as const, confidence: "high" as const }
       : input.playbackState?.pendingStationRequest && isPendingStationDecline(userText)
         ? { type: "pending_station_decline" as const, confidence: "high" as const }
@@ -145,11 +146,12 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     if (intent.type === "pending_station_decline") {
       if (input.playbackState) {
         input.playbackState.pendingStationRequest = undefined;
+        input.playbackState.pendingStationOriginalRequest = undefined;
       }
       const response = "No problem. We can keep talking, or you can point me toward a different mood.";
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
-      return { sessionId, intent: { type: "conversation", confidence: "high" }, response, shouldExit: false };
+      return { sessionId, intent, response, shouldExit: false };
     }
 
     if (intent.type === "stop") {
@@ -198,26 +200,10 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response: response.text, shouldExit: false, djAudio: response.djAudio };
     }
 
-    if (intent.type === "music_recommendation") {
-      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config));
-      store.addContextSnapshot(sessionId, {
-        calendarSummary: context.calendar?.summary,
-        weather: context.weather,
-        diarySummary: context.diary?.summary,
-        personality: context.personality ?? config.personality
-      });
-      const response = await generateMusicRecommendationResponse({ config, llm, userText, playbackState: input.playbackState, context });
-      if (input.playbackState) {
-        input.playbackState.pendingStationRequest = userText;
-      }
-      store.addMessage(sessionId, "pockedio", response);
-      writeOutput(response);
-      return { sessionId, intent, response, shouldExit: false };
-    }
-
     if (intent.type === "pending_station_confirmation" && input.playbackState?.pendingStationRequest) {
       const pendingRequest = input.playbackState.pendingStationRequest;
       input.playbackState.pendingStationRequest = undefined;
+      input.playbackState.pendingStationOriginalRequest = undefined;
       const playback = await handlePlaybackRequest({
         config,
         sessionId,
@@ -238,7 +224,46 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
     }
 
+    if (input.playbackState?.pendingStationRequest && shouldHandlePendingStationFollowup(intent, userText)) {
+      const response = await withStatus(writeStatus, "Thinking...", () => handlePendingStationFollowup({
+        config,
+        llm,
+        userText,
+        playbackState: input.playbackState!
+      }));
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return {
+        sessionId,
+        intent: { type: "pending_station_refinement", confidence: "high" },
+        response,
+        shouldExit: false
+      };
+    }
+
+    if (intent.type === "music_recommendation") {
+      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config));
+      store.addContextSnapshot(sessionId, {
+        calendarSummary: context.calendar?.summary,
+        weather: context.weather,
+        diarySummary: context.diary?.summary,
+        personality: context.personality ?? config.personality
+      });
+      const response = await generateMusicRecommendationResponse({ config, llm, userText, playbackState: input.playbackState, context });
+      if (input.playbackState) {
+        input.playbackState.pendingStationRequest = userText;
+        input.playbackState.pendingStationOriginalRequest = userText;
+      }
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
     if (intent.type === "playback_request" || intent.type === "direct_playback_request") {
+      if (input.playbackState) {
+        input.playbackState.pendingStationRequest = undefined;
+        input.playbackState.pendingStationOriginalRequest = undefined;
+      }
       const playback = await handlePlaybackRequest({
         config,
         sessionId,
@@ -456,11 +481,103 @@ async function generateMusicRecommendationResponse(input: {
 }
 
 function isPendingStationConfirmation(text: string): boolean {
-  return /\b(yes|yeah|yep|sure|ok|okay|go ahead|play it|play that|start it|start the station|play the station)\b/i.test(text);
+  const trimmed = text.trim();
+  if (trimmed === "") {
+    return true;
+  }
+  return /^(yes|yeah|yep|sure|ok|okay)(\b|[,.! ]|$)/i.test(trimmed)
+    || /\b(go ahead|play it|play that|start it|start the station|play the station)\b/i.test(trimmed);
 }
 
 function isPendingStationDecline(text: string): boolean {
   return /\b(no|nope|not now|don'?t|do not|skip it|leave it|not yet)\b/i.test(text);
+}
+
+function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: string): boolean {
+  if (!userText.trim()) {
+    return false;
+  }
+  if (intent.type === "stop"
+    || intent.type === "playback_status"
+    || intent.type === "identity_capability"
+    || intent.type === "explicit_dj_audio_request"
+    || intent.type === "pending_station_confirmation"
+    || intent.type === "pending_station_decline") {
+    return false;
+  }
+  if ((intent.type === "playback_request" || intent.type === "direct_playback_request") && hasExplicitPlaybackCommand(userText)) {
+    return false;
+  }
+  return true;
+}
+
+function hasExplicitPlaybackCommand(text: string): boolean {
+  return /\b(play|put on|start|queue|just play|play it directly|start playback)\b/i.test(text);
+}
+
+async function handlePendingStationFollowup(input: {
+  config: PockedioConfig;
+  llm: LlmClient;
+  userText: string;
+  playbackState: InteractivePlaybackState;
+}): Promise<string> {
+  if (isPendingStationQuestion(input.userText)) {
+    return answerPendingStationQuestion(input);
+  }
+
+  const previous = input.playbackState.pendingStationRequest ?? input.userText;
+  const refined = mergePendingStationRequest(previous, input.userText);
+  input.playbackState.pendingStationRequest = refined;
+  input.playbackState.pendingStationOriginalRequest ??= previous;
+
+  const prompt = [
+    `You are ${input.config.dj.displayName}, Pockedio's concise personal DJ.`,
+    "The user is refining a pending station before playback starts.",
+    "Acknowledge the refinement in one short sentence.",
+    "Then ask whether to play this version.",
+    "Do not claim playback started. Do not show a queue.",
+    `Previous pending station: ${previous}`,
+    `User refinement: ${input.userText}`
+  ].join("\n");
+  const result = await input.llm.generateText(prompt);
+  if (result.ok && result.value.trim()) {
+    return result.value.trim();
+  }
+
+  return `Got it. I’ll shape it around: ${input.userText.trim()}.\n\nPlay this version?`;
+}
+
+function isPendingStationQuestion(text: string): boolean {
+  return /\?$/.test(text.trim())
+    || /^(what|why|how|which|would|could|can you explain|tell me)/i.test(text.trim());
+}
+
+async function answerPendingStationQuestion(input: {
+  config: PockedioConfig;
+  llm: LlmClient;
+  userText: string;
+  playbackState: InteractivePlaybackState;
+}): Promise<string> {
+  const pending = input.playbackState.pendingStationRequest ?? "";
+  const prompt = [
+    `You are ${input.config.dj.displayName}, Pockedio's concise personal DJ.`,
+    "The user asked a question before confirming a pending station.",
+    "Answer briefly and keep the pending station alive.",
+    "End with a natural confirmation question, but do not use the fixed startup phrase.",
+    "Do not start playback. Do not show a queue.",
+    `Pending station: ${pending}`,
+    `User question: ${input.userText}`
+  ].join("\n");
+  const result = await input.llm.generateText(prompt);
+  if (result.ok && result.value.trim()) {
+    return result.value.trim();
+  }
+
+  return "I’d keep it close to the direction we just discussed, then adjust once the first track lands.\n\nPlay this version?";
+}
+
+function mergePendingStationRequest(previous: string, refinement: string): string {
+  return `${previous}\nRefinement: ${refinement.trim()}`;
 }
 
 async function generateIdentityCapabilityResponse(input: {
