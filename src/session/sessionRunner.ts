@@ -104,7 +104,7 @@ export function formatInteractiveStartupGuide(displayName = "Pockedio"): string 
     "  show queue",
     "",
     "Spoken DJ:",
-    "  make me a short DJ intro",
+    "  after a station suggestion, type dj",
     "",
     "Setup:",
     "  pockedio setup"
@@ -137,11 +137,16 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
   try {
     store.addMessage(sessionId, "user", userText);
-    const intent = input.playbackState?.pendingStationRequest && isPendingStationConfirmation(input.input)
-      ? { type: "pending_station_confirmation" as const, confidence: "high" as const }
+    let intent = input.playbackState?.pendingStationRequest && isPendingStationDjProgramRequest(userText)
+        ? { type: "pending_station_dj_program" as const, confidence: "high" as const }
+      : input.playbackState?.pendingStationRequest && isPendingStationConfirmation(input.input)
+        ? { type: "pending_station_confirmation" as const, confidence: "high" as const }
       : input.playbackState?.pendingStationRequest && isPendingStationDecline(userText)
         ? { type: "pending_station_decline" as const, confidence: "high" as const }
         : await resolveIntent(userText, llm, writeStatus);
+    if (input.playbackState?.currentTrackId && isCurrentTrackQuestion(userText) && isStationStartingIntent(intent.type)) {
+      intent = { type: "conversation", confidence: "high" };
+    }
 
     if (intent.type === "pending_station_decline") {
       if (input.playbackState) {
@@ -224,6 +229,33 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
     }
 
+    if (intent.type === "pending_station_dj_program" && input.playbackState?.pendingStationRequest) {
+      const pendingRequest = input.playbackState.pendingStationRequest;
+      input.playbackState.pendingStationRequest = undefined;
+      input.playbackState.pendingStationOriginalRequest = undefined;
+      const playback = await handlePlaybackRequest({
+        config,
+        sessionId,
+        store,
+        provider,
+        llm,
+        requestText: pendingRequest,
+        intentType: "playback_request",
+        buildContext: input.buildContext,
+        writeStatus,
+        playUrl,
+        startUrlPlayback,
+        playbackState: input.playbackState,
+        now,
+        djProgramIntro: true,
+        synthesize,
+        playFile
+      });
+      store.addMessage(sessionId, "pockedio", playback.response);
+      writeOutput(playback.response);
+      return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
+    }
+
     if (input.playbackState?.pendingStationRequest && shouldHandlePendingStationFollowup(intent, userText)) {
       const response = await withStatus(writeStatus, "Thinking...", () => handlePendingStationFollowup({
         config,
@@ -277,7 +309,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         playUrl,
         startUrlPlayback,
         playbackState: input.playbackState,
-        now
+        now,
+        synthesize,
+        playFile
       });
       store.addMessage(sessionId, "pockedio", playback.response);
       writeOutput(playback.response);
@@ -366,6 +400,9 @@ async function handlePlaybackRequest(input: {
   startUrlPlayback: StartUrlPlayback;
   playbackState?: InteractivePlaybackState;
   now: NowProvider;
+  djProgramIntro?: boolean;
+  synthesize?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
+  playFile?: (filePath: string) => Promise<PlayerResult>;
 }): Promise<{ response: string; station: GeneratedStation }> {
   const context = await withStatus(input.writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(input.config));
   input.store.addContextSnapshot(input.sessionId, {
@@ -385,24 +422,41 @@ async function handlePlaybackRequest(input: {
   const firstPlayable = station.tracks.find((track) => track.playable.available);
   let playbackFailure: string | undefined;
   let nowPlaying = "";
+  let djProgramIntro = "";
   let stationIntro = input.intentType === "direct_playback_request"
     ? formatDirectPlaybackConfirmation(station)
     : await generateStationIntroResponse({ config: input.config, llm: input.llm, userText: input.requestText, station, context });
+  if (input.djProgramIntro && input.synthesize && input.playFile) {
+    djProgramIntro = await withStatus(input.writeStatus, "Preparing DJ voice...", () => generateStationDjProgramIntro({
+      config: input.config,
+      sessionId: input.sessionId,
+      store: input.store,
+      llm: input.llm,
+      station,
+      requestText: input.requestText,
+      synthesize: input.synthesize!,
+      playFile: input.playFile!
+    }));
+  }
   if (input.playbackState) {
     input.playbackState.station = station;
     input.playbackState.storedTracks = storedTracks;
+    stopActivePlayback(input.playbackState, input.store);
     nowPlaying = await withStatus(input.writeStatus, "Starting playback...", () => startTrackAt(input.playbackState!, input.config, input.store, 0, input.startUrlPlayback, input.now));
   } else if (firstPlayable?.playable.available) {
     const playableUrl = firstPlayable.playable.playableUrl;
     const playback = await withStatus(input.writeStatus, "Starting playback...", () => input.playUrl(playableUrl));
     if (!playback.ok) {
       playbackFailure = playback.error ?? "Playback failed.";
+    } else {
+      nowPlaying = formatTrackStartSurface(firstPlayable, input.config, input.now(), input.now());
     }
   } else if (input.intentType === "direct_playback_request") {
     stationIntro = formatUnavailableTrackFallbackForResponse(station.tracks);
   }
 
   const response = [
+    djProgramIntro,
     stationIntro,
     formatQueue(station),
     nowPlaying,
@@ -470,14 +524,14 @@ async function generateMusicRecommendationResponse(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt);
   if (result.ok && result.value.trim()) {
-    return result.value.trim();
+    return appendPendingStationChoicePrompt(result.value.trim());
   }
 
-  return [
+  return appendPendingStationChoicePrompt([
     "I can still help with the music, though my deeper conversation layer is offline right now.",
     "",
     "Want me to search directly from your request and build a five-track station?"
-  ].join("\n");
+  ].join("\n"));
 }
 
 function isPendingStationConfirmation(text: string): boolean {
@@ -493,6 +547,24 @@ function isPendingStationDecline(text: string): boolean {
   return /\b(no|nope|not now|don'?t|do not|skip it|leave it|not yet)\b/i.test(text);
 }
 
+function isPendingStationDjProgramRequest(text: string): boolean {
+  const trimmed = text.trim().toLowerCase();
+  return trimmed === "dj"
+    || trimmed === "dj mode"
+    || /\b(dj program|dj version|radio show|radio version|spoken version|play it as a dj|make it a dj)\b/.test(trimmed);
+}
+
+function isCurrentTrackQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return /\b(who\s+(is|was|sings|sang)|who'?s)\b.*\b(singer|artist|performer|vocalist|composer|songwriter|producer)\b/.test(normalized)
+    || /\b(singer|artist|performer|vocalist|composer|songwriter|producer)\b.*\b(who|what|which)\b/.test(normalized)
+    || /\b(tell me|what do you know)\b.*\b(this song|this track|current song|current track)\b/.test(normalized);
+}
+
+function isStationStartingIntent(type: SessionIntent["type"]): boolean {
+  return type === "playback_request" || type === "direct_playback_request" || type === "music_recommendation";
+}
+
 function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: string): boolean {
   if (!userText.trim()) {
     return false;
@@ -502,6 +574,7 @@ function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: str
     || intent.type === "identity_capability"
     || intent.type === "explicit_dj_audio_request"
     || intent.type === "pending_station_confirmation"
+    || intent.type === "pending_station_dj_program"
     || intent.type === "pending_station_decline") {
     return false;
   }
@@ -541,10 +614,10 @@ async function handlePendingStationFollowup(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt);
   if (result.ok && result.value.trim()) {
-    return result.value.trim();
+    return appendPendingStationChoicePrompt(result.value.trim());
   }
 
-  return `Got it. I’ll shape it around: ${input.userText.trim()}.\n\nPlay this version?`;
+  return appendPendingStationChoicePrompt(`Got it. I’ll shape it around: ${input.userText.trim()}.\n\nPlay this version?`);
 }
 
 function isPendingStationQuestion(text: string): boolean {
@@ -570,14 +643,25 @@ async function answerPendingStationQuestion(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt);
   if (result.ok && result.value.trim()) {
-    return result.value.trim();
+    return appendPendingStationChoicePrompt(result.value.trim());
   }
 
-  return "I’d keep it close to the direction we just discussed, then adjust once the first track lands.\n\nPlay this version?";
+  return appendPendingStationChoicePrompt("I’d keep it close to the direction we just discussed, then adjust once the first track lands.\n\nPlay this version?");
 }
 
 function mergePendingStationRequest(previous: string, refinement: string): string {
   return `${previous}\nRefinement: ${refinement.trim()}`;
+}
+
+function appendPendingStationChoicePrompt(text: string): string {
+  if (/press enter|type "dj"|type dj/i.test(text)) {
+    return text;
+  }
+  return [
+    text,
+    "",
+    "Press Enter to play it, type \"dj\" for a spoken DJ version, or tell me how to adjust it."
+  ].join("\n");
 }
 
 async function generateIdentityCapabilityResponse(input: {
@@ -804,6 +888,58 @@ async function generateDjAudioResponse(input: {
   return { text, djAudio };
 }
 
+async function generateStationDjProgramIntro(input: {
+  config: PockedioConfig;
+  sessionId: string;
+  store: MemoryStore;
+  llm: LlmClient;
+  station: GeneratedStation;
+  requestText: string;
+  synthesize: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
+  playFile: (filePath: string) => Promise<PlayerResult>;
+}): Promise<string> {
+  const textResult = await input.llm.generateText([
+    `You are ${input.config.dj.displayName}, Pockedio's spoken DJ.`,
+    "Write a warm, concise opening for a five-track DJ program.",
+    "Sound human and specific, but keep it under 70 words.",
+    "Mention the station direction and ease the listener into the first track.",
+    "Do not list every track.",
+    `User request: ${input.requestText}`,
+    "Station tracks:",
+    ...input.station.tracks.map((track) => `${track.position}. ${track.title} - ${track.artist}: ${track.rationale}`)
+  ].join("\n"));
+  const text = textResult.ok && textResult.value.trim()
+    ? textResult.value.trim()
+    : `${input.config.dj.displayName} here. I’ll open this as a short DJ program and ease you into the first track with the station already shaped around your request.`;
+  const djAudio = shouldUseSpokenDjAudio({
+    triggerType: "conversation",
+    userExplicitlyRequestedDjAudio: true
+  })
+    ? await input.synthesize(input.config, text)
+    : { ok: false as const, latencyMs: 0, error: "Voice rules disabled DJ audio." };
+
+  if (!djAudio.ok) {
+    input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath ?? null, "text_fallback", {
+      cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
+      latencyMs: djAudio.latencyMs
+    });
+    return formatDjAudioFallbackText(text, djAudio.error);
+  }
+
+  const playback = await input.playFile(djAudio.audioPath);
+  input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath, playback.ok ? "played" : "failed", {
+    cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
+    latencyMs: djAudio.latencyMs,
+    fileSizeBytes: getFileSize(djAudio.audioPath)
+  });
+
+  return [
+    "DJ program intro:",
+    text,
+    playback.ok ? "" : `Playback detail: ${playback.error ?? "DJ intro playback failed."}`
+  ].filter(Boolean).join("\n");
+}
+
 function getExplicitDjAudioCacheExpiresAt(): string {
   return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 }
@@ -841,6 +977,20 @@ function formatUnavailableTrackFallbackForResponse(tracks: StationTrack[]): stri
   return tracks.some((track) => !track.playable.available)
     ? `${tracks.filter((track) => !track.playable.available).length} unavailable track(s) kept in the station.`
     : "";
+}
+
+function stopActivePlayback(playbackState: InteractivePlaybackState, store: MemoryStore): void {
+  if (!playbackState.activePlayback) {
+    return;
+  }
+  playbackState.activePlayback.stop();
+  if (playbackState.currentTrackId) {
+    store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
+  }
+  playbackState.activePlayback = undefined;
+  playbackState.currentIndex = undefined;
+  playbackState.currentTrackId = undefined;
+  playbackState.currentStartedAt = undefined;
 }
 
 async function advancePlayback(
@@ -891,7 +1041,7 @@ async function startTrackAt(
     void autoAdvancePlayback(playbackState, config, entry.dbId, nextIndex + 1, startUrlPlayback);
   }).catch(() => undefined);
   store.updateTrackPlayback(entry.dbId, "playing");
-  return formatNowPlayingLine(entry.track, playbackState.currentStartedAt, now());
+  return formatTrackStartSurface(entry.track, config, playbackState.currentStartedAt, now());
 }
 
 async function autoAdvancePlayback(
@@ -946,6 +1096,31 @@ function formatPlaybackStatus(playbackState: InteractivePlaybackState | undefine
       return `${marker} ${entry.track.position}. ${entry.track.title} - ${entry.track.artist}`;
     })
   ].join("\n");
+}
+
+function formatTrackStartSurface(track: StationTrack, config: PockedioConfig, startedAt: Date | undefined, now: Date): string {
+  return [
+    formatNowPlayingLine(track, startedAt, now),
+    "",
+    `${config.dj.displayName}'s note:`,
+    formatDjTrackNote(track)
+  ].join("\n");
+}
+
+function formatDjTrackNote(track: StationTrack): string {
+  const rationale = track.rationale.trim();
+  if (rationale) {
+    return `I’m playing this because ${normalizeTrackRationale(rationale)}`;
+  }
+  return `I’m playing ${track.title} because it fits the station’s direction and keeps the set moving naturally.`;
+}
+
+function normalizeTrackRationale(rationale: string): string {
+  const cleaned = rationale.replace(/\s+/g, " ").trim();
+  if (/^(it|this|the track|the song)\b/i.test(cleaned)) {
+    return `${cleaned.charAt(0).toLowerCase()}${cleaned.slice(1)}`;
+  }
+  return `${cleaned.charAt(0).toLowerCase()}${cleaned.slice(1)}`;
 }
 
 function formatNowPlayingLine(track: StationTrack, startedAt: Date | undefined, now: Date, includePosition = false): string {

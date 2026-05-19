@@ -707,7 +707,7 @@ Controls:
   show queue
 
 Spoken DJ:
-  make me a short DJ intro
+  after a station suggestion, type dj
 
 Setup:
   pockedio setup
@@ -765,6 +765,7 @@ next                             3.9 Playback Controls
 stop                             3.9 Playback Controls
 what's playing?                  3.10 Queue And Status Questions
 show queue                       3.10 Queue And Status Questions
+dj, when a station is pending    3.5 Pending Station Confirmation
 make me a short DJ intro         3.12 Explicit DJ Audio Request
 yes / play it                    3.5 Pending Station Confirmation, if pending
 no / not now                     3.5 Pending Station Confirmation, if pending
@@ -994,12 +995,13 @@ Use no visible spinner for simple confirm/decline. Use `Thinking...` when interp
 Decision map:
 
 ```text
-Enter / yes / sure / play it -> build and play pending station
-no / not now                 -> clear pending station, stay in conversation
-make it softer               -> update pending station, ask again
-more energetic               -> update pending station, ask again
-what kind of tracks?         -> answer, keep pending station alive, ask again
-actually play jazz for work  -> replace pending station with explicit playback request
+Enter / yes / sure / play it    -> build and play pending station
+dj / dj mode                    -> play a spoken DJ opening, then start station
+no / not now                    -> clear pending station, stay in conversation
+make it softer                  -> update pending station, ask again
+more energetic                  -> update pending station, ask again
+what kind of tracks?            -> answer, keep pending station alive, ask again
+actually play jazz for work     -> replace pending station with explicit playback request
 ```
 
 Confirmation output:
@@ -1028,6 +1030,8 @@ Refinement output:
 Got it. I’ll keep it softer and more spacious.
 
 Play this version?
+
+Press Enter to play it, type "dj" for a spoken DJ version, or tell me how to adjust it.
 ```
 
 Question output:
@@ -1038,6 +1042,19 @@ Question output:
 Mostly warm ambient, slow instrumental pieces, and soft downtempo.
 
 Play this version?
+
+Press Enter to play it, type "dj" for a spoken DJ version, or tell me how to adjust it.
+```
+
+DJ-program choice:
+
+```text
+> dj
+
+Reading your context...
+Building a station...
+Preparing DJ voice...
+Starting playback...
 ```
 
 Rules:
@@ -1049,8 +1066,21 @@ Rules:
 - Keep the pending station alive after refinements and questions.
 - Clear the pending station after confirmation, decline, explicit playback replacement, or session exit.
 - A new explicit playback request replaces the pending station and routes to 3.7.
+- `dj` is only a shortcut when a station is pending. It means spoken opening plus normal station playback.
 
 ## 3.6 Station Building And Playback Start
+
+Flow name:
+  Station building and normal playback start.
+
+User entry:
+  Command:
+    `pockedio`
+  User input:
+    Confirmation from 3.5 or explicit playback from 3.7.
+
+Preconditions:
+  Pockedio has a station request to build and play.
 
 Processing phases:
 
@@ -1060,6 +1090,61 @@ Reading your context...
 Building a station...
 Starting playback...
 ```
+
+Main output:
+
+```text
+[Short station framing.]
+
+Queue:
+1. Track - Artist
+2. Track - Artist
+3. Track - Artist
+4. Track - Artist
+5. Track - Artist
+
+Now playing: 1. Track - Artist
+[>...................] 00:00 elapsed
+
+Mina's note:
+[One concise note about why this track starts here.]
+```
+
+Track-start rule:
+
+```text
+Every time a track starts, show:
+  Now playing
+  elapsed bar
+  selected DJ name plus note
+```
+
+The DJ note should be text in normal station mode and should use the selected DJ name in the label, for example `Mina's note:`. It should sound warm and first-person. It may mention one useful angle:
+
+- why the track fits the user request
+- how it fits the station arc
+- taste/personality signal
+- recent context such as weather, Calendar, or diary summary
+- song background when known
+
+Rules:
+
+- Keep each DJ note concise.
+- Do not speak the DJ note by default.
+- Do not delay playback to generate a long intro.
+- Do not show long track biographies.
+- Use track rationale as the fallback note when richer context is unavailable, but rewrite it as a first-person recommendation.
+- Show DJ notes when the first track starts, on manual `next`, and on auto-advance.
+- Previous, next, pause, resume, and favorite controls belong to 3.9 and 3.11.
+
+DJ program mode:
+
+```text
+dj
+play it as a DJ program
+```
+
+This should be explicit. In the first implementation, DJ program mode plays one spoken opening before the station starts. Later versions may alternate spoken DJ audio with songs like a radio show. Normal station mode should remain text-first and fast.
 
 ## 3.7 Explicit Playback Request
 

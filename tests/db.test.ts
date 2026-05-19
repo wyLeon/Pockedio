@@ -49,6 +49,73 @@ describe("database migrations", () => {
     ]);
   });
 
+  it("backfills DJ audio cache columns into an existing local database", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-db-test-"));
+    tempDirs.push(home);
+    const config = loadConfig({ POCKEDIO_HOME: home });
+    fs.mkdirSync(path.dirname(config.paths.database), { recursive: true });
+
+    const legacy = new Database(config.paths.database);
+    try {
+      legacy.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          trigger_type TEXT NOT NULL CHECK (trigger_type IN ('conversation', 'scheduled_morning', 'scheduled_evening', 'mood_check', 'explicit_dj_audio')),
+          trigger_text TEXT NOT NULL
+        );
+
+        CREATE TABLE dj_audio (
+          id TEXT PRIMARY KEY,
+          session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('morning', 'evening', 'explicit')),
+          persona_id TEXT,
+          text TEXT NOT NULL,
+          audio_path TEXT,
+          status TEXT NOT NULL CHECK (status IN ('generated', 'played', 'failed', 'text_fallback')),
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE scheduled_dj_preparations (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL CHECK (kind IN ('morning', 'evening')),
+          target_play_time TEXT NOT NULL,
+          prepared_at TEXT NOT NULL,
+          persona_id TEXT,
+          text TEXT NOT NULL,
+          audio_path TEXT,
+          status TEXT NOT NULL CHECK (status IN ('generated', 'played', 'failed', 'text_fallback')),
+          context_summary TEXT
+        );
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    runMigrations(config);
+
+    withDatabase(config, (db) => {
+      const djAudioColumns = db.prepare("PRAGMA table_info(dj_audio)").all().map((row) => (row as { name: string }).name);
+      const prepColumns = db.prepare("PRAGMA table_info(scheduled_dj_preparations)").all().map((row) => (row as { name: string }).name);
+      expect(djAudioColumns).toEqual(expect.arrayContaining([
+        "audio_cache_expires_at",
+        "voice_model",
+        "latency_ms",
+        "file_size_bytes"
+      ]));
+      expect(prepColumns).toContain("audio_cache_expires_at");
+
+      const store = new MemoryStore(db);
+      const sessionId = store.createSession("explicit_dj_audio", "make me a DJ intro");
+      expect(() => store.recordDjAudio(sessionId, "explicit", null, "A migrated DJ script.", "/tmp/pockedio.wav", "played", {
+        cacheExpiresAt: "2026-05-26T00:00:00.000Z",
+        latencyMs: 12,
+        fileSizeBytes: 2048
+      })).not.toThrow();
+    });
+  });
+
   it("stores and queries full transcript messages", () => {
     const config = makeConfig();
     withDatabase(config, (db) => {
