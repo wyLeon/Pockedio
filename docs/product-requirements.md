@@ -36,7 +36,7 @@ User-active playback must not trigger DJ voice mode by default. In this mode, Po
 
 ### 3. Pockedio-Active Morning DJ
 
-Every weekday at 8:45 AM, Pockedio should generate a morning DJ audio segment, play the generated audio file directly, and start the day with music.
+Every weekday at the configured Morning DJ ready time, Pockedio should generate a morning DJ audio segment, play the generated audio file directly, and start the day with music.
 
 The morning DJ should use:
 
@@ -51,7 +51,7 @@ The user is the listener, not the reviewer of the generated file. The audio shou
 
 ### 4. Pockedio-Active Evening DJ
 
-Every weekday at 5:00 PM, Pockedio should generate an evening DJ audio segment, play the generated audio file directly, and start a station for transition, decompression, commute, or continued focus.
+Every weekday at the configured Evening DJ ready time, Pockedio should generate an evening DJ audio segment, play the generated audio file directly, and start a station for transition, decompression, commute, or continued focus.
 
 The evening DJ should use:
 
@@ -60,7 +60,7 @@ The evening DJ should use:
 - recent mood check-ins and playback feedback
 - diary summaries only when explicitly allowed
 
-The evening segment is the second scheduled DJ voice moment. Outside the weekday 8:45 AM and 5:00 PM active DJ windows, Pockedio should avoid spoken DJ audio unless the user explicitly asks Pockedio to create a DJ-like audio segment.
+The evening segment is the second scheduled DJ voice moment. Outside enabled scheduled DJ windows, Pockedio should avoid spoken DJ audio unless the user explicitly asks Pockedio to create a DJ-like audio segment.
 
 ### 5. User-Requested DJ Audio
 
@@ -107,7 +107,7 @@ The first implementation should keep persona behavior configurable and simple: a
 Commands are operational entry points, not the main user experience. The v1 command surface should stay small:
 
 - `pockedio`: enter the conversational DJ session
-- `pockedio serve`: run scheduled jobs, including weekday 8:45 AM DJ, weekday 5:00 PM DJ, and automatic mood check prompts
+- `pockedio serve`: run scheduled jobs, including configured weekday Morning DJ, configured weekday Evening DJ, and automatic mood check prompts
 - `pockedio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar, weather location, diary permission, user personality profile, and database
 - `pockedio import-taste <file>`: import exported music app data
 - `pockedio status`: check playback, scheduled jobs, and service health
@@ -183,7 +183,7 @@ The first CLI demo is successful if:
 - Pockedio creates a five-song playlist
 - at least three of the five songs feel aligned with the user's stated intent
 - unavailable songs do not crash the session
-- DJ voice appears only in the weekday 8:45 AM active moment, the weekday 5:00 PM active moment, or when the user explicitly requests DJ-like audio
+- DJ voice appears only in enabled scheduled DJ moments or when the user explicitly requests DJ-like audio
 - DJ audio outputs are played directly and do not require a user review step
 - scheduled DJ jobs use the persona assigned to that day
 - spoken DJ audio and default terminal DJ output use English by default

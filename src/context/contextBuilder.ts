@@ -1,9 +1,11 @@
 import { loadConfig } from "../config/load.js";
 import type { PockedioConfig } from "../config/schema.js";
 import { runMigrations } from "../db/migrations.js";
-import { MemoryStore, type RecentSessionSummary } from "../memory/store.js";
-import { readCalendarContext, type CalendarContext, type CalendarProcessRunner } from "./calendar.js";
-import { readDiaryContext, type DiaryContext } from "./diary.js";
+import type { LlmClient } from "../llm/llmClient.js";
+import { createLlmClient } from "../llm/openaiClient.js";
+import { MemoryStore, type CalendarEventSource, type RecentSessionSummary } from "../memory/store.js";
+import { readCalendarContext, type CalendarContext, type CalendarProcessRunner, type CalendarReadWindow } from "./calendar.js";
+import { readDiaryContextWithLlmSummary, type DiaryContext } from "./diary.js";
 import { readWeatherContext, type WeatherContext } from "./weather.js";
 
 export type PockedioContext = {
@@ -20,7 +22,10 @@ export type PockedioContext = {
 export type ContextBuilderOptions = {
   now?: Date;
   calendarRunner?: CalendarProcessRunner;
+  calendarWindow?: CalendarReadWindow;
+  calendarSource?: CalendarEventSource;
   fetchImpl?: typeof fetch;
+  llm?: LlmClient;
 };
 
 export async function buildContext(
@@ -31,17 +36,30 @@ export async function buildContext(
   runMigrations(config);
   const store = new MemoryStore(config);
   try {
+    const calendarWindow = options.calendarWindow ?? "today";
+    const calendarTimeout = calendarWindow === "today" ? 20_000 : 60_000;
     const [calendar, weather] = await Promise.all([
-      readCalendarContext(config.calendar.enabled, 20_000, options.calendarRunner),
+      readCalendarContext(config.calendar.enabled, calendarTimeout, options.calendarRunner, calendarWindow),
       readWeatherContext(config.weather.location, options.fetchImpl)
     ]);
+    if (calendar.available) {
+      store.upsertCalendarEvents(calendar.events.map((event) => ({
+        calendarName: event.calendarName,
+        title: event.title,
+        startTime: event.startTime,
+        endTime: event.endTime,
+        isAllDay: event.isAllDay,
+        source: options.calendarSource ?? "interactive",
+        readAt: now.toISOString()
+      })));
+    }
 
     return {
       now: now.toISOString(),
       timeOfDay: getTimeOfDay(now),
       calendar,
       weather,
-      diary: readDiaryContext(config),
+      diary: await readDiaryContextWithLlmSummary(config, options.llm ?? createLlmClient(config)),
       tastePath: config.paths.taste,
       personality: config.personality,
       recentSessions: store.getRecentSessionSummaries(5)

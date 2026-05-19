@@ -3,9 +3,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 export type CalendarEvent = {
   calendarName: string;
   title: string;
-  start: string;
-  end: string;
+  startTime: string;
+  endTime: string;
+  isAllDay: boolean;
 };
+
+export type CalendarReadWindow = "today" | "last7Days" | "last7DaysAndToday";
 
 export type CalendarContext =
   | {
@@ -21,21 +24,30 @@ export type CalendarContext =
     };
 
 export type CalendarProcessRunner = (script: string, timeoutMs: number) => Promise<{ stdout: string; stderr: string; timedOut: boolean; code: number | null }>;
+export type CalendarPermissionResult = { available: true } | { available: false; warning: string };
 
-const calendarAppleScript = String.raw`
-set startOfDay to current date
-set time of startOfDay to 0
-set endOfDay to startOfDay + (24 * 60 * 60)
+const calendarPermissionScript = String.raw`
+tell application "Calendar"
+  return count of calendars
+end tell
+`;
+
+function buildCalendarAppleScript(window: CalendarReadWindow): string {
+  const windowBounds = calendarWindowBoundsScript(window);
+  return String.raw`
+set startOfToday to current date
+set time of startOfToday to 0
+${windowBounds}
 set outputLines to {}
 
 tell application "Calendar"
   repeat with cal in calendars
-    set eventList to (events of cal whose start date ≥ startOfDay and start date < endOfDay)
+    set eventList to (events of cal whose start date is greater than or equal to startOfWindow and start date is less than endOfWindow)
     repeat with evt in eventList
       set eventTitle to summary of evt
       set eventStart to start date of evt
       set eventEnd to end date of evt
-      set end of outputLines to ((name of cal) & " | " & eventTitle & " | " & (eventStart as text) & " | " & (eventEnd as text))
+      set end of outputLines to ((name of cal) & " | " & eventTitle & " | " & (eventStart as text) & " | " & (eventEnd as text) & " | false")
     end repeat
   end repeat
 end tell
@@ -43,33 +55,64 @@ end tell
 set AppleScript's text item delimiters to linefeed
 return outputLines as text
 `;
+}
 
 export async function readCalendarContext(
   enabled: boolean,
   timeoutMs = 20_000,
-  runner: CalendarProcessRunner = runOsaScript
+  runner: CalendarProcessRunner = runOsaScript,
+  window: CalendarReadWindow = "today"
 ): Promise<CalendarContext> {
   if (!enabled) {
     return unavailableCalendar("Calendar context is disabled.");
   }
 
   try {
-    const result = await runner(calendarAppleScript, timeoutMs);
+    const result = await runner(buildCalendarAppleScript(window), timeoutMs);
     if (result.timedOut) {
       return unavailableCalendar("Calendar read timed out.");
     }
     if (result.code !== 0) {
-      return unavailableCalendar(result.stderr.trim() || "Calendar read failed.");
+      return unavailableCalendar(normalizeCalendarWarning(result.stderr.trim() || "Calendar read failed."));
     }
     const events = parseCalendarOutput(result.stdout);
     return {
       available: true,
       events,
-      summary: summarizeCalendarEvents(events)
+      summary: summarizeCalendarEvents(events, window)
     };
   } catch (error) {
-    return unavailableCalendar(error instanceof Error ? error.message : String(error));
+    return unavailableCalendar(normalizeCalendarWarning(error instanceof Error ? error.message : String(error)));
   }
+}
+
+export async function requestCalendarPermission(
+  timeoutMs = 20_000,
+  runner: CalendarProcessRunner = runOsaScript
+): Promise<CalendarPermissionResult> {
+  try {
+    const result = await runner(calendarPermissionScript, timeoutMs);
+    if (result.timedOut) {
+      return { available: false, warning: "Calendar permission request timed out." };
+    }
+    if (result.code !== 0) {
+      return { available: false, warning: normalizeCalendarWarning(result.stderr.trim() || "Calendar permission request failed.") };
+    }
+    return { available: true };
+  } catch (error) {
+    return { available: false, warning: normalizeCalendarWarning(error instanceof Error ? error.message : String(error)) };
+  }
+}
+
+export function normalizeCalendarWarning(warning: string): string {
+  const lower = warning.toLowerCase();
+  if (lower.includes("system settings")) {
+    return warning;
+  }
+  if (lower.includes("not authorized") || lower.includes("not permitted") || lower.includes("permission")) {
+    return `${warning} Enable Calendar access for your terminal in System Settings > Privacy & Security > Automation or Calendars, then run setup again.`;
+  }
+  return warning;
 }
 
 export function parseCalendarOutput(output: string): CalendarEvent[] {
@@ -77,18 +120,25 @@ export function parseCalendarOutput(output: string): CalendarEvent[] {
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => {
-      const [calendarName = "", title = "", start = "", end = ""] = line.split(" | ");
-      return { calendarName, title, start, end };
+      const [calendarName = "", title = "", startTime = "", endTime = "", allDay = "false"] = line.split(" | ");
+      return {
+        calendarName,
+        title,
+        startTime,
+        endTime,
+        isAllDay: allDay.toLowerCase() === "true"
+      };
     });
 }
 
-export function summarizeCalendarEvents(events: CalendarEvent[]): string {
+export function summarizeCalendarEvents(events: CalendarEvent[], window: CalendarReadWindow = "today"): string {
+  const label = calendarWindowSummaryLabel(window);
   if (events.length === 0) {
-    return "No calendar events found for today.";
+    return `No calendar events found for ${label}.`;
   }
 
-  return `Today's calendar has ${events.length} event${events.length === 1 ? "" : "s"}: ${events
-    .map((event) => `${event.title} (${event.start})`)
+  return `Calendar has ${events.length} event${events.length === 1 ? "" : "s"} for ${label}: ${events
+    .map((event) => `${event.title} (${event.startTime})`)
     .join("; ")}.`;
 }
 
@@ -129,4 +179,32 @@ function unavailableCalendar(warning: string): CalendarContext {
     summary: "Calendar context unavailable.",
     warning
   };
+}
+
+function calendarWindowBoundsScript(window: CalendarReadWindow): string {
+  if (window === "last7Days") {
+    return String.raw`set startOfWindow to startOfToday
+set startOfWindow to startOfWindow - (7 * 24 * 60 * 60)
+set endOfWindow to current date
+set time of endOfWindow to 0`;
+  }
+
+  if (window === "last7DaysAndToday") {
+    return String.raw`set startOfWindow to startOfToday
+set startOfWindow to startOfWindow - (7 * 24 * 60 * 60)
+set endOfWindow to startOfToday + (24 * 60 * 60)`;
+  }
+
+  return String.raw`set startOfWindow to startOfToday
+set endOfWindow to startOfWindow + (24 * 60 * 60)`;
+}
+
+function calendarWindowSummaryLabel(window: CalendarReadWindow): string {
+  if (window === "last7Days") {
+    return "the last 7 days";
+  }
+  if (window === "last7DaysAndToday") {
+    return "the last 7 days and today";
+  }
+  return "today";
 }

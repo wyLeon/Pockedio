@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import Database from "better-sqlite3";
 import { loadConfig } from "../config/load.js";
 import { getConfigPath, type PockedioEnv } from "../config/paths.js";
@@ -12,6 +13,10 @@ export type StatusReport = {
     path: string;
     present: boolean;
   };
+  runtime: {
+    currentPlayback: string | null;
+    scheduledJobs: string;
+  };
   database: {
     path: string;
     present: boolean;
@@ -23,6 +28,13 @@ export type StatusReport = {
     baseUrl: string;
     reachable: boolean;
     error?: string;
+  };
+  llm: {
+    provider: string;
+    model: string;
+    baseUrl?: string;
+    apiKeyEnv: string;
+    apiKeyPresent: boolean;
   };
   fishAudio: {
     pythonPath: string;
@@ -66,7 +78,18 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
   const database = getDatabaseStatus(config);
   const baseReport = {
     config: configStatus,
+    runtime: {
+      currentPlayback: getCurrentPlayback(config),
+      scheduledJobs: formatScheduledJobs(config)
+    },
     database,
+    llm: {
+      provider: "OpenAI-compatible",
+      model: config.llm.model,
+      baseUrl: config.llm.baseUrl,
+      apiKeyEnv: config.llm.apiKeyEnv,
+      apiKeyPresent: Boolean(env[config.llm.apiKeyEnv])
+    },
     fishAudio,
     calendar: {
       enabled: config.calendar.enabled
@@ -190,18 +213,76 @@ function getLatestSessionTimestamp(config: PockedioConfig): string | null {
   }
 }
 
+function getCurrentPlayback(config: PockedioConfig): string | null {
+  if (!fs.existsSync(config.paths.database)) {
+    return null;
+  }
+
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(config.paths.database, { readonly: true });
+    const row = db.prepare(`
+      SELECT title, artist
+      FROM station_tracks
+      WHERE playback_status = 'playing'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get() as { title: string; artist: string } | undefined;
+    return row ? `${row.title} - ${row.artist}` : null;
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
+function formatScheduledJobs(config: PockedioConfig): string {
+  return [
+    formatScheduledProgramStatus("Morning DJ", config.dj.schedule.morning),
+    formatScheduledProgramStatus("Evening DJ", config.dj.schedule.evening),
+    "mood checks hourly while serve runs"
+  ].join("; ");
+}
+
+function formatScheduledProgramStatus(
+  label: string,
+  schedule: PockedioConfig["dj"]["schedule"]["morning"]
+): string {
+  if (!schedule.enabled) {
+    return `${label} disabled`;
+  }
+  return `${label} weekdays ${schedule.playTime} (prepare ${schedule.prepareMinutesBefore} min before)`;
+}
+
 export function formatStatusReport(report: StatusReport): string {
   const lines = [
     "Pockedio status",
-    `Config: ${report.config.present ? "present" : "missing"} (${report.config.path})`,
-    `Database: ${report.database.migrated ? "migrated" : report.database.present ? "not migrated" : "missing"} (${report.database.path})`,
-    `NetEase API: ${report.netease.reachable ? "reachable" : "unreachable"} (${report.netease.baseUrl})`,
-    `FishAudio: ${report.fishAudio.pathsPresent ? "paths present" : "missing paths"}`,
-    `Calendar: ${report.calendar.enabled ? "enabled" : "disabled"}`,
-    `Weather: ${report.weather.location}`,
-    `taste.md: ${report.taste.present ? "present" : "missing"} (${report.taste.path})`,
-    `Personas: ${report.personas.present ? "present" : "missing"} (${report.personas.path})`,
-    `Latest session: ${report.latestSessionTimestamp ?? "none"}`
+    "",
+    "Runtime",
+    `- Current playback: ${report.runtime.currentPlayback ?? "none"}`,
+    `- Last session: ${report.latestSessionTimestamp ?? "none"}`,
+    `- Scheduled jobs: ${report.runtime.scheduledJobs}`,
+    "",
+    "Integrations",
+    `- NetEase music: ${report.netease.reachable ? "reachable" : "unreachable"} (${report.netease.baseUrl})`,
+    `- LLM: ${report.llm.apiKeyPresent ? "configured" : "missing API key"} (${formatLlmStatus(report.llm)})`,
+    `- FishAudio: ${report.fishAudio.pathsPresent ? "paths present" : "missing paths"}`,
+    `- Calendar: ${report.calendar.enabled ? "enabled" : "disabled"}`,
+    `- Weather: ${report.weather.location}`,
+    "",
+    "Memory",
+    `- Config: ${report.config.present ? "present" : "missing"} (${report.config.path})`,
+    `- Database: ${report.database.migrated ? "migrated" : report.database.present ? "not migrated" : "missing"} (${report.database.path})`,
+    `- taste.md: ${report.taste.present ? "present" : "missing"} (${report.taste.path})`,
+    `- Personas: ${report.personas.present ? "present" : "missing"} (${report.personas.path})`,
+    "",
+    "Data boundary",
+    `- Local home: ${path.dirname(report.config.path)}`,
+    "- Pockedio-owned data: local only",
+    "- Stored locally: config, SQLite memory, taste.md, personas, DJ audio cache",
+    "- External adapters: NetEase music, OpenAI-compatible LLM, Open-Meteo weather",
+    "- Diary summary generation may send the latest diary excerpt to the configured LLM.",
+    "- External adapter data may leave this machine when used; Pockedio does not store it remotely."
   ];
   if (report.database.error) {
     lines.push(`Database detail: ${report.database.error}`);
@@ -214,6 +295,15 @@ export function formatStatusReport(report: StatusReport): string {
     lines.push(...report.fishAudio.missing.map((item) => `- ${item}`));
   }
   return lines.join("\n");
+}
+
+function formatLlmStatus(llm: StatusReport["llm"]): string {
+  return [
+    llm.provider,
+    llm.model,
+    llm.baseUrl,
+    `key env ${llm.apiKeyEnv}`
+  ].filter(Boolean).join(", ");
 }
 
 export async function printStatus(): Promise<void> {

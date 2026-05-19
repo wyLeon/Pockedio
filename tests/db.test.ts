@@ -33,12 +33,15 @@ describe("database migrations", () => {
     `).all().map((row) => (row as { name: string }).name));
 
     expect(tables).toEqual([
+      "calendar_events",
       "context_snapshots",
+      "diary_summaries",
       "dj_audio",
       "feedback",
       "memory_items",
       "messages",
       "mood_checks",
+      "scheduled_dj_preparations",
       "sessions",
       "settings",
       "station_tracks",
@@ -101,6 +104,133 @@ describe("database migrations", () => {
 
       const row = db.prepare("SELECT personality_json as personalityJson FROM context_snapshots WHERE session_id = ?").get(sessionId) as { personalityJson: string };
       expect(JSON.parse(row.personalityJson)).toEqual({ mbti: "INTJ" });
+    });
+  });
+
+  it("stores calendar events in a dedicated table and dedupes repeated reads", () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+
+      const first = store.upsertCalendarEvents([
+        {
+          calendarName: "Work",
+          title: "Planning Review",
+          startTime: "2026-05-17T09:00:00.000Z",
+          endTime: "2026-05-17T10:00:00.000Z",
+          isAllDay: false,
+          source: "setup",
+          readAt: "2026-05-19T00:00:00.000Z"
+        }
+      ]);
+      const second = store.upsertCalendarEvents([
+        {
+          calendarName: "Work",
+          title: "Planning Review",
+          startTime: "2026-05-17T09:00:00.000Z",
+          endTime: "2026-05-17T10:00:00.000Z",
+          isAllDay: false,
+          source: "interactive",
+          readAt: "2026-05-19T01:00:00.000Z"
+        }
+      ]);
+
+      expect(first).toBe(1);
+      expect(second).toBe(1);
+      const rows = db.prepare(`
+        SELECT calendar_name as calendarName, title, start_time as startTime, end_time as endTime,
+          is_all_day as isAllDay, source, read_at as readAt
+        FROM calendar_events
+      `).all();
+      expect(rows).toEqual([
+        {
+          calendarName: "Work",
+          title: "Planning Review",
+          startTime: "2026-05-17T09:00:00.000Z",
+          endTime: "2026-05-17T10:00:00.000Z",
+          isAllDay: 0,
+          source: "interactive",
+          readAt: "2026-05-19T01:00:00.000Z"
+        }
+      ]);
+    });
+  });
+
+  it("stores and reuses diary summaries by source file version", () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+
+      store.upsertDiarySummary({
+        sourceFile: "/Users/leonw/Diary/2026-05-18.md",
+        sourceMtime: "2026-05-18T10:00:00.000Z",
+        summary: "A quiet but demanding workday. Good fit: calm recovery music.",
+        generatedAt: "2026-05-19T00:00:00.000Z"
+      });
+
+      expect(store.getDiarySummary(
+        "/Users/leonw/Diary/2026-05-18.md",
+        "2026-05-18T10:00:00.000Z"
+      )).toEqual({
+        sourceFile: "/Users/leonw/Diary/2026-05-18.md",
+        sourceMtime: "2026-05-18T10:00:00.000Z",
+        summary: "A quiet but demanding workday. Good fit: calm recovery music.",
+        generatedAt: "2026-05-19T00:00:00.000Z"
+      });
+      expect(store.getDiarySummary(
+        "/Users/leonw/Diary/2026-05-18.md",
+        "2026-05-18T11:00:00.000Z"
+      )).toBeNull();
+    });
+  });
+
+  it("stores DJ script as history and audio path as expiring cache metadata", () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+      const sessionId = store.createSession("explicit_dj_audio", "make me a DJ intro");
+
+      store.recordDjAudio(sessionId, "explicit", null, "A durable DJ script.", "/tmp/pockedio.wav", "played", {
+        cacheExpiresAt: "2026-05-26T00:00:00.000Z",
+        voiceModel: "fish-s2-pro",
+        latencyMs: 12,
+        fileSizeBytes: 2048
+      });
+
+      const row = db.prepare(`
+        SELECT text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt,
+          voice_model as voiceModel, latency_ms as latencyMs, file_size_bytes as fileSizeBytes
+        FROM dj_audio
+      `).get();
+      expect(row).toEqual({
+        text: "A durable DJ script.",
+        audioPath: "/tmp/pockedio.wav",
+        audioCacheExpiresAt: "2026-05-26T00:00:00.000Z",
+        voiceModel: "fish-s2-pro",
+        latencyMs: 12,
+        fileSizeBytes: 2048
+      });
+    });
+  });
+
+  it("cleans expired DJ audio cache files without deleting DJ script history", () => {
+    const config = makeConfig();
+    const cachedAudioPath = path.join(path.dirname(config.paths.database), "expired.wav");
+    fs.writeFileSync(cachedAudioPath, "audio");
+
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+      const sessionId = store.createSession("explicit_dj_audio", "make me a DJ intro");
+      store.recordDjAudio(sessionId, "explicit", null, "Keep this script.", cachedAudioPath, "played", {
+        cacheExpiresAt: "2026-05-18T00:00:00.000Z"
+      });
+
+      const result = store.cleanupExpiredDjAudioCache(new Date("2026-05-19T00:00:00.000Z"));
+
+      expect(result).toEqual({ rowsCleared: 1, filesDeleted: 1 });
+      expect(fs.existsSync(cachedAudioPath)).toBe(false);
+      const row = db.prepare("SELECT text, audio_path as audioPath FROM dj_audio").get();
+      expect(row).toEqual({ text: "Keep this script.", audioPath: null });
     });
   });
 

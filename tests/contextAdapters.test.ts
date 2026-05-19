@@ -4,9 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig, saveConfig } from "../src/config/load.js";
 import type { PockedioConfig } from "../src/config/schema.js";
-import { readCalendarContext } from "../src/context/calendar.js";
+import { normalizeCalendarWarning, readCalendarContext, requestCalendarPermission } from "../src/context/calendar.js";
 import { buildContext } from "../src/context/contextBuilder.js";
-import { readDiaryContext } from "../src/context/diary.js";
+import { readDiaryContext, readDiaryContextWithLlmSummary } from "../src/context/diary.js";
 import { readWeatherContext } from "../src/context/weather.js";
 
 const tempDirs: string[] = [];
@@ -49,7 +49,7 @@ describe("calendar adapter", () => {
 
   it("parses successful calendar output into event summaries", async () => {
     const context = await readCalendarContext(true, 1, async () => ({
-      stdout: "Work | Planning Review | Sun May 17 09:00:00 2026 | Sun May 17 10:00:00 2026\n",
+      stdout: "Work | Planning Review | Sun May 17 09:00:00 2026 | Sun May 17 10:00:00 2026 | false\n",
       stderr: "",
       timedOut: false,
       code: 0
@@ -60,11 +60,67 @@ describe("calendar adapter", () => {
       {
         calendarName: "Work",
         title: "Planning Review",
-        start: "Sun May 17 09:00:00 2026",
-        end: "Sun May 17 10:00:00 2026"
+        startTime: "Sun May 17 09:00:00 2026",
+        endTime: "Sun May 17 10:00:00 2026",
+        isAllDay: false
       }
     ]);
     expect(context.summary).toContain("Planning Review");
+  });
+
+  it("builds distinct Apple Calendar windows for today, setup, and scheduled DJ reads", async () => {
+    const scripts: string[] = [];
+    const runner = async (script: string) => {
+      scripts.push(script);
+      return {
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        code: 0
+      };
+    };
+
+    await readCalendarContext(true, 1, runner, "today");
+    await readCalendarContext(true, 1, runner, "last7Days");
+    await readCalendarContext(true, 1, runner, "last7DaysAndToday");
+
+    expect(scripts.join("\n")).not.toContain("≥");
+    expect(scripts[0]).toContain("set endOfWindow to startOfWindow + (24 * 60 * 60)");
+    expect(scripts[1]).toContain("set startOfWindow to startOfWindow - (7 * 24 * 60 * 60)");
+    expect(scripts[1]).toContain("set endOfWindow to current date");
+    expect(scripts[2]).toContain("set startOfWindow to startOfWindow - (7 * 24 * 60 * 60)");
+    expect(scripts[2]).toContain("set endOfWindow to startOfToday + (24 * 60 * 60)");
+  });
+
+  it("normalizes macOS calendar permission errors into actionable setup guidance", async () => {
+    const context = await readCalendarContext(true, 1, async () => ({
+      stdout: "",
+      stderr: "Not authorized to send Apple events to Calendar.",
+      timedOut: false,
+      code: 1
+    }));
+
+    expect(context.available).toBe(false);
+    expect(context.warning).toBe(
+      "Not authorized to send Apple events to Calendar. Enable Calendar access for your terminal in System Settings > Privacy & Security > Automation or Calendars, then run setup again."
+    );
+    expect(normalizeCalendarWarning("Calendar got an error: Not authorized.")).toContain("System Settings");
+  });
+
+  it("can make a small calendar request to trigger macOS permission", async () => {
+    const scripts: string[] = [];
+    const result = await requestCalendarPermission(1, async (script) => {
+      scripts.push(script);
+      return {
+        stdout: "0",
+        stderr: "",
+        timedOut: false,
+        code: 0
+      };
+    });
+
+    expect(result.available).toBe(true);
+    expect(scripts[0]).toContain("count of calendars");
   });
 });
 
@@ -134,6 +190,60 @@ describe("diary adapter", () => {
       summary: "Latest diary file: newer.md, modified 2026-05-17T00:00:00.000Z."
     });
   });
+
+  it("generates and caches an LLM diary summary for the latest diary file", async () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const entry = path.join(diaryDir, "entry.md");
+    fs.writeFileSync(entry, "I felt exhausted after a heavy workday, but the evening was peaceful.");
+    const entryDate = new Date("2026-05-18T10:00:00.000Z");
+    fs.utimesSync(entry, entryDate, entryDate);
+    const config = makeConfig({ diary: { enabled: true, path: diaryDir } });
+    const prompts: string[] = [];
+    const llm = {
+      generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "unused" }),
+      generateText: async (prompt: string) => {
+        prompts.push(prompt);
+        return { ok: true as const, value: "Recent diary summary: tired after work, better suited to warm recovery music." };
+      }
+    };
+
+    const first = await readDiaryContextWithLlmSummary(config, llm);
+    const second = await readDiaryContextWithLlmSummary(config, {
+      ...llm,
+      generateText: async () => {
+        throw new Error("should use cached summary");
+      }
+    });
+
+    expect(first).toEqual({
+      filePath: entry,
+      summary: "Recent diary summary: tired after work, better suited to warm recovery music."
+    });
+    expect(second).toEqual(first);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("Do not quote raw diary text");
+  });
+
+  it("falls back to metadata diary summary when LLM summary is unavailable", async () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const entry = path.join(diaryDir, "entry.md");
+    fs.writeFileSync(entry, "private text");
+    const entryDate = new Date("2026-05-18T10:00:00.000Z");
+    fs.utimesSync(entry, entryDate, entryDate);
+    const config = makeConfig({ diary: { enabled: true, path: diaryDir } });
+
+    const context = await readDiaryContextWithLlmSummary(config, {
+      generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "unused" }),
+      generateText: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "missing key" })
+    });
+
+    expect(context).toEqual({
+      filePath: entry,
+      summary: "Latest diary file: entry.md, modified 2026-05-18T10:00:00.000Z."
+    });
+  });
 });
 
 describe("context builder", () => {
@@ -156,5 +266,28 @@ describe("context builder", () => {
     expect(context.weather).toBeNull();
     expect(context.calendar.available).toBe(true);
     expect(context.tastePath).toBe(config.paths.taste);
+  });
+
+  it("stores today's calendar events during normal context building", async () => {
+    const config = makeConfig({ calendar: { enabled: true } });
+    const context = await buildContext(config, {
+      now: new Date("2026-05-19T09:00:00+08:00"),
+      calendarRunner: async () => ({
+        stdout: "Personal | Gym | Tue May 19 07:30:00 2026 | Tue May 19 08:30:00 2026 | false\n",
+        stderr: "",
+        timedOut: false,
+        code: 0
+      }),
+      fetchImpl: async () => {
+        throw new Error("weather offline");
+      }
+    });
+
+    expect(context.calendar.available).toBe(true);
+    const db = await import("../src/db/database.js");
+    const rows = db.withDatabase(config, (database) => database.prepare(`
+      SELECT title, source FROM calendar_events
+    `).all());
+    expect(rows).toEqual([{ title: "Gym", source: "interactive" }]);
   });
 });

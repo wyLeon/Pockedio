@@ -6,6 +6,7 @@ import { loadConfig } from "../src/config/load.js";
 import { withDatabase } from "../src/db/database.js";
 import { parseTasteCsv } from "../src/taste/csv.js";
 import { importTaste } from "../src/taste/importTaste.js";
+import { extractNetEasePlaylistId, importTasteFromNetEasePlaylist } from "../src/taste/neteasePlaylist.js";
 
 const tempDirs: string[] = [];
 
@@ -62,5 +63,53 @@ describe("taste import", () => {
 
     expect(row.sourceFile).toBe("tests/fixtures/taste-normalized.csv");
     expect(row.trackCount).toBe(3);
+  });
+
+  it("extracts NetEase playlist IDs from pasted links", () => {
+    expect(extractNetEasePlaylistId("https://music.163.com/#/playlist?id=123456")).toBe("123456");
+    expect(extractNetEasePlaylistId("https://music.163.com/playlist?id=987654&userid=1")).toBe("987654");
+    expect(extractNetEasePlaylistId("123456")).toBe("123456");
+    expect(() => extractNetEasePlaylistId("https://music.163.com/#/user/home?id=123456")).toThrow("playlist");
+  });
+
+  it("imports a pasted NetEase playlist into taste.md", async () => {
+    const config = makeConfig();
+    const requestedUrls: string[] = [];
+    const result = await importTasteFromNetEasePlaylist("https://music.163.com/#/playlist?id=123456", config, async (url) => {
+      requestedUrls.push(String(url));
+      return new Response(JSON.stringify({
+        playlist: { name: "Late Night Piano" },
+        songs: [
+          {
+            name: "Merry Christmas Mr. Lawrence",
+            ar: [{ name: "Ryuichi Sakamoto" }],
+            al: { name: "Merry Christmas Mr. Lawrence" }
+          },
+          {
+            name: "An Ending (Ascent)",
+            artists: [{ name: "Brian Eno" }],
+            album: { name: "Apollo" }
+          }
+        ]
+      }), { status: 200 });
+    });
+
+    expect(requestedUrls[0]).toBe("http://127.0.0.1:3000/playlist/track/all?id=123456&limit=1000&offset=0");
+    expect(result.trackCount).toBe(2);
+    expect(result.playlists).toEqual(["Late Night Piano"]);
+    expect(result.artists).toEqual(["Brian Eno", "Ryuichi Sakamoto"]);
+
+    const markdown = fs.readFileSync(result.tastePath, "utf8");
+    expect(markdown).toContain("- Late Night Piano");
+    expect(markdown).toContain("- Ryuichi Sakamoto");
+
+    const row = withDatabase(config, (db) => db.prepare(`
+      SELECT source_file as sourceFile, track_count as trackCount
+      FROM taste_imports
+    `).get()) as { sourceFile: string; trackCount: number };
+    expect(row).toEqual({
+      sourceFile: "netease:playlist:123456",
+      trackCount: 2
+    });
   });
 });

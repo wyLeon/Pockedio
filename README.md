@@ -2,7 +2,7 @@
 
 Pockedio is a CLI-first, LLM-powered personal DJ. The main interface is conversational: run `pockedio`, talk naturally, and let the app decide whether to discuss, generate a five-song station, start playback, store feedback, or create explicit DJ audio.
 
-V1 is local-first and single-user. It uses NetEase Cloud Music for real music search/playback, local FishAudio S2 Pro MLX for spoken DJ audio, Apple Calendar and weather for context, SQLite for durable memory, and editable `taste.md` as a human-readable taste surface.
+V1 is local-first and single-user. Pockedio-owned data stays on this machine under `~/.pockedio/`. It uses NetEase Cloud Music for real music search/playback, local FishAudio S2 Pro MLX for spoken DJ audio, Apple Calendar and weather for context, SQLite for durable memory, and editable `taste.md` as a human-readable taste surface.
 
 ## Command Surface
 
@@ -46,7 +46,7 @@ npm link
 pockedio status
 ```
 
-Start the local NetEase Cloud Music API before real playback checks:
+Start the local NetEase Cloud Music adapter before real playback checks:
 
 ```bash
 spikes/scripts/run_netease_api.sh
@@ -82,6 +82,8 @@ Import normalized taste data:
 npm run dev -- import-taste spikes/fixtures/taste-normalized.csv
 ```
 
+`import-taste` expects a normalized CSV export, not a direct NetEase account login. The importer writes `~/.pockedio/taste.md` and durable taste memories into SQLite. Keep `taste.md` editable; it is the human-readable preference surface Pockedio reads when planning stations.
+
 Check health:
 
 ```bash
@@ -102,7 +104,7 @@ npm run dev -- serve
 
 ## Runtime Dependencies
 
-- NetEaseCloudMusicApi local server on `http://127.0.0.1:3000` for real music search and playable URL retrieval.
+- NetEaseCloudMusicApi local adapter on `http://127.0.0.1:3000` for real music search and playable URL retrieval.
 - FishAudio S2 Pro MLX model and Python entrypoint configured through `pockedio setup`.
 - `afplay` on macOS for local audio playback.
 - Apple Calendar permission when Calendar context is enabled.
@@ -110,15 +112,56 @@ npm run dev -- serve
 - `OPENAI_API_KEY` for full LLM station planning and DJ copy. Without it, Pockedio uses deterministic fallback paths where available.
 - OpenAI-compatible LLMs can be used by setting `llm.baseUrl` and `llm.apiKeyEnv` in `~/.pockedio/config.json`, for example DeepSeek with `baseUrl: "https://api.deepseek.com"` and `apiKeyEnv: "DEEPSEEK_API_KEY"`.
 
+## Data Boundary
+
+Pockedio-owned data is local only:
+
+- Config: `~/.pockedio/config.json`
+- Durable memory: `~/.pockedio/pockedio.sqlite`
+- Human-editable taste: `~/.pockedio/taste.md`
+- DJ personas: `~/.pockedio/personas.json`
+- DJ audio cache: `~/.pockedio/audio/`
+
+External adapters may send request data outside the machine when used:
+
+- NetEase music adapter: search terms and track lookup requests.
+- OpenAI-compatible LLM: prompts used for conversation, station planning, and DJ copy.
+- Open-Meteo weather: configured city/location lookup.
+
+Pockedio does not run a hosted backend, create user accounts, or store user memory remotely.
+
+## Setup Surfaces
+
+`pockedio setup` runs the first setup flow:
+
+- DJ choice: Mina or Nova, with optional local trial audio.
+- Taste import: optional NetEase playlist link.
+- Weather context: optional city lookup for lighter DJ context.
+- Other context: optional Apple Calendar access and diary path; both stay local, and setup checks show spinner-style feedback while reading.
+- Scheduled DJ programs: optional weekday Morning DJ, Evening DJ, both, or neither. Setup asks for the ready time for each enabled program; Pockedio prepares audio before that time.
+
+Advanced preference surfaces are still evolving:
+
+- Calendar context can also be revisited with `pockedio setup calendar`.
+- Diary context is optional. Pockedio generates and stores a local summary for the latest diary file; if the configured LLM is remote, summary generation may send a diary excerpt to that LLM.
+- Developer/runtime config: NetEase music adapter base URL and OpenAI-compatible LLM settings.
+- Personal profile: MBTI.
+- DJ preference: language, style, persona preference, and program length.
+- Scheduled DJ: Morning DJ and Evening DJ can be revisited later; the user-facing setting is ready time, while the preparation offset stays internal by default.
+
+DJ persona schedules are stored in `~/.pockedio/personas.json`. The setup prompt controls the preferred persona direction; the personas file controls the actual weekly persona rotation.
+
 ## V1 Behavior
 
 - Ordinary user-active playback creates a five-song station and attempts real playback through NetEase.
 - Ordinary user-active playback does not synthesize spoken DJ voice.
-- Spoken DJ audio is limited to weekday 8:45 AM Morning DJ, weekday 5:00 PM Evening DJ, and explicit user requests for DJ-like audio.
+- Spoken DJ audio is limited to enabled weekday Morning/Evening DJ programs and explicit user requests for DJ-like audio.
 - FishAudio output is played directly; it is not presented for review first.
+- Normal conversations can read today's Calendar context when enabled; scheduled DJ reads the last 7 days plus today.
 - `pockedio serve` runs scheduled DJ jobs and hourly mood-check prompts.
 - Mood checks are app prompts with options and require confirmation before playback.
 - Apple Calendar, weather, diary summaries, taste, personality, mood, feedback, and playback context are stored locally when used.
+- Diary summaries are cached in SQLite and reused until the source diary file changes.
 - Every user and Pockedio message in a session is stored in SQLite.
 - `taste.md` is editable, but durable memory also lives in the database.
 
@@ -142,13 +185,26 @@ npm run dev -- status
 npm run dev
 ```
 
+If your local shell picks up a different Node.js version, run CLI smoke checks with Node v24 first on `PATH`:
+
+```bash
+PATH=/Users/leonw/.nvm/versions/node/v24.12.0/bin:$PATH npm run dev -- status
+PATH=/Users/leonw/.nvm/versions/node/v24.12.0/bin:$PATH npm run dev -- setup
+PATH=/Users/leonw/.nvm/versions/node/v24.12.0/bin:$PATH npm run dev
+```
+
 In the session:
 
 ```text
-play something for deep work
+I'm exhausted now, want some relaxation.
+yes, play it
+This reminds me of winter evenings in university.
+Why did you pick this track?
+what's playing?
+next
 ```
 
-Then verify a five-song station is generated, playback starts or unavailable tracks are handled gracefully, the transcript is stored, and no spoken DJ audio plays.
+Then verify implicit mood requests answer first and ask before playback, confirmation starts the pending station, playback requests show progress statuses, a five-song station is generated when requested, playback starts or unavailable tracks are handled gracefully, the transcript is stored, and no spoken DJ audio plays unless explicitly requested.
 
 Explicit DJ audio smoke:
 
@@ -168,6 +224,14 @@ Scheduled job smoke:
 npm run dev -- serve --run-once morning
 npm run dev -- serve --run-once evening
 npm run dev -- serve --run-once mood-check
+```
+
+Built CLI smoke:
+
+```bash
+PATH=/Users/leonw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH npm run build
+node dist/cli.js status
+node dist/cli.js
 ```
 
 ## Project Docs

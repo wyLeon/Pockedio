@@ -13,7 +13,7 @@ V1 builds a local, single-user product for Leon. It includes:
 - conversational terminal DJ session
 - real playback through NetEase Cloud Music
 - five-song station generation
-- scheduled weekday DJ moments at 8:45 AM and 5:00 PM
+- configurable weekday Morning DJ and Evening DJ moments
 - explicit user-requested DJ audio through local Fish TTS
 - multiple configurable DJ personas with fixed day schedules
 - English as the default DJ language
@@ -56,7 +56,7 @@ The user should mostly live in the conversation layer. Fixed CLI commands exist 
 The v1 command surface stays small:
 
 - `pockedio`: enter the conversational DJ session.
-- `pockedio serve`: run scheduled jobs, including weekday 8:45 AM DJ, weekday 5:00 PM DJ, and automatic mood check prompts.
+- `pockedio serve`: run scheduled jobs, including configured weekday Morning DJ, configured weekday Evening DJ, and automatic mood check prompts.
 - `pockedio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar permission, weather location, diary permission, user personality profile, and the local database.
 - `pockedio import-taste <file>`: import exported music app data and update taste memory.
 - `pockedio status`: show playback state, scheduled job state, and service health.
@@ -158,8 +158,8 @@ The feedback should update session memory and future taste decisions.
 
 Spoken DJ audio is allowed only in three cases:
 
-1. Weekday 8:45 AM Morning DJ.
-2. Weekday 5:00 PM Evening DJ.
+1. Configured weekday Morning DJ.
+2. Configured weekday Evening DJ.
 3. The user explicitly asks Pockedio to create a DJ-like audio segment.
 
 When DJ audio is generated, it is final output for the user, not an artifact for review. Pockedio should synthesize it through the local Fish TTS model and play the generated audio file directly.
@@ -172,7 +172,7 @@ Scheduled DJ jobs are cron-like behavior managed by `pockedio serve`, not normal
 
 ### Morning DJ
 
-Every weekday at 8:45 AM, Pockedio should:
+Every weekday at the configured Morning DJ ready time, Pockedio should:
 
 1. Read current-date Apple Calendar context.
 2. Read weather for the user's living location.
@@ -186,7 +186,7 @@ Every weekday at 8:45 AM, Pockedio should:
 
 ### Evening DJ
 
-Every weekday at 5:00 PM, Pockedio should:
+Every weekday at the configured Evening DJ ready time, Pockedio should:
 
 1. Read current-date Apple Calendar context again.
 2. Treat afternoon context as different from morning context because the user's status, attitude, and remaining agenda may have changed.
@@ -335,7 +335,7 @@ V1 is acceptable when:
 - At least three of five generated songs feel aligned with the stated intent.
 - User-active playback does not synthesize DJ voice unless explicitly requested.
 - Explicit DJ audio requests generate and directly play Fish TTS audio.
-- Weekday 8:45 AM and 5:00 PM scheduled jobs generate DJ audio, play it directly, and start music.
+- Enabled weekday Morning DJ and Evening DJ scheduled jobs generate DJ audio, play it directly, and start music.
 - Scheduled DJ jobs use the persona assigned to that day.
 - DJ spoken output defaults to English.
 - Mood checks are automatic app prompts with options, not user-typed commands.

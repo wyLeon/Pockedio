@@ -30,6 +30,23 @@ describe("parseIntent", () => {
     })).toBe(false);
   });
 
+  it("maps recommendation-only listening questions without starting playback", async () => {
+    for (const input of [
+      "I'm a little grumpy, what music should I listen to?",
+      "I'm a little exhausted and want some relaxation, what music would suggest to me.",
+      "I'm exhausted now, want some relaxation.",
+      "what should I listen to?",
+      "recommend music for a low mood",
+      "suggest something relaxing for me",
+      "what music should I listen to after a rough day?"
+    ]) {
+      await expect(parseIntent(input)).resolves.toEqual({
+        type: "music_recommendation",
+        confidence: "high"
+      });
+    }
+  });
+
   it("maps conversational listening requests to playback", async () => {
     for (const input of [
       "Want to listen some pure musics to calm me down.",
@@ -69,5 +86,19 @@ describe("parseIntent", () => {
       type: "playback_status",
       confidence: "high"
     });
+  });
+
+  it("classifies identity and capability questions before music routing", async () => {
+    for (const input of [
+      "Who are you?",
+      "Who is talking there?",
+      "What can you do?",
+      "Are you a real DJ?"
+    ]) {
+      await expect(parseIntent(input)).resolves.toEqual({
+        type: "identity_capability",
+        confidence: "high"
+      });
+    }
   });
 });

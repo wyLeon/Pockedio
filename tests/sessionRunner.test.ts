@@ -47,12 +47,33 @@ function fakeLlm(): LlmClient {
   };
 }
 
+function conversationalLlm(response: string, prompts: string[] = []): LlmClient {
+  return {
+    generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
+    generateText: async (prompt) => {
+      prompts.push(prompt);
+      return { ok: true, value: response };
+    }
+  };
+}
+
+function unavailableLlm(): LlmClient {
+  return {
+    generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "missing key" }),
+    generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "missing key" })
+  };
+}
+
 describe("runSessionTurn", () => {
   it("formats a concise startup guide for the interactive CLI", () => {
-    const guide = formatInteractiveStartupGuide();
+    const guide = formatInteractiveStartupGuide("Mina");
 
-    expect(guide).toContain("Pockedio is listening.");
-    expect(guide).toContain("play calm guqin music for meditation");
+    expect(guide).toContain("Mina is listening.");
+    expect(guide).toContain("What are we tuning for?");
+    expect(guide).toContain("I'm exhausted and want something calm.");
+    expect(guide).toContain("play something for deep work");
+    expect(guide).toContain("make me a short DJ intro");
+    expect(guide).toContain("setup");
     expect(guide).toContain("next");
     expect(guide).toContain("stop");
     expect(guide).toContain("what's playing?");
@@ -111,6 +132,50 @@ describe("runSessionTurn", () => {
     expect(rows.messages.some((row) => (row as { role: string }).role === "pockedio")).toBe(true);
     expect(rows.tracks).toHaveLength(5);
     expect(rows.tracks[0]).toMatchObject({ playbackStatus: "playing" });
+  });
+
+  it("prints playback progress statuses while handling a station request", async () => {
+    const config = makeConfig();
+    const statuses: string[] = [];
+
+    await runSessionTurn({
+      input: "play something soft for my exhausted mood",
+      config,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeStatus: (text) => {
+        statuses.push(text);
+        return () => undefined;
+      },
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null })
+    });
+
+    expect(statuses).toEqual([
+      "Thinking...",
+      "Reading your context...",
+      "Building a station...",
+      "Starting playback..."
+    ]);
+  });
+
+  it("uses a warmer LLM-authored station reply for emotional playback requests", async () => {
+    const config = makeConfig();
+    const prompts: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "play something soft for my exhausted mood",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I hear the exhaustion. I’m keeping this soft, slow, and low-friction before the first track comes in.", prompts),
+      buildContext: async () => ({ personality: config.personality }),
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null })
+    });
+
+    expect(result.response).toContain("I hear the exhaustion.");
+    expect(result.response).not.toContain("I built a five-track station");
+    expect(result.response).toContain("Queue:");
+    expect(prompts.some((prompt) => prompt.includes("Write a warm, concise station introduction"))).toBe(true);
   });
 
   it("prints the five-song queue and starts playback without blocking when state is provided", async () => {
@@ -319,6 +384,245 @@ describe("runSessionTurn", () => {
       JOIN station_tracks st ON st.id = f.track_id
     `).all());
     expect(rows).toEqual([{ action: "more_like_this", position: 1 }]);
+  });
+
+  it("keeps music playing while responding to personal listening memories", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => {
+          stopCalls += 1;
+        }
+      })
+    });
+
+    const currentIndex = playbackState.currentIndex;
+    const currentTrackId = playbackState.currentTrackId;
+    const prompts: string[] = [];
+    const result = await runSessionTurn({
+      input: "This kind of piano reminds me of winter evenings in university.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("That memory fits this patient, spacious lane. I will keep the set reflective without turning it into productivity music.", prompts)
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.station).toBeUndefined();
+    expect(result.response).toContain("patient, spacious");
+    expect(stopCalls).toBe(0);
+    expect(playbackState.currentIndex).toBe(currentIndex);
+    expect(playbackState.currentTrackId).toBe(currentTrackId);
+    expect(prompts[0]).toContain("winter evenings in university");
+
+    const rows = withDatabase(config, (db) => db.prepare("SELECT role, content FROM messages ORDER BY created_at DESC LIMIT 2").all());
+    expect(rows).toEqual([
+      { role: "pockedio", content: result.response },
+      { role: "user", content: "This kind of piano reminds me of winter evenings in university." }
+    ]);
+  });
+
+  it("uses current track and queue context for music conversation during playback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const prompts: string[] = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "Why did you pick this track?",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I opened here because the current track keeps the set focused without crowding the room.", prompts)
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.response).toContain("current track");
+    expect(prompts[0]).toContain("Current track:");
+    expect(prompts[0]).toContain("Queue:");
+  });
+
+  it("answers personal taste insights even when no station is playing", async () => {
+    const config = makeConfig();
+
+    const result = await runSessionTurn({
+      input: "I realized I like spacious instrumental music.",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("That is a useful taste signal. I will treat spacious instrumental music as a patient, low-pressure lane for future stations.")
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.response).toContain("taste signal");
+    expect(result.response).not.toContain("Tell me what you want to hear");
+  });
+
+  it("answers identity and capability questions without treating them as taste", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+
+    const result = await runSessionTurn({
+      input: "Tell me what you can do, who are you.",
+      config,
+      provider: new FakeProvider(),
+      llm: unavailableLlm()
+    });
+
+    expect(result.intent.type).toBe("identity_capability");
+    expect(result.response).toContain("Mina");
+    expect(result.response).toContain("play");
+    expect(result.response).not.toContain("listening taste");
+    expect(result.response).not.toContain("What are we tuning for?");
+  });
+
+  it("recommends music for mood questions without starting playback", async () => {
+    const config = makeConfig();
+    const playedUrls: string[] = [];
+    const prompts: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "I'm a little grumpy, what music should I listen to?",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Try low-lit instrumental music with warm bass and no bright vocals. Want me to build that station?", prompts),
+      buildContext: async () => ({ personality: config.personality }),
+      playUrl: async (url) => {
+        playedUrls.push(url);
+        return { ok: true, target: url, exitCode: 0, signal: null };
+      }
+    });
+
+    expect(result.intent.type).toBe("music_recommendation");
+    expect(result.station).toBeUndefined();
+    expect(playedUrls).toEqual([]);
+    expect(result.response).toContain("Want me to build");
+    expect(prompts[0]).toContain("Recommend one clear listening direction");
+  });
+
+  it("replies first and stores a pending station for implicit relaxation requests", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const prompts: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Mina is here. I hear the exhaustion. I would build a soft relaxation station with ambient piano and warm instrumental tracks. Want me to play that station?", prompts),
+      buildContext: async () => ({
+        personality: config.personality,
+        weather: { summary: "Guangzhou, 95% humidity" }
+      }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("music_recommendation");
+    expect(result.station).toBeUndefined();
+    expect(started).toEqual([]);
+    expect(playbackState.pendingStationRequest).toBe("I'm exhausted now, want some relaxation.");
+    expect(result.response).toContain("Want me to play");
+    expect(prompts[0]).toContain("Weather summary: Guangzhou, 95% humidity");
+  });
+
+  it("plays the pending station after confirmation", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "yes, play it",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("pending_station_confirmation");
+    expect(result.station?.request).toBe("I'm exhausted now, want some relaxation.");
+    expect(started).toHaveLength(1);
+    expect(playbackState.pendingStationRequest).toBeUndefined();
+    expect(result.response).toContain("Queue:");
+    expect(result.response).toContain("Now playing:");
+  });
+
+  it("keeps explicit mood playback requests as playback", async () => {
+    const config = makeConfig();
+    const playedUrls: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "play something for my grumpy mood",
+      config,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      playUrl: async (url) => {
+        playedUrls.push(url);
+        return { ok: true, target: url, exitCode: 0, signal: null };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.station?.tracks).toHaveLength(5);
+    expect(playedUrls).toHaveLength(1);
   });
 
   it("generates and records FishAudio only for explicit DJ audio", async () => {

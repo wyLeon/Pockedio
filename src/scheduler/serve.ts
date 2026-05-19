@@ -16,11 +16,24 @@ import { NetEaseProvider } from "../providers/netease.js";
 import { generateStation } from "../station/stationGenerator.js";
 import type { GeneratedStation } from "../station/stationTypes.js";
 import { synthesizeFishAudio as synthesizeFishAudioDefault, type FishAudioResult } from "../tts/fishAudio.js";
-import { isEveningDjTime, isMorningDjTime, scheduledJobKey, shouldPromptMoodCheck } from "./jobs.js";
+import {
+  formatLocalDateTime,
+  getScheduledDjTargetPlayTime,
+  isEveningDjPrepareTime,
+  isEveningDjTime,
+  isMorningDjPrepareTime,
+  isMorningDjTime,
+  scheduledJobKey,
+  scheduledPreparationJobKey,
+  shouldPromptMoodCheck
+} from "./jobs.js";
 
 export type ScheduledDjKind = "morning" | "evening";
 export type ScheduledDjResult =
   | { ran: true; sessionId: string; text: string; station: GeneratedStation; djAudio: FishAudioResult }
+  | { ran: false; reason: string };
+export type ScheduledDjPreparationResult =
+  | { ran: true; text: string; audioPath: string | null; targetPlayTime: string }
   | { ran: false; reason: string };
 
 export type ScheduledDjInput = {
@@ -33,6 +46,16 @@ export type ScheduledDjInput = {
   synthesizeFishAudio?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
   playFile?: (filePath: string) => Promise<PlayerResult>;
   playUrl?: (url: string) => Promise<PlayerResult>;
+  writeOutput?: (text: string) => void;
+};
+
+export type ScheduledDjPreparationInput = {
+  kind: ScheduledDjKind;
+  now?: Date;
+  config?: PockedioConfig;
+  context?: PockedioContext;
+  llm?: LlmClient;
+  synthesizeFishAudio?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
   writeOutput?: (text: string) => void;
 };
 
@@ -62,7 +85,11 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
   const config = input.config ?? loadConfig();
   const now = input.now ?? new Date();
   runMigrations(config);
-  const context = input.context ?? await buildContext(config, { now });
+  const context = input.context ?? await buildContext(config, {
+    now,
+    calendarWindow: "last7DaysAndToday",
+    calendarSource: "scheduled"
+  });
   if (calendarLooksBusy(context.calendar.summary)) {
     return { ran: false, reason: "Calendar indicates an active meeting." };
   }
@@ -89,23 +116,39 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
       diarySummary: context.diary?.summary,
       personality: context.personality
     });
-    const text = await generateScheduledDjText({ kind: input.kind, llm, context, personaName: persona.persona.name });
+    const targetPlayTime = formatLocalDateTime(getScheduledDjTargetPlayTime(input.kind, now, config));
+    const prepared = getPreparedScheduledDj(config, input.kind, targetPlayTime, now);
+    const text = prepared?.text ?? await generateScheduledDjText({ kind: input.kind, llm, context, personaName: persona.persona.name });
     store.addMessage(sessionId, "pockedio", text);
     writeOutput(text);
 
-    const djAudio = shouldUseSpokenDjAudio({
-      triggerType,
-      userExplicitlyRequestedDjAudio: false,
-      now
-    })
-      ? await synthesize(config, text)
-      : { ok: false as const, latencyMs: 0, error: "Voice rules disabled scheduled audio." };
+    const djAudio = prepared?.audioPath
+      ? { ok: true as const, audioPath: prepared.audioPath, latencyMs: 0 }
+      : shouldUseSpokenDjAudio({
+          triggerType,
+          userExplicitlyRequestedDjAudio: false,
+          now
+        })
+        ? await synthesize(config, text)
+        : { ok: false as const, latencyMs: 0, error: "Voice rules disabled scheduled audio." };
 
     if (djAudio.ok) {
       const playback = await playFile(djAudio.audioPath);
-      store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath, playback.ok ? "played" : "failed");
+      store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath, playback.ok ? "played" : "failed", {
+        cacheExpiresAt: prepared?.audioCacheExpiresAt ?? getScheduledAudioCacheExpiresAt(input.kind, now, config),
+        latencyMs: djAudio.latencyMs
+      });
+      if (prepared) {
+        updatePreparedScheduledDjStatus(config, prepared.id, playback.ok ? "played" : "failed");
+      }
     } else {
-      store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath ?? null, "text_fallback");
+      store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath ?? null, "text_fallback", {
+        cacheExpiresAt: prepared?.audioCacheExpiresAt ?? getScheduledAudioCacheExpiresAt(input.kind, now, config),
+        latencyMs: djAudio.latencyMs
+      });
+      if (prepared) {
+        updatePreparedScheduledDjStatus(config, prepared.id, "text_fallback");
+      }
     }
 
     const station = await generateStation({
@@ -126,6 +169,58 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
     store.endSession(sessionId);
     store.close();
   }
+}
+
+export async function prepareScheduledDjJob(input: ScheduledDjPreparationInput): Promise<ScheduledDjPreparationResult> {
+  const config = input.config ?? loadConfig();
+  const now = input.now ?? new Date();
+  runMigrations(config);
+  const context = input.context ?? await buildContext(config, {
+    now,
+    calendarWindow: "last7DaysAndToday",
+    calendarSource: "scheduled"
+  });
+  if (calendarLooksBusy(context.calendar.summary)) {
+    return { ran: false, reason: "Calendar indicates an active meeting." };
+  }
+
+  const persona = getPersonaForDate(config, now);
+  if (!persona) {
+    return { ran: false, reason: "No weekday persona is scheduled." };
+  }
+
+  const llm = input.llm ?? createLlmClient(config);
+  const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
+  const writeOutput = input.writeOutput ?? (() => undefined);
+  const targetPlayTime = formatLocalDateTime(getScheduledDjTargetPlayTime(input.kind, now, config));
+
+  const text = await generateScheduledDjText({ kind: input.kind, llm, context, personaName: persona.persona.name });
+  writeOutput(text);
+  const djAudio = shouldUseSpokenDjAudio({
+    triggerType: input.kind === "morning" ? "scheduled_morning" : "scheduled_evening",
+    userExplicitlyRequestedDjAudio: false,
+    now: getScheduledDjTargetPlayTime(input.kind, now, config)
+  })
+    ? await synthesize(config, text)
+    : { ok: false as const, latencyMs: 0, error: "Voice rules disabled scheduled audio." };
+
+  savePreparedScheduledDj(config, {
+    kind: input.kind,
+    targetPlayTime,
+    audioCacheExpiresAt: getScheduledAudioCacheExpiresAt(input.kind, now, config),
+    personaId: persona.id,
+    text,
+    audioPath: djAudio.ok ? djAudio.audioPath : null,
+    status: djAudio.ok ? "generated" : "text_fallback",
+    contextSummary: context.calendar.summary
+  });
+
+  return {
+    ran: true,
+    text,
+    audioPath: djAudio.ok ? djAudio.audioPath : null,
+    targetPlayTime
+  };
 }
 
 export async function runMoodCheckOnce(input: MoodCheckInput = {}): Promise<MoodCheckResult> {
@@ -176,10 +271,16 @@ export async function runServe(options: { runOnce?: string; config?: PockedioCon
   let lastMoodPromptAt: Date | null = null;
   while (true) {
     const now = new Date();
-    if (isMorningDjTime(now)) {
+    if (isMorningDjPrepareTime(now, config)) {
+      await prepareJobOnce("morning", now, completed, config);
+    }
+    if (isEveningDjPrepareTime(now, config)) {
+      await prepareJobOnce("evening", now, completed, config);
+    }
+    if (isMorningDjTime(now, config)) {
       await runJobOnce("morning", now, completed, config);
     }
-    if (isEveningDjTime(now)) {
+    if (isEveningDjTime(now, config)) {
       await runJobOnce("evening", now, completed, config);
     }
     if (shouldPromptMoodCheck(lastMoodPromptAt, now)) {
@@ -197,6 +298,18 @@ async function runJobOnce(kind: ScheduledDjKind, now: Date, completed: Set<strin
   }
   completed.add(key);
   const result = await runScheduledDjJob({ kind, now, config, writeOutput: (text) => console.log(text) });
+  if (!result.ran) {
+    console.log(result.reason);
+  }
+}
+
+async function prepareJobOnce(kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig): Promise<void> {
+  const key = scheduledPreparationJobKey(kind, now);
+  if (completed.has(key)) {
+    return;
+  }
+  completed.add(key);
+  const result = await prepareScheduledDjJob({ kind, now, config, writeOutput: (text) => console.log(text) });
   if (!result.ran) {
     console.log(result.reason);
   }
@@ -260,6 +373,89 @@ function recordMoodCheck(config: PockedioConfig, mood: string, note?: string): v
       INSERT INTO mood_checks (id, selected_mood, note, created_at)
       VALUES (?, ?, ?, ?)
     `).run(randomUUID(), mood, note ?? null, new Date().toISOString());
+  } finally {
+    database.close();
+  }
+}
+
+type PreparedScheduledDj = {
+  id: string;
+  text: string;
+  audioPath: string | null;
+  audioCacheExpiresAt: string | null;
+};
+
+type PreparedScheduledDjInput = {
+  kind: ScheduledDjKind;
+  targetPlayTime: string;
+  audioCacheExpiresAt: string;
+  personaId: string;
+  text: string;
+  audioPath: string | null;
+  status: "generated" | "played" | "failed" | "text_fallback";
+  contextSummary: string;
+};
+
+function savePreparedScheduledDj(config: PockedioConfig, input: PreparedScheduledDjInput): void {
+  const database = new Database(config.paths.database);
+  try {
+    database.prepare(`
+      INSERT INTO scheduled_dj_preparations (
+        id, kind, target_play_time, prepared_at, persona_id, text, audio_path, audio_cache_expires_at, status, context_summary
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      randomUUID(),
+      input.kind,
+      input.targetPlayTime,
+      new Date().toISOString(),
+      input.personaId,
+      input.text,
+      input.audioPath,
+      input.audioCacheExpiresAt,
+      input.status,
+      input.contextSummary
+    );
+  } finally {
+    database.close();
+  }
+}
+
+function getPreparedScheduledDj(
+  config: PockedioConfig,
+  kind: ScheduledDjKind,
+  targetPlayTime: string,
+  now: Date
+): PreparedScheduledDj | null {
+  const database = new Database(config.paths.database, { readonly: true });
+  try {
+    const row = database.prepare(`
+      SELECT id, text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt
+      FROM scheduled_dj_preparations
+      WHERE kind = ? AND target_play_time = ? AND status = 'generated' AND audio_path IS NOT NULL
+        AND (audio_cache_expires_at IS NULL OR audio_cache_expires_at > ?)
+      ORDER BY prepared_at DESC
+      LIMIT 1
+    `).get(kind, targetPlayTime, formatLocalDateTime(now)) as PreparedScheduledDj | undefined;
+    return row ?? null;
+  } finally {
+    database.close();
+  }
+}
+
+function getScheduledAudioCacheExpiresAt(kind: ScheduledDjKind, date: Date, config: PockedioConfig): string {
+  const target = getScheduledDjTargetPlayTime(kind, date, config);
+  return formatLocalDateTime(new Date(target.getTime() + 24 * 60 * 60 * 1000));
+}
+
+function updatePreparedScheduledDjStatus(
+  config: PockedioConfig,
+  id: string,
+  status: PreparedScheduledDjInput["status"]
+): void {
+  const database = new Database(config.paths.database);
+  try {
+    database.prepare("UPDATE scheduled_dj_preparations SET status = ? WHERE id = ?").run(status, id);
   } finally {
     database.close();
   }

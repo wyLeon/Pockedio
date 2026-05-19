@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import { openDatabase } from "../db/database.js";
 import type { PockedioConfig } from "../config/schema.js";
 
@@ -10,6 +11,14 @@ export type FeedbackAction = "like" | "skip" | "ban" | "more_like_this" | "chang
 export type MemoryKind = "agenda" | "diary" | "taste" | "feedback" | "summary" | "personality";
 export type DjAudioKind = "morning" | "evening" | "explicit";
 export type DjAudioStatus = "generated" | "played" | "failed" | "text_fallback";
+export type CalendarEventSource = "setup" | "interactive" | "scheduled";
+
+export type DjAudioCacheMetadata = {
+  cacheExpiresAt?: string | null;
+  voiceModel?: string | null;
+  latencyMs?: number | null;
+  fileSizeBytes?: number | null;
+};
 
 export type StationTrackInput = {
   position: number;
@@ -29,6 +38,25 @@ export type ContextSnapshotInput = {
   diarySummary?: string | null;
   personality?: unknown;
 };
+
+export type CalendarEventInput = {
+  calendarName: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  isAllDay: boolean;
+  source: CalendarEventSource;
+  readAt?: string;
+};
+
+export type DiarySummaryInput = {
+  sourceFile: string;
+  sourceMtime: string;
+  summary: string;
+  generatedAt?: string;
+};
+
+export type DiarySummaryRecord = Required<DiarySummaryInput>;
 
 export type RecentSessionSummary = {
   id: string;
@@ -148,19 +176,104 @@ export class MemoryStore {
     return id;
   }
 
+  upsertCalendarEvents(events: CalendarEventInput[]): number {
+    if (events.length === 0) {
+      return 0;
+    }
+
+    const statement = this.db.prepare(`
+      INSERT INTO calendar_events (
+        id, calendar_name, title, start_time, end_time, is_all_day, source, read_at, dedupe_key
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(dedupe_key) DO UPDATE SET
+        calendar_name = excluded.calendar_name,
+        title = excluded.title,
+        start_time = excluded.start_time,
+        end_time = excluded.end_time,
+        is_all_day = excluded.is_all_day,
+        source = excluded.source,
+        read_at = excluded.read_at
+    `);
+
+    const write = this.db.transaction((rows: CalendarEventInput[]) => {
+      let written = 0;
+      for (const event of rows) {
+        statement.run(
+          randomUUID(),
+          event.calendarName,
+          event.title,
+          event.startTime,
+          event.endTime,
+          event.isAllDay ? 1 : 0,
+          event.source,
+          event.readAt ?? nowIso(),
+          calendarDedupeKey(event)
+        );
+        written += 1;
+      }
+      return written;
+    });
+
+    return write(events);
+  }
+
+  upsertDiarySummary(input: DiarySummaryInput): void {
+    this.db.prepare(`
+      INSERT INTO diary_summaries (id, source_file, source_mtime, summary, generated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(source_file, source_mtime) DO UPDATE SET
+        summary = excluded.summary,
+        generated_at = excluded.generated_at
+    `).run(
+      randomUUID(),
+      input.sourceFile,
+      input.sourceMtime,
+      input.summary,
+      input.generatedAt ?? nowIso()
+    );
+  }
+
+  getDiarySummary(sourceFile: string, sourceMtime: string): DiarySummaryRecord | null {
+    const row = this.db.prepare(`
+      SELECT source_file as sourceFile, source_mtime as sourceMtime, summary, generated_at as generatedAt
+      FROM diary_summaries
+      WHERE source_file = ? AND source_mtime = ?
+      LIMIT 1
+    `).get(sourceFile, sourceMtime) as DiarySummaryRecord | undefined;
+    return row ?? null;
+  }
+
   recordDjAudio(
     sessionId: string | null,
     kind: DjAudioKind,
     personaId: string | null,
     text: string,
     audioPath: string | null,
-    status: DjAudioStatus
+    status: DjAudioStatus,
+    cache?: DjAudioCacheMetadata
   ): string {
     const id = randomUUID();
     this.db.prepare(`
-      INSERT INTO dj_audio (id, session_id, kind, persona_id, text, audio_path, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, sessionId, kind, personaId, text, audioPath, status, nowIso());
+      INSERT INTO dj_audio (
+        id, session_id, kind, persona_id, text, audio_path, audio_cache_expires_at,
+        voice_model, latency_ms, file_size_bytes, status, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      sessionId,
+      kind,
+      personaId,
+      text,
+      audioPath,
+      cache?.cacheExpiresAt ?? null,
+      cache?.voiceModel ?? null,
+      cache?.latencyMs ?? null,
+      cache?.fileSizeBytes ?? null,
+      status,
+      nowIso()
+    );
     return id;
   }
 
@@ -172,12 +285,50 @@ export class MemoryStore {
       LIMIT ?
     `).all(limit) as RecentSessionSummary[];
   }
+
+  cleanupExpiredDjAudioCache(now: Date = new Date()): { rowsCleared: number; filesDeleted: number } {
+    const rows = this.db.prepare(`
+      SELECT id, audio_path as audioPath
+      FROM dj_audio
+      WHERE audio_path IS NOT NULL
+        AND audio_cache_expires_at IS NOT NULL
+        AND audio_cache_expires_at <= ?
+    `).all(now.toISOString()) as Array<{ id: string; audioPath: string }>;
+
+    let filesDeleted = 0;
+    for (const row of rows) {
+      try {
+        fs.unlinkSync(row.audioPath);
+        filesDeleted += 1;
+      } catch (error) {
+        if (!isMissingFileError(error)) {
+          throw error;
+        }
+      }
+      this.db.prepare("UPDATE dj_audio SET audio_path = NULL WHERE id = ?").run(row.id);
+    }
+
+    return { rowsCleared: rows.length, filesDeleted };
+  }
 }
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
+function calendarDedupeKey(event: CalendarEventInput): string {
+  return [
+    event.calendarName.trim(),
+    event.title.trim(),
+    event.startTime.trim(),
+    event.endTime.trim()
+  ].join(" | ");
+}
+
 function isDatabase(value: PockedioConfig | Database.Database): value is Database.Database {
   return typeof (value as Database.Database).prepare === "function";
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

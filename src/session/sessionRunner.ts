@@ -1,5 +1,6 @@
 import readline from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
+import fs from "node:fs";
 import { loadConfig } from "../config/load.js";
 import type { PockedioConfig } from "../config/schema.js";
 import { buildContext, type PockedioContext } from "../context/contextBuilder.js";
@@ -27,9 +28,11 @@ import { NetEaseProvider } from "../providers/netease.js";
 import { generateStation } from "../station/stationGenerator.js";
 import type { GeneratedStation, StationTrack } from "../station/stationTypes.js";
 import { synthesizeFishAudio as synthesizeFishAudioDefault, type FishAudioResult } from "../tts/fishAudio.js";
-import { parseIntent, type SessionIntent } from "./intent.js";
+import { parseDeterministicIntent, parseIntent, type SessionIntent } from "./intent.js";
 
 type OutputWriter = (text: string) => void;
+type StatusDone = () => void;
+type StatusWriter = (text: string) => StatusDone;
 type StartUrlPlayback = (url: string) => Promise<PlaybackHandle>;
 type NowProvider = () => Date;
 
@@ -41,6 +44,7 @@ type StoredPlaybackTrack = {
 export type InteractivePlaybackState = {
   station?: GeneratedStation;
   storedTracks?: StoredPlaybackTrack[];
+  pendingStationRequest?: string;
   currentIndex?: number;
   currentTrackId?: string;
   currentStartedAt?: Date;
@@ -58,6 +62,7 @@ export type SessionTurnInput = {
   llm?: LlmClient;
   buildContext?: (config: PockedioConfig) => Promise<Partial<PockedioContext>>;
   writeOutput?: OutputWriter;
+  writeStatus?: StatusWriter;
   playUrl?: (url: string) => Promise<PlayerResult>;
   startUrlPlayback?: StartUrlPlayback;
   playbackState?: InteractivePlaybackState;
@@ -82,11 +87,26 @@ export function createDefaultInteractiveStartUrlPlayback(
   return (url) => startAudioUrlPlayback(url, undefined, starter, fetchImpl);
 }
 
-export function formatInteractiveStartupGuide(): string {
+export function formatInteractiveStartupGuide(displayName = "Pockedio"): string {
   return [
-    "Pockedio is listening.",
-    "Try: play calm guqin music for meditation",
-    "While playing: next, stop, what's playing?, show queue, more like this"
+    `${displayName} is listening.`,
+    "What are we tuning for?",
+    "",
+    "Try:",
+    "  I'm exhausted and want something calm.",
+    "  play something for deep work",
+    "  what's playing?",
+    "",
+    "Controls:",
+    "  next",
+    "  stop",
+    "  show queue",
+    "",
+    "Spoken DJ:",
+    "  make me a short DJ intro",
+    "",
+    "Setup:",
+    "  pockedio setup"
   ].join("\n");
 }
 
@@ -102,6 +122,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   const startUrlPlayback = input.startUrlPlayback ?? createDefaultInteractiveStartUrlPlayback();
   const playFile = input.playFile ?? ((filePath) => playAudioFile(filePath, 60_000));
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
+  const writeStatus = input.writeStatus ?? (() => () => undefined);
   const now = input.now ?? (() => new Date());
   const userText = input.input.trim();
   const sessionId = input.sessionId ?? store.createSession("conversation", userText);
@@ -115,7 +136,21 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
   try {
     store.addMessage(sessionId, "user", userText);
-    const intent = await parseIntent(userText, llm);
+    const intent = input.playbackState?.pendingStationRequest && isPendingStationConfirmation(userText)
+      ? { type: "pending_station_confirmation" as const, confidence: "high" as const }
+      : input.playbackState?.pendingStationRequest && isPendingStationDecline(userText)
+        ? { type: "pending_station_decline" as const, confidence: "high" as const }
+        : await resolveIntent(userText, llm, writeStatus);
+
+    if (intent.type === "pending_station_decline") {
+      if (input.playbackState) {
+        input.playbackState.pendingStationRequest = undefined;
+      }
+      const response = "No problem. We can keep talking, or you can point me toward a different mood.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent: { type: "conversation", confidence: "high" }, response, shouldExit: false };
+    }
 
     if (intent.type === "stop") {
       if (input.playbackState?.activePlayback) {
@@ -149,56 +184,87 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response, shouldExit: false };
     }
 
+    if (intent.type === "identity_capability") {
+      const response = await withStatus(writeStatus, "Thinking...", () => generateIdentityCapabilityResponse({ config, llm, userText }));
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
     if (intent.type === "explicit_dj_audio_request") {
-      const response = await generateDjAudioResponse({ config, sessionId, store, llm, userText, synthesize, playFile });
+      const response = await withStatus(writeStatus, "Preparing DJ voice...", () => generateDjAudioResponse({ config, sessionId, store, llm, userText, synthesize, playFile }));
       store.addMessage(sessionId, "pockedio", response.text);
       writeOutput(response.text);
       return { sessionId, intent, response: response.text, shouldExit: false, djAudio: response.djAudio };
     }
 
-    if (intent.type === "playback_request" || intent.type === "direct_playback_request") {
-      const context = await (input.buildContext ?? buildContext)(config);
+    if (intent.type === "music_recommendation") {
+      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config));
       store.addContextSnapshot(sessionId, {
         calendarSummary: context.calendar?.summary,
         weather: context.weather,
         diarySummary: context.diary?.summary,
         personality: context.personality ?? config.personality
       });
-      const station = await generateStation({ request: userText, config, context, provider, llm });
-      const storedTracks = storeStation(sessionId, store, station, input.playbackState === undefined);
-      const firstPlayable = station.tracks.find((track) => track.playable.available);
-      let playbackFailure: string | undefined;
-      let nowPlaying = "";
+      const response = await generateMusicRecommendationResponse({ config, llm, userText, playbackState: input.playbackState, context });
       if (input.playbackState) {
-        input.playbackState.station = station;
-        input.playbackState.storedTracks = storedTracks;
-        nowPlaying = await startTrackAt(input.playbackState, config, store, 0, startUrlPlayback, now);
-      } else if (firstPlayable?.playable.available) {
-        const playback = await playUrl(firstPlayable.playable.playableUrl);
-        if (!playback.ok) {
-          playbackFailure = playback.error ?? "Playback failed.";
-        }
+        input.playbackState.pendingStationRequest = userText;
       }
-
-      const response = [
-        intent.type === "direct_playback_request" ? formatDirectPlaybackConfirmation(station) : formatStationIntro(station),
-        formatQueue(station),
-        nowPlaying,
-        formatUnavailableTrackFallbackForResponse(station.tracks),
-        playbackFailure ? `Playback detail: ${playbackFailure}` : ""
-      ].filter(Boolean).join("\n");
-
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
-
-      if (shouldUseSpokenDjAudio({ triggerType: "normal_playback", userExplicitlyRequestedDjAudio: false })) {
-        await synthesize(config, response);
-      }
-
-      return { sessionId, intent, response, shouldExit: false, station };
+      return { sessionId, intent, response, shouldExit: false };
     }
 
-    const response = "Tell me what you want to hear, or ask for a station.";
+    if (intent.type === "pending_station_confirmation" && input.playbackState?.pendingStationRequest) {
+      const pendingRequest = input.playbackState.pendingStationRequest;
+      input.playbackState.pendingStationRequest = undefined;
+      const playback = await handlePlaybackRequest({
+        config,
+        sessionId,
+        store,
+        provider,
+        llm,
+        requestText: pendingRequest,
+        intentType: "playback_request",
+        buildContext: input.buildContext,
+        writeStatus,
+        playUrl,
+        startUrlPlayback,
+        playbackState: input.playbackState,
+        now
+      });
+      store.addMessage(sessionId, "pockedio", playback.response);
+      writeOutput(playback.response);
+      return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
+    }
+
+    if (intent.type === "playback_request" || intent.type === "direct_playback_request") {
+      const playback = await handlePlaybackRequest({
+        config,
+        sessionId,
+        store,
+        provider,
+        llm,
+        requestText: userText,
+        intentType: intent.type,
+        buildContext: input.buildContext,
+        writeStatus,
+        playUrl,
+        startUrlPlayback,
+        playbackState: input.playbackState,
+        now
+      });
+      store.addMessage(sessionId, "pockedio", playback.response);
+      writeOutput(playback.response);
+
+      if (shouldUseSpokenDjAudio({ triggerType: "normal_playback", userExplicitlyRequestedDjAudio: false })) {
+        await synthesize(config, playback.response);
+      }
+
+      return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
+    }
+
+    const response = await generateConversationResponse({ config, llm, userText, playbackState: input.playbackState });
     store.addMessage(sessionId, "pockedio", response);
     writeOutput(response);
     return { sessionId, intent, response, shouldExit: false };
@@ -208,6 +274,306 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
     store.close();
   }
+}
+
+async function resolveIntent(userText: string, llm: LlmClient, writeStatus: StatusWriter): Promise<SessionIntent> {
+  const deterministic = parseDeterministicIntent(userText);
+  if (deterministic.confidence === "high" && isInstantLocalIntent(deterministic.type)) {
+    return deterministic;
+  }
+  return withStatus(writeStatus, "Thinking...", () => parseIntent(userText, llm));
+}
+
+function isInstantLocalIntent(type: SessionIntent["type"]): boolean {
+  return type === "stop"
+    || type === "playback_status"
+    || type === "feedback_like"
+    || type === "feedback_skip"
+    || type === "feedback_ban"
+    || type === "feedback_more_like_this"
+    || type === "feedback_change_vibe";
+}
+
+async function withStatus<T>(writeStatus: StatusWriter, text: string, action: () => Promise<T>): Promise<T> {
+  const done = writeStatus(text);
+  try {
+    return await action();
+  } finally {
+    done();
+  }
+}
+
+function createInteractiveStatusWriter(output: typeof defaultOutput): StatusWriter {
+  if (!output.isTTY) {
+    return (text) => {
+      output.write(`${text}\n`);
+      return () => undefined;
+    };
+  }
+
+  const frames = ["|", "/", "-", "\\"];
+  return (text) => {
+    let index = 0;
+    const render = () => {
+      output.write(`\r${frames[index % frames.length]} ${text}`);
+      index += 1;
+    };
+    render();
+    const timer = setInterval(render, 80);
+    return () => {
+      clearInterval(timer);
+      output.write(`\r${" ".repeat(text.length + 4)}\r`);
+    };
+  };
+}
+
+async function handlePlaybackRequest(input: {
+  config: PockedioConfig;
+  sessionId: string;
+  store: MemoryStore;
+  provider: MusicProvider;
+  llm: LlmClient;
+  requestText: string;
+  intentType: "playback_request" | "direct_playback_request";
+  buildContext?: (config: PockedioConfig) => Promise<Partial<PockedioContext>>;
+  writeStatus: StatusWriter;
+  playUrl: (url: string) => Promise<PlayerResult>;
+  startUrlPlayback: StartUrlPlayback;
+  playbackState?: InteractivePlaybackState;
+  now: NowProvider;
+}): Promise<{ response: string; station: GeneratedStation }> {
+  const context = await withStatus(input.writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(input.config));
+  input.store.addContextSnapshot(input.sessionId, {
+    calendarSummary: context.calendar?.summary,
+    weather: context.weather,
+    diarySummary: context.diary?.summary,
+    personality: context.personality ?? input.config.personality
+  });
+  const station = await withStatus(input.writeStatus, "Building a station...", () => generateStation({
+    request: input.requestText,
+    config: input.config,
+    context,
+    provider: input.provider,
+    llm: input.llm
+  }));
+  const storedTracks = storeStation(input.sessionId, input.store, station, input.playbackState === undefined);
+  const firstPlayable = station.tracks.find((track) => track.playable.available);
+  let playbackFailure: string | undefined;
+  let nowPlaying = "";
+  let stationIntro = input.intentType === "direct_playback_request"
+    ? formatDirectPlaybackConfirmation(station)
+    : await generateStationIntroResponse({ config: input.config, llm: input.llm, userText: input.requestText, station, context });
+  if (input.playbackState) {
+    input.playbackState.station = station;
+    input.playbackState.storedTracks = storedTracks;
+    nowPlaying = await withStatus(input.writeStatus, "Starting playback...", () => startTrackAt(input.playbackState!, input.config, input.store, 0, input.startUrlPlayback, input.now));
+  } else if (firstPlayable?.playable.available) {
+    const playableUrl = firstPlayable.playable.playableUrl;
+    const playback = await withStatus(input.writeStatus, "Starting playback...", () => input.playUrl(playableUrl));
+    if (!playback.ok) {
+      playbackFailure = playback.error ?? "Playback failed.";
+    }
+  } else if (input.intentType === "direct_playback_request") {
+    stationIntro = formatUnavailableTrackFallbackForResponse(station.tracks);
+  }
+
+  const response = [
+    stationIntro,
+    formatQueue(station),
+    nowPlaying,
+    formatUnavailableTrackFallbackForResponse(station.tracks),
+    playbackFailure ? `Playback detail: ${playbackFailure}` : ""
+  ].filter(Boolean).join("\n");
+
+  return { response, station };
+}
+
+async function generateStationIntroResponse(input: {
+  config: PockedioConfig;
+  llm: LlmClient;
+  userText: string;
+  station: GeneratedStation;
+  context: Partial<PockedioContext>;
+}): Promise<string> {
+  const prompt = [
+    `You are ${input.config.dj.displayName}, Pockedio's personal DJ.`,
+    "Write a warm, concise station introduction for a CLI music session.",
+    "Acknowledge the user's mood or request in human language before mentioning the station.",
+    "Keep it to 2-3 sentences.",
+    "Do not say playback failed. Do not list the queue.",
+    `User request: ${input.userText}`,
+    `DJ style: ${input.config.dj.style}`,
+    `DJ language: ${input.config.dj.language}`,
+    `Playable tracks: ${input.station.tracks.filter((track) => track.playable.available).length}`,
+    `Weather summary: ${input.context.weather?.summary ?? "not available"}`,
+    `Diary summary: ${input.context.diary?.summary ?? "not available"}`
+  ].join("\n");
+  const result = await input.llm.generateText(prompt);
+  if (result.ok && result.value.trim()) {
+    return result.value.trim();
+  }
+
+  return formatWarmStationIntro(input.station, input.userText);
+}
+
+function formatWarmStationIntro(station: GeneratedStation, userText: string): string {
+  const playableCount = station.tracks.filter((track) => track.playable.available).length;
+  if (/\b(exhausted|tired|grumpy|rough|stressed|sad|anxious|relax|relaxation|low mood)\b/i.test(userText)) {
+    return `I hear the mood in that request, so I am keeping this station gentle and low-pressure. ${formatStationIntro(station)}`
+      .replace("I built", "I made");
+  }
+  return formatStationIntro(station).replace("I built", "I made");
+}
+
+async function generateMusicRecommendationResponse(input: {
+  config: PockedioConfig;
+  llm: LlmClient;
+  userText: string;
+  playbackState?: InteractivePlaybackState;
+  context?: Partial<PockedioContext>;
+}): Promise<string> {
+  const prompt = [
+    `You are ${input.config.dj.displayName}, Pockedio's concise personal DJ.`,
+    "The user is asking what they should listen to, but has not asked you to start playback.",
+    "Recommend one clear listening direction in 2-4 sentences, tuned to their mood or context.",
+    "End by asking whether they want you to build or play that station.",
+    "Do not claim playback has started.",
+    `Weather summary: ${input.context?.weather?.summary ?? "not available"}`,
+    `Diary summary: ${input.context?.diary?.summary ?? "not available"}`,
+    formatConversationPlaybackContext(input.playbackState),
+    `User: ${input.userText}`
+  ].join("\n");
+  const result = await input.llm.generateText(prompt);
+  if (result.ok && result.value.trim()) {
+    return result.value.trim();
+  }
+
+  return [
+    "I can still help with the music, though my deeper conversation layer is offline right now.",
+    "",
+    "Want me to search directly from your request and build a five-track station?"
+  ].join("\n");
+}
+
+function isPendingStationConfirmation(text: string): boolean {
+  return /\b(yes|yeah|yep|sure|ok|okay|go ahead|play it|play that|start it|start the station|play the station)\b/i.test(text);
+}
+
+function isPendingStationDecline(text: string): boolean {
+  return /\b(no|nope|not now|don'?t|do not|skip it|leave it|not yet)\b/i.test(text);
+}
+
+async function generateIdentityCapabilityResponse(input: {
+  config: PockedioConfig;
+  llm: LlmClient;
+  userText: string;
+}): Promise<string> {
+  const displayName = input.config.dj.displayName;
+  const prompt = [
+    `You are ${displayName}, Pockedio's concise personal DJ in a terminal.`,
+    "Answer the user's identity or capability question directly.",
+    "Use the selected DJ name for identity questions.",
+    "Mention real capabilities only: conversation, recommendations and stations, playback controls, queue/status, useful taste memory, and explicit spoken DJ audio.",
+    "Mention memory carefully as useful taste signals, not remembering everything.",
+    "Do not say you are an AI language model.",
+    "Do not mention therapy disclaimers unless the user asks for mental-health support.",
+    "Do not start playback.",
+    "Do not end with the fixed startup phrase 'What are we tuning for?'",
+    "Keep it to 1-3 concise sentences.",
+    `User: ${input.userText}`
+  ].join("\n");
+  const result = await input.llm.generateText(prompt);
+  if (result.ok && result.value.trim()) {
+    return result.value.trim();
+  }
+
+  return [
+    `${displayName} is here.`,
+    "I can still build stations, play music, control playback, show the queue, and make spoken DJ audio if voice is configured.",
+    "Deeper conversation and personal context may be limited until the LLM is available."
+  ].join(" ");
+}
+
+async function generateConversationResponse(input: {
+  config?: PockedioConfig;
+  llm: LlmClient;
+  userText: string;
+  playbackState?: InteractivePlaybackState;
+}): Promise<string> {
+  if (!input.userText) {
+    return "Tell me what you want to hear, or share what this music is bringing up.";
+  }
+
+  const prompt = formatConversationPrompt(input.userText, input.playbackState, input.config);
+  const result = await input.llm.generateText(prompt);
+  if (result.ok && result.value.trim()) {
+    return result.value.trim();
+  }
+
+  return formatConversationFallback(input.userText, input.playbackState, input.config);
+}
+
+function formatConversationPrompt(userText: string, playbackState: InteractivePlaybackState | undefined, config?: PockedioConfig): string {
+  const displayName = config?.dj.displayName ?? "Pockedio";
+  return [
+    `You are ${displayName}, Pockedio's concise personal DJ in a text conversation.`,
+    "The user may be sharing a personal memory, listening insight, mood, taste signal, or a question about the current music.",
+    "Reply like a radio DJ who is listening carefully: acknowledge the user, connect it to music when useful, and stay brief.",
+    "Do not act as a therapist, diagnose the user, or give life advice.",
+    "Do not claim spoken audio was generated. Do not change playback or promise queue edits unless the user explicitly asked for playback control.",
+    formatConversationPlaybackContext(playbackState),
+    `User: ${userText}`
+  ].filter(Boolean).join("\n");
+}
+
+function formatConversationPlaybackContext(playbackState: InteractivePlaybackState | undefined): string {
+  const storedTracks = playbackState?.storedTracks ?? [];
+  const currentIndex = playbackState?.currentIndex;
+  const current = currentIndex === undefined ? undefined : storedTracks[currentIndex]?.track;
+  if (!current) {
+    return "Current playback: none.";
+  }
+
+  return [
+    `Current track: ${current.title} - ${current.artist}`,
+    "Queue:",
+    ...storedTracks.map((entry, index) => {
+      const marker = index === currentIndex ? ">" : " ";
+      return `${marker} ${entry.track.position}. ${entry.track.title} - ${entry.track.artist}`;
+    })
+  ].join("\n");
+}
+
+function formatConversationFallback(userText: string, playbackState: InteractivePlaybackState | undefined, config?: PockedioConfig): string {
+  const displayName = config?.dj.displayName ?? "Pockedio";
+  if (isCapabilityQuestion(userText)) {
+    return [
+      `${displayName} is here.`,
+      "I can still build stations, play music, control playback, show the queue, and make spoken DJ audio if voice is configured.",
+      "Deeper conversation and personal context may be limited until the LLM is available."
+    ].join(" ");
+  }
+
+  const current = playbackState?.currentIndex === undefined
+    ? undefined
+    : playbackState.storedTracks?.[playbackState.currentIndex]?.track;
+  if (current) {
+    return `I hear that. I will keep ${current.title} - ${current.artist} in that personal context and let the set stay music-first.`;
+  }
+  if (isListeningPreferenceStatement(userText)) {
+    return "I hear that. I will treat it as part of your listening taste, especially when you ask for a station later.";
+  }
+  return "I hear you. I can keep talking about the music, help shape a station, or respond to what this listening moment brings up.";
+}
+
+function isCapabilityQuestion(userText: string): boolean {
+  const text = userText.toLowerCase();
+  return /\b(who are you|who is talking|who'?s talking|what are you|what can you do|help|how do you work|what do you do|are you a real dj)\b/.test(text);
+}
+
+function isListeningPreferenceStatement(userText: string): boolean {
+  const text = userText.toLowerCase();
+  return /\b(i like|i love|i prefer|i realized|reminds me|this reminds|my taste|for reading|for focus|helps me|distracts me|too bright|too sharp|too busy|spacious|instrumental|vocals?)\b/.test(text);
 }
 
 export async function runInteractiveSession(config: PockedioConfig = loadConfig()): Promise<void> {
@@ -220,8 +586,9 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
   const sessionId = store.createSession("conversation", "interactive session");
   store.close();
   const playbackState: InteractivePlaybackState = {};
+  const statusWriter = createInteractiveStatusWriter(defaultOutput);
   try {
-    console.log(formatInteractiveStartupGuide());
+    console.log(formatInteractiveStartupGuide(config.dj.displayName));
     while (true) {
       let line: string;
       try {
@@ -238,7 +605,8 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
         sessionId,
         endSession: false,
         playbackState,
-        writeOutput: (text) => console.log(text)
+        writeOutput: (text) => console.log(text),
+        writeStatus: statusWriter
       });
       if (result.shouldExit) {
         break;
@@ -303,13 +671,32 @@ async function generateDjAudioResponse(input: {
     : { ok: false as const, latencyMs: 0, error: "Voice rules disabled DJ audio." };
 
   if (!djAudio.ok) {
-    input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath ?? null, "text_fallback");
+    input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath ?? null, "text_fallback", {
+      cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
+      latencyMs: djAudio.latencyMs
+    });
     return { text: formatDjAudioFallbackText(text, djAudio.error), djAudio };
   }
 
   const playback = await input.playFile(djAudio.audioPath);
-  input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath, playback.ok ? "played" : "failed");
+  input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath, playback.ok ? "played" : "failed", {
+    cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
+    latencyMs: djAudio.latencyMs,
+    fileSizeBytes: getFileSize(djAudio.audioPath)
+  });
   return { text, djAudio };
+}
+
+function getExplicitDjAudioCacheExpiresAt(): string {
+  return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function getFileSize(filePath: string): number | null {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return null;
+  }
 }
 
 function isFeedbackIntent(type: SessionIntent["type"]): boolean {

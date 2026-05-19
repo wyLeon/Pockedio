@@ -7,6 +7,15 @@ export const mbtiTypes = [
   "ISTP", "ISFP", "ESTP", "ESFP"
 ] as const;
 
+export const djProgramLengths = ["short", "standard", "extended"] as const;
+export const djStyles = ["direct", "warm", "exploratory", "low-talk"] as const;
+const timeOfDaySchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const scheduledDjProgramSchema = z.object({
+  enabled: z.boolean().default(true),
+  playTime: timeOfDaySchema,
+  prepareMinutesBefore: z.number().int().min(0).max(120).default(10)
+});
+
 export const fishAudioModelDir =
   "/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e";
 
@@ -33,6 +42,17 @@ export const pockedioConfigSchema = z.object({
     baseUrl: z.string().url().optional(),
     apiKeyEnv: z.string().min(1).default("OPENAI_API_KEY")
   }).default({}),
+  dj: z.object({
+    personaPreference: z.string().min(1).default("scheduled"),
+    displayName: z.string().min(1).default("Pockedio"),
+    language: z.string().min(1).default("English"),
+    programLength: z.enum(djProgramLengths).default("standard"),
+    style: z.enum(djStyles).default("warm"),
+    schedule: z.object({
+      morning: scheduledDjProgramSchema.default({ playTime: "08:45" }),
+      evening: scheduledDjProgramSchema.default({ playTime: "17:00" })
+    }).default({})
+  }).default({}),
   fishAudio: z.object({
     pythonPath: z.string().min(1).default(".cache/mlx-speech-venv/bin/python"),
     scriptPath: z.string().min(1).default(".cache/mlx-speech/scripts/generate/fish_s2_pro.py"),
@@ -48,3 +68,6 @@ export const pockedioConfigSchema = z.object({
 
 export type PockedioConfig = z.infer<typeof pockedioConfigSchema>;
 export type MbtiType = typeof mbtiTypes[number];
+export type DjProgramLength = typeof djProgramLengths[number];
+export type DjStyle = typeof djStyles[number];
+export type ScheduledDjProgramConfig = PockedioConfig["dj"]["schedule"]["morning"];

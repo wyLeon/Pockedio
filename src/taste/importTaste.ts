@@ -7,7 +7,7 @@ import type { PockedioConfig } from "../config/schema.js";
 import { runMigrations } from "../db/migrations.js";
 import { withDatabase } from "../db/database.js";
 import { MemoryStore } from "../memory/store.js";
-import { parseTasteCsv } from "./csv.js";
+import { parseTasteCsv, type TasteImportRow } from "./csv.js";
 import { generateTasteMarkdown, summarizeTasteRows } from "./tasteMarkdown.js";
 
 export type TasteImportResult = {
@@ -18,8 +18,12 @@ export type TasteImportResult = {
 };
 
 export function importTaste(file: string, config: PockedioConfig = loadConfig()): TasteImportResult {
-  runMigrations(config);
   const rows = parseTasteCsv(fs.readFileSync(file, "utf8"));
+  return importTasteRows(rows, file, config);
+}
+
+export function importTasteRows(rows: TasteImportRow[], sourceFile: string, config: PockedioConfig = loadConfig()): TasteImportResult {
+  runMigrations(config);
   const summary = summarizeTasteRows(rows);
   const markdown = generateTasteMarkdown(rows);
 
@@ -36,7 +40,7 @@ export function importTaste(file: string, config: PockedioConfig = loadConfig())
         likedAt: row.liked_at
       });
     }
-    recordTasteImport(db, file, summary.trackCount, `Imported ${summary.trackCount} tracks from ${summary.sources.join(", ") || "unknown sources"}.`);
+    recordTasteImport(db, sourceFile, summary.trackCount, `Imported ${summary.trackCount} tracks from ${summary.sources.join(", ") || "unknown sources"}.`);
   });
 
   return {

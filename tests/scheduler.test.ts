@@ -8,8 +8,8 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { isEveningDjTime, isMorningDjTime, isWeekday, shouldPromptMoodCheck } from "../src/scheduler/jobs.js";
-import { runMoodCheckOnce, runScheduledDjJob } from "../src/scheduler/serve.js";
+import { isEveningDjTime, isMorningDjPrepareTime, isMorningDjTime, isWeekday, shouldPromptMoodCheck } from "../src/scheduler/jobs.js";
+import { prepareScheduledDjJob, runMoodCheckOnce, runScheduledDjJob } from "../src/scheduler/serve.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-scheduler-test-"));
@@ -69,6 +69,18 @@ describe("scheduled job decisions", () => {
     expect(isEveningDjTime(new Date("2026-05-18T17:00:20+08:00"))).toBe(true);
   });
 
+  it("uses configured scheduled DJ play and preparation windows", () => {
+    const config = makeConfig();
+    config.dj.schedule.morning.playTime = "08:30";
+    config.dj.schedule.morning.prepareMinutesBefore = 12;
+    config.dj.schedule.evening.enabled = false;
+
+    expect(isMorningDjTime(new Date("2026-05-18T08:30:00+08:00"), config)).toBe(true);
+    expect(isMorningDjTime(new Date("2026-05-18T08:45:00+08:00"), config)).toBe(false);
+    expect(isMorningDjPrepareTime(new Date("2026-05-18T08:18:00+08:00"), config)).toBe(true);
+    expect(isEveningDjTime(new Date("2026-05-18T17:00:00+08:00"), config)).toBe(false);
+  });
+
   it("prompts mood checks hourly", () => {
     expect(shouldPromptMoodCheck(null, new Date("2026-05-18T09:00:00+08:00"))).toBe(true);
     expect(shouldPromptMoodCheck(
@@ -83,6 +95,66 @@ describe("scheduled job decisions", () => {
 });
 
 describe("scheduled DJ jobs", () => {
+  it("prepares scheduled DJ audio before play time and reuses it at play time", async () => {
+    const config = makeConfig();
+    const playedFiles: string[] = [];
+    let synthCalls = 0;
+
+    const preparation = await prepareScheduledDjJob({
+      kind: "morning",
+      now: new Date("2026-05-18T08:35:00+08:00"),
+      config,
+      context: fakeContext(config),
+      llm: fakeLlm("Prepared morning program."),
+      synthesizeFishAudio: async (_config, text) => {
+        synthCalls += 1;
+        return { ok: true, audioPath: `/tmp/prepared-${text.length}.wav`, latencyMs: 4 };
+      }
+    });
+
+    expect(preparation).toMatchObject({ ran: true, text: "Prepared morning program." });
+
+    const result = await runScheduledDjJob({
+      kind: "morning",
+      now: new Date("2026-05-18T08:45:00+08:00"),
+      config,
+      context: fakeContext(config),
+      provider: new FakeProvider(),
+      llm: fakeLlm("Should not regenerate."),
+      synthesizeFishAudio: async () => {
+        throw new Error("should not synthesize at play time");
+      },
+      playFile: async (filePath) => {
+        playedFiles.push(filePath);
+        return { ok: true, target: filePath, exitCode: 0, signal: null };
+      },
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null })
+    });
+
+    expect(result.ran).toBe(true);
+    expect(synthCalls).toBe(1);
+    expect(playedFiles).toEqual(["/tmp/prepared-25.wav"]);
+    const rows = withDatabase(config, (db) => ({
+      prep: db.prepare("SELECT kind, target_play_time as targetPlayTime, text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt, status FROM scheduled_dj_preparations").all(),
+      audio: db.prepare("SELECT kind, text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt, status FROM dj_audio").all()
+    }));
+    expect(rows.prep).toEqual([{
+      kind: "morning",
+      targetPlayTime: "2026-05-18T08:45:00.000+08:00",
+      text: "Prepared morning program.",
+      audioPath: "/tmp/prepared-25.wav",
+      audioCacheExpiresAt: "2026-05-19T08:45:00.000+08:00",
+      status: "played"
+    }]);
+    expect(rows.audio).toEqual([{
+      kind: "morning",
+      text: "Prepared morning program.",
+      audioPath: "/tmp/prepared-25.wav",
+      audioCacheExpiresAt: "2026-05-19T08:45:00.000+08:00",
+      status: "played"
+    }]);
+  });
+
   it("generates spoken morning DJ audio, plays it directly, starts music, and stores metadata", async () => {
     const config = makeConfig();
     const playedFiles: string[] = [];

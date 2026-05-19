@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { runSetup } from "./config/setup.js";
+import { runCalendarSetup, runSetup } from "./config/setup.js";
 import { pockedioVersion } from "./index.js";
 import { runServe } from "./scheduler/serve.js";
 import { runInteractiveSession } from "./session/sessionRunner.js";
@@ -20,7 +20,15 @@ program
 program
   .command("setup")
   .description("Configure local Pockedio integrations and memory")
-  .action(async () => {
+  .argument("[section]", "optional setup section, for example calendar")
+  .action(async (section?: string) => {
+    if (section === "calendar") {
+      await runCalendarSetup();
+      return;
+    }
+    if (section) {
+      throw new Error(`Unknown setup section: ${section}`);
+    }
     await runSetup();
   });
 

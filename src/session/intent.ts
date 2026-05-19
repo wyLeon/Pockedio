@@ -2,6 +2,9 @@ import type { LlmClient } from "../llm/llmClient.js";
 
 export type SessionIntentType =
   | "conversation"
+  | "identity_capability"
+  | "music_recommendation"
+  | "pending_station_confirmation"
   | "playback_request"
   | "direct_playback_request"
   | "feedback_like"
@@ -25,6 +28,9 @@ type LlmIntentResponse = {
 
 const intentTypes = new Set<SessionIntentType>([
   "conversation",
+  "identity_capability",
+  "music_recommendation",
+  "pending_station_confirmation",
   "playback_request",
   "direct_playback_request",
   "feedback_like",
@@ -46,7 +52,9 @@ export async function parseIntent(input: string, llm?: LlmClient): Promise<Sessi
   const result = await llm.generateJson<LlmIntentResponse>(
     [
       "Classify this Pockedio user message into one intent.",
+      "Use identity_capability when the user asks who Pockedio is, who is talking, or what Pockedio can do.",
       "Prefer playback_request for ordinary music requests.",
+      "Use music_recommendation when the user asks what music they should listen to but does not ask to play it.",
       "Use explicit_dj_audio_request only when the user asks for spoken/audio DJ narration.",
       `Message: ${input}`
     ].join("\n"),
@@ -75,6 +83,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(stop|pause|quit|exit|shut up)\b/.test(text)) {
     return { type: "stop", confidence: "high" };
   }
+  if (isIdentityCapabilityText(text)) {
+    return { type: "identity_capability", confidence: "high" };
+  }
   if (/\b(never play|ban|block|don't play this artist|do not play this artist)\b/.test(text)) {
     return { type: "feedback_ban", confidence: "high" };
   }
@@ -99,11 +110,24 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(play it directly|play directly|direct playback|start playback|just play|no discussion)\b/.test(text)) {
     return { type: "direct_playback_request", confidence: "high" };
   }
+  if (isMusicRecommendationText(text)) {
+    return { type: "music_recommendation", confidence: "high" };
+  }
   if (isPlaybackRequestText(text)) {
     return { type: "playback_request", confidence: "high" };
   }
 
   return { type: "conversation", confidence: "medium" };
+}
+
+function isIdentityCapabilityText(text: string): boolean {
+  return /\b(who are you|who is talking|who'?s talking|what are you|what can you do|what do you do|how do you work|are you a real dj)\b/.test(text)
+    || /^(help|help me)$/i.test(text);
+}
+
+function isMusicRecommendationText(text: string): boolean {
+  return /\b(what music should i listen to|what music would .*suggest|what should i listen to|what should i play|recommend music|recommend some music|suggest music|suggest some music|suggest something|what .*music.*suggest)\b/.test(text)
+    || /\b(i'?m|i am|feeling|feel)\b.*\b(exhausted|tired|stressed|grumpy|sad|anxious)\b.*\b(relax|relaxation|calm|rest|unwind)\b/.test(text);
 }
 
 function isPlaybackRequestText(text: string): boolean {
