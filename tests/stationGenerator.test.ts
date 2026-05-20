@@ -251,4 +251,70 @@ describe("generateStation", () => {
     expect(station.tracks).toHaveLength(5);
     expect(station.tracks.every((track) => track.playable.available === false)).toBe(true);
   });
+
+  it("builds artist-only requests from matching unique provider results", async () => {
+    const provider = new FakeProvider();
+    provider.search = async (query: MusicSearchQuery, limit: number): Promise<MusicTrackCandidate[]> => {
+      provider.searches.push(query);
+      expect(query.keyword).toBe("Sufjan Stevens");
+      expect(limit).toBeGreaterThanOrEqual(20);
+      return [
+        { provider: "netease", providerTrackId: "a", title: "Chicago", artists: ["Sufjan Stevens"], album: "Illinois" },
+        { provider: "netease", providerTrackId: "a-dup", title: "Chicago", artists: ["Sufjan Stevens"], album: "Illinois" },
+        { provider: "netease", providerTrackId: "b", title: "Should Have Known Better", artists: ["Sufjan Stevens"], album: "Carrie & Lowell" },
+        { provider: "netease", providerTrackId: "other", title: "Mystery of Love", artists: ["Other Artist"], album: "Cover" },
+        { provider: "netease", providerTrackId: "c", title: "Fourth of July", artists: ["Sufjan Stevens"], album: "Carrie & Lowell" }
+      ];
+    };
+    const llm: StationLlmClient = {
+      generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    const station = await generateStation({
+      request: "play songs by Sufjan Stevens",
+      config: makeConfig(),
+      provider,
+      llm
+    });
+
+    expect(station.tracks.map((track) => `${track.title} - ${track.artist}`)).toEqual([
+      "Chicago - Sufjan Stevens",
+      "Should Have Known Better - Sufjan Stevens",
+      "Fourth of July - Sufjan Stevens"
+    ]);
+  });
+
+  it("dedupes Wang OK artist stations and filters unrelated search results", async () => {
+    const provider = new FakeProvider();
+    provider.search = async (query: MusicSearchQuery, limit: number): Promise<MusicTrackCandidate[]> => {
+      provider.searches.push(query);
+      expect(query.keyword).toBe("Wang OK");
+      expect(limit).toBeGreaterThanOrEqual(20);
+      return [
+        { provider: "netease", providerTrackId: "before-spring", title: "Before spring ends", artists: ["Wang OK", "Duke Lee"], album: "Single" },
+        { provider: "netease", providerTrackId: "before-spring-dup", title: "Before spring ends", artists: ["Wang OK", "Duke Lee"], album: "Single" },
+        { provider: "netease", providerTrackId: "evening-wind", title: "晚风", artists: ["Copy", "BT07"], album: "Single" },
+        { provider: "netease", providerTrackId: "light-chaser", title: "追光者", artists: ["汪苏泷"], album: "Single" },
+        { provider: "netease", providerTrackId: "rainy-day", title: "雨天", artists: ["孙燕姿"], album: "Single" },
+        { provider: "netease", providerTrackId: "another-wang-ok", title: "Another Wang OK Song", artists: ["Wang OK"], album: "Single" }
+      ];
+    };
+    const llm: StationLlmClient = {
+      generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    const station = await generateStation({
+      request: "play songs by Wang OK",
+      config: makeConfig(),
+      provider,
+      llm
+    });
+
+    expect(station.tracks.map((track) => `${track.title} - ${track.artist}`)).toEqual([
+      "Before spring ends - Wang OK, Duke Lee",
+      "Another Wang OK Song - Wang OK"
+    ]);
+  });
 });

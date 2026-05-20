@@ -1,11 +1,22 @@
 import type { GeneratedStation, StationTrack } from "../station/stationTypes.js";
 
 export function formatStationIntro(station: GeneratedStation): string {
+  const totalCount = station.tracks.length;
   const playableCount = station.tracks.filter((track) => track.playable.available).length;
   const requestLabel = /[\u3400-\u9fff]/.test(station.request)
     ? "this request"
     : `"${station.request}"`;
-  return `I built a five-track station for ${requestLabel}. ${playableCount} track${playableCount === 1 ? "" : "s"} are playable now.`;
+  return `I built ${formatStationSize(totalCount)} for ${requestLabel}. ${playableCount} track${playableCount === 1 ? "" : "s"} are playable now.`;
+}
+
+function formatStationSize(count: number): string {
+  if (count === 5) {
+    return "a five-track station";
+  }
+  if (count === 1) {
+    return "a one-track station";
+  }
+  return `a ${count}-track station`;
 }
 
 export function formatDirectPlaybackConfirmation(station: GeneratedStation): string {

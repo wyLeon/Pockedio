@@ -1266,7 +1266,35 @@ dj
 play it as a DJ program
 ```
 
-This should be explicit. DJ program mode prepares one spoken opening, starts the first song quietly under that DJ voice, then hands off to normal-volume playback. While each song is playing, Pockedio should prepare the next song's spoken intro in the background. At auto-advance or manual `next`, if the next intro is ready, start the next song quietly under that voice; if it is not ready or TTS failed, start the next song normally and keep the text note. Normal station mode should remain text-first and fast.
+This should be explicit. DJ program mode prepares one spoken opening, starts the first song quietly under that DJ voice, then hands off to normal-volume playback. It should not speak before every song. Pockedio should treat each transition as a possible DJ cue and decide whether to speak based on program pacing, meaningful mood/artist/context shifts, and the selected program length.
+
+Default DJ program pacing:
+
+```text
+short:
+  opening voice
+  no automatic transition voice
+  closing voice
+
+standard:
+  opening voice
+  quiet first transition
+  one middle transition voice when useful
+  closing voice
+
+extended:
+  opening voice
+  up to two transition voices when useful
+  closing voice
+```
+
+If a transition is intentionally quiet, do not print a warning. Just start the next track and show the normal playback surface. If Pockedio chose a transition voice but it is still rendering when auto-advance or manual `next` happens, start the next song normally and show a tiny status line such as:
+
+```text
+Mina is still preparing the next voice break, so I’ll keep the music moving.
+```
+
+Normal station mode should remain text-first and fast.
 
 Whenever DJ program voice is played, the terminal should also show the spoken transcript before the now-playing surface:
 
@@ -1276,6 +1304,15 @@ Mina:
 
 Now playing: 2/5  Track - Artist
 [>...................] 00:00 / 04:13
+```
+
+When the final playable track finishes in DJ program mode, Pockedio should play a short closing voice break before the station-complete prompt:
+
+```text
+Mina:
+[short closing DJ copy]
+
+That station’s done. Press Enter to continue this vibe, or tell me where to take it next.
 ```
 
 DJ mode is not a mid-station toggle. Once normal playback starts, `dj` / `dj mode` should not retrofit spoken mode into that station. The user can stop and ask for a new DJ version, or choose DJ mode before the next station starts.
@@ -1324,7 +1361,27 @@ Examples:
 ```text
 play some jazz for deep work
 put on something for a rainy commute
+play songs by Sufjan Stevens
+play songs from Mina Okabe
 ```
+
+Artist-only playback:
+
+```text
+> play songs by Sufjan Stevens
+Reading your context...
+Building a station...
+Starting playback...
+I made a 3-track station for "play songs by Sufjan Stevens". 3 tracks are playable now.
+Now playing: 1/3  Chicago - Sufjan Stevens
+```
+
+Rules:
+- `play songs by/from [artist]` builds an artist-catalog station, not a single-song request.
+- Keep only tracks whose listed artist matches the requested artist.
+- Deduplicate repeated song titles before filling the queue.
+- Do not add unrelated artists just to reach five songs.
+- If fewer than five playable matching tracks are found, show the real count.
 
 ## Active Playback Interaction Map
 
@@ -1364,10 +1421,10 @@ play [specific song]               3.7 Specific Song Playback    built
 Rules:
 
 - During playback, questions and personal comments should not stop or replace music unless the user clearly asks for playback control.
-- During playback, current-track and artist questions should use the LLM conversation path with current track and queue context.
+- During playback, current-track and artist questions should use the LLM conversation path with current track, rationale, and queue context.
 - During playback, `next` means skip current track and start the next playable track.
 - During playback, `stop` stops playback and ends the interactive session.
-- During playback, `pause` and `resume` are real controls when mpv is available; with afplay fallback, pause stops audio and resume is unavailable.
+- During playback, `pause` and `resume` are real controls when mpv is available; with ffplay/afplay fallback, pause stops audio and resume is unavailable.
 - During playback, `dj` is not a toggle. DJ mode is chosen before playback starts.
 - Replacement requests such as `play something else` may stop current playback and start a new station.
 
@@ -1396,14 +1453,14 @@ Thinking...
 ```
 
 Main output:
-  Answer in the selected DJ voice. Use current track and queue context when relevant. Do not start a new station unless the user clearly asks for playback.
+  Answer in the selected DJ voice. Use current track, artist, album when available, recommendation rationale, and queue context when relevant. Do not start a new station unless the user clearly asks for playback.
 
 Example:
 
 ```text
 > Who is the singer?
 
-The current track is Blue Bossa - Kenny Dorham, Joe Henderson. The listed artists are Kenny Dorham and Joe Henderson.
+That’s listed as Kenny Dorham and Joe Henderson on this track. I’d treat those credits as the reliable source here, then keep the answer focused on how their playing shapes the room.
 ```
 
 Example:
@@ -1427,6 +1484,8 @@ Rules:
 - Keep music playing.
 - Do not show queue unless the user asks for queue/status.
 - Do not turn artist or song-background questions into playback requests.
+- Resolve phrases like `the singer`, `this artist`, `this song`, and `this track` against the current playback metadata before answering.
+- If Pockedio does not have verified background details, say what is known from metadata instead of inventing a story.
 - Store useful personal listening comments as conversation memory.
 - Keep answers concise; this is still a listening session, not a long article.
 
@@ -1446,6 +1505,7 @@ Built controls:
 ```text
 next / skip / next song / next track
   -> stop current track, mark it skipped, start next playable track, show 3.6 track-start surface
+  -> if the next track cannot start, show the playback detail, keep the CLI session open, and let the next `next` try the following track
 
 stop
   -> stop current playback, mark current track skipped, end interactive session
@@ -1593,4 +1653,40 @@ Examples:
 quit
 exit
 Ctrl+C
+```
+
+## Future Note: Music Knowledge Enrichment
+
+Purpose:
+
+- Improve DJ-style answers for artist background, song history, versions, credits, albums, genres, and related artists.
+- Keep normal conversation LLM-first; enrichment should support answers, not replace the DJ conversation layer.
+
+Candidate sources:
+
+- Wikidata / Wikimedia APIs:
+  - Treat as the first future candidate for factual enrichment.
+  - Useful for open artist, album, genre, birthplace, date, relationship, and linked-entity facts.
+  - Public data is open, but clients must respect request limits and identify themselves properly.
+
+- Spotify Web API:
+  - Treat as an optional future candidate for artist metadata, albums, popularity, related music surfaces, and provider-side identifiers.
+  - Requires a Spotify developer app and OAuth/client credentials.
+  - Do not assume it is a free public knowledge base; access is governed by Spotify developer terms, quota/rate limits, and current account requirements.
+
+Interaction rule:
+
+- Do not call external music-knowledge sources for every user turn.
+- Use them only when the user asks factual music-background questions or when the LLM needs grounding for the current track/artist.
+- If enrichment is unavailable, answer from current playback metadata and model knowledge, and acknowledge uncertainty instead of inventing facts.
+
+Examples:
+
+```text
+Who is the singer?
+Tell me about the singer.
+What is the story behind this song?
+Is this version a cover?
+What album is this from?
+Who produced this track?
 ```

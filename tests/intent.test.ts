@@ -45,8 +45,11 @@ describe("parseIntent", () => {
     for (const input of [
       "play something for deep work",
       "play some late night jazz",
+      "put on something for a rainy commute",
       "play something like To Be Alone With You",
-      "play relaxing music"
+      "play relaxing music",
+      "play songs by Sufjan Stevens",
+      "play songs from Mina Okabe"
     ]) {
       await expect(parseIntent(input)).resolves.toEqual({
         type: "playback_request",

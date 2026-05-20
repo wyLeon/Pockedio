@@ -1,13 +1,18 @@
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { downloadRemoteAudio, type PlaybackHandle, type PlayerResult } from "./afplay.js";
+import { runProcess, type PlaybackHandle, type PlayerResult, type ProcessRunner } from "./afplay.js";
 
 export type MpvOptions = {
   command?: string;
-  fetchImpl?: typeof fetch;
+  volume?: number;
+};
+
+export type MpvDuckedIntroOptions = MpvOptions & {
+  musicVolume?: number;
+  introTimeoutMs?: number;
+  runner?: ProcessRunner;
 };
 
 export function isMpvAvailable(command = "mpv"): boolean {
@@ -17,14 +22,9 @@ export function isMpvAvailable(command = "mpv"): boolean {
 
 export async function startMpvUrlPlayback(url: string, options: MpvOptions = {}): Promise<PlaybackHandle> {
   const command = options.command ?? "mpv";
-  const target = /^https?:\/\//i.test(url) ? await downloadRemoteAudio(url, options.fetchImpl ?? fetch) : url;
-  const ipcPath = path.join(os.tmpdir(), `pockedio-mpv-${randomUUID()}.sock`);
-  const child = spawn(command, [
-    "--no-video",
-    "--really-quiet",
-    `--input-ipc-server=${ipcPath}`,
-    target
-  ], { stdio: ["ignore", "ignore", "pipe"] });
+  const target = url;
+  const ipcPath = createMpvIpcPath();
+  const child = spawn(command, buildMpvArgs(target, ipcPath, options.volume), { stdio: ["ignore", "ignore", "pipe"] });
 
   let settled = false;
   let stderr = "";
@@ -72,8 +72,49 @@ export async function startMpvUrlPlayback(url: string, options: MpvOptions = {})
       }
     },
     pause: () => sendMpvCommand(ipcPath, ["set_property", "pause", true]),
-    resume: () => sendMpvCommand(ipcPath, ["set_property", "pause", false])
+    resume: () => sendMpvCommand(ipcPath, ["set_property", "pause", false]),
+    setVolume: (volume) => sendMpvCommand(ipcPath, ["set_property", "volume", volume])
   };
+}
+
+export async function startMpvDuckedUrlWithIntro(
+  url: string,
+  introFilePath: string,
+  options: MpvDuckedIntroOptions = {}
+): Promise<PlaybackHandle> {
+  const handle = await startMpvUrlPlayback(url, {
+    command: options.command,
+    volume: Math.round((options.musicVolume ?? 0.18) * 100)
+  });
+  const runner = options.runner ?? runProcess;
+  let introResult: PlayerResult;
+  try {
+    introResult = await runner("afplay", [introFilePath], options.introTimeoutMs);
+  } finally {
+    await handle.setVolume?.(100);
+  }
+  return {
+    ...handle,
+    introResult
+  };
+}
+
+export function buildMpvArgs(target: string, ipcPath: string, volume?: number): string[] {
+  const args = [
+    "--no-video",
+    "--really-quiet",
+    `--input-ipc-server=${ipcPath}`,
+    ...(volume === undefined ? [] : [`--volume=${volume}`]),
+    target
+  ];
+  return args;
+}
+
+export function createMpvIpcPath(): string {
+  const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+  return process.platform === "win32"
+    ? `\\\\.\\pipe\\pockedio-mpv-${suffix}`
+    : path.join("/tmp", `pockedio-mpv-${suffix}.sock`);
 }
 
 async function sendMpvCommand(ipcPath: string, command: unknown[]): Promise<boolean> {

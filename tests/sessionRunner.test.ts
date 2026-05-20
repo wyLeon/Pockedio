@@ -7,8 +7,9 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { createDefaultInteractiveStartUrlPlayback, formatInteractiveStartupGuide, runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { createDefaultInteractiveStartUrlPlayback, formatInteractiveStartupGuide, formatStartupSetupNote, runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
+import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-session-test-"));
@@ -83,6 +84,73 @@ class AmbiguousSongProvider implements MusicProvider {
   }
 }
 
+class ArtistStationProvider implements MusicProvider {
+  readonly searches: MusicSearchQuery[] = [];
+
+  async search(query: MusicSearchQuery, _limit: number): Promise<MusicTrackCandidate[]> {
+    this.searches.push(query);
+    if (query.keyword === "Sufjan Stevens") {
+      return [
+        { provider: "netease", providerTrackId: "chicago", title: "Chicago", artists: ["Sufjan Stevens"], album: "Illinois" },
+        { provider: "netease", providerTrackId: "chicago-dup", title: "Chicago", artists: ["Sufjan Stevens"], album: "Illinois" },
+        { provider: "netease", providerTrackId: "other", title: "Mystery of Love", artists: ["Other Artist"], album: "Cover" },
+        { provider: "netease", providerTrackId: "known-better", title: "Should Have Known Better", artists: ["Sufjan Stevens"], album: "Carrie & Lowell" }
+      ];
+    }
+    if (query.keyword === "Wang OK") {
+      return [
+        { provider: "netease", providerTrackId: "before-spring", title: "Before spring ends", artists: ["Wang OK", "Duke Lee"], album: "Single" },
+        { provider: "netease", providerTrackId: "before-spring-dup", title: "Before spring ends", artists: ["Wang OK", "Duke Lee"], album: "Single" },
+        { provider: "netease", providerTrackId: "evening-wind", title: "晚风", artists: ["Copy", "BT07"], album: "Single" },
+        { provider: "netease", providerTrackId: "light-chaser", title: "追光者", artists: ["汪苏泷"], album: "Single" },
+        { provider: "netease", providerTrackId: "rainy-day", title: "雨天", artists: ["孙燕姿"], album: "Single" },
+        { provider: "netease", providerTrackId: "another-wang-ok", title: "Another Wang OK Song", artists: ["Wang OK"], album: "Single" }
+      ];
+    }
+
+    return [{
+      provider: "netease",
+      providerTrackId: query.keyword,
+      title: query.keyword,
+      artists: ["Test Artist"],
+      album: "Test Album"
+    }];
+  }
+
+  async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+    return {
+      available: true,
+      provider: "netease",
+      providerTrackId: trackId,
+      playableUrl: `https://example.com/${encodeURIComponent(trackId)}.mp3`,
+      urlType: "mp3"
+    };
+  }
+}
+
+class CjkDirectSongProvider implements MusicProvider {
+  async search(_query: MusicSearchQuery, _limit: number): Promise<MusicTrackCandidate[]> {
+    return [{
+      provider: "netease",
+      providerTrackId: "moon-river-lisa-ono",
+      title: "Moon River",
+      artists: ["小野リサ"],
+      album: "Pretty World"
+    }];
+  }
+
+  async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+    return {
+      available: true,
+      provider: "netease",
+      providerTrackId: trackId,
+      playableUrl: `https://example.com/${encodeURIComponent(trackId)}.mp3`,
+      urlType: "mp3",
+      durationMs: 263_000
+    };
+  }
+}
+
 function fakeLlm(): LlmClient {
   return {
     generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
@@ -125,11 +193,23 @@ describe("runSessionTurn", () => {
     expect(guide).toContain("What are we tuning for?");
     expect(guide).toContain("I'm exhausted and want something calm.");
     expect(guide).toContain("play something for deep work");
-    expect(guide).toContain("after a station suggestion, type dj");
+    expect(guide).toContain("When I suggest a station:");
+    expect(guide).toContain("press Enter to play it");
+    expect(guide).toContain("type dj for a spoken DJ version");
     expect(guide).toContain("setup");
     expect(guide).toContain("next");
     expect(guide).toContain("stop");
     expect(guide).toContain("what's playing?");
+  });
+
+  it("shows a concise startup setup note when taste is missing", () => {
+    const config = loadConfig({ POCKEDIO_HOME: fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-missing-taste-")) });
+    const note = formatStartupSetupNote(config);
+    const guide = formatInteractiveStartupGuide("Mina", note);
+
+    expect(note).toContain("Taste is not imported yet.");
+    expect(guide).toContain("Setup note:");
+    expect(guide).toContain("Run pockedio setup");
   });
 
   it("starts interactive playback without an automatic timeout", async () => {
@@ -490,7 +570,53 @@ describe("runSessionTurn", () => {
     expect(playbackState.currentIndex).toBe(1);
   });
 
-  it("pause stops current playback without ending the CLI session", async () => {
+  it("keeps the session open when next fails to start playback", async () => {
+    const config = makeConfig();
+    let stopCalls = 0;
+    let startCalls = 0;
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        startCalls += 1;
+        if (startCalls > 1) {
+          throw new Error("fetch failed");
+        }
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "next",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.shouldExit).toBe(false);
+    expect(result.response).toContain("I could not start");
+    expect(result.response).toContain("Playback detail: fetch failed");
+    expect(result.response).toContain("Type next to try the following track");
+    expect(stopCalls).toBe(1);
+    expect(playbackState.activePlayback).toBeUndefined();
+    expect(playbackState.currentIndex).toBe(1);
+    expect(playbackState.currentTrackId).toBeUndefined();
+  });
+
+  it("pause stops current playback with clear fallback copy when controls are unavailable", async () => {
     const config = makeConfig();
     let stopCalls = 0;
     const playbackState: InteractivePlaybackState = {};
@@ -521,9 +647,25 @@ describe("runSessionTurn", () => {
 
     expect(result.intent.type).toBe("pause");
     expect(result.shouldExit).toBe(false);
-    expect(result.response).toContain("Paused.");
+    expect(result.response).toBe("Pause is not available with this player, so I stopped playback instead. Install mpv for pause/resume, or type next to continue.");
     expect(stopCalls).toBe(1);
     expect(playbackState.activePlayback).toBeUndefined();
+  });
+
+  it("explains the mpv requirement when resume is requested without a paused handle", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    const result = await runSessionTurn({
+      input: "resume",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("resume");
+    expect(result.response).toBe("Nothing resumable is paused right now. Install mpv for pause/resume support with streaming playback.");
   });
 
   it("pause and resume use a controllable playback handle when available", async () => {
@@ -650,9 +792,10 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain("[===>................] 00:42 / 04:13");
   });
 
-  it("answers current-track singer questions from playback state", async () => {
+  it("answers current-track singer questions through grounded DJ conversation", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
+    const prompts: string[] = [];
 
     await runSessionTurn({
       input: "play something for deep work",
@@ -675,14 +818,19 @@ describe("runSessionTurn", () => {
       provider: new FakeProvider(),
       llm: {
         generateJson: async () => ({ ok: true, value: { type: "identity_capability", confidence: "high" } }),
-        generateText: async () => ({ ok: true, value: "I am Pockedio, your personal DJ." })
+        generateText: async (prompt) => {
+          prompts.push(prompt);
+          return { ok: true, value: "That’s Test Artist on this track. I’d treat the vocal credit from the current metadata first, then keep listening for the arrangement around it." };
+        }
       }
     });
 
     expect(result.intent.type).toBe("conversation");
-    expect(result.response).toContain("The current track is");
-    expect(result.response).toContain("The listed artist is Test Artist.");
+    expect(result.response).toContain("Test Artist");
     expect(result.response).not.toContain("I am Pockedio");
+    expect(prompts[0]).toContain("For current-track questions");
+    expect(prompts[0]).toContain("Current track:");
+    expect(prompts[0]).toContain("Test Artist");
   });
 
   it("auto-advances to the next playable track when playback finishes", async () => {
@@ -761,6 +909,60 @@ describe("runSessionTurn", () => {
     expect(output.at(-1)).toContain("> 2.");
   });
 
+  it("prints auto-advance playback surfaces after the active conversation response", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    let finishFirst: ((value: { ok: boolean; target: string; exitCode: number; signal: null }) => void) | undefined;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          if (!finishFirst) {
+            finishFirst = resolve;
+          }
+        }),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "Tell me about this track",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: {
+        generateJson: async () => ({ ok: true, value: { type: "conversation", confidence: "high" } }),
+        generateText: async () => {
+          finishFirst?.({ ok: true, target: "first", exitCode: 0, signal: null });
+          await Promise.resolve();
+          await Promise.resolve();
+          return { ok: true, value: "This track has a steady, focused pulse." };
+        }
+      },
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    expect(result.response).toBe("This track has a steady, focused pulse.");
+    const conversationIndex = output.findIndex((text) => text === "This track has a steady, focused pulse.");
+    const transitionIndex = output.findIndex((text, index) => index > conversationIndex && text.includes("Now playing: 2/5"));
+    expect(conversationIndex).toBeGreaterThan(-1);
+    expect(transitionIndex).toBeGreaterThan(conversationIndex);
+  });
+
   it("announces station completion when the final track finishes", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
@@ -787,8 +989,7 @@ describe("runSessionTurn", () => {
 
     for (let index = 0; index < 5; index += 1) {
       finishers[index]?.({ ok: true, target: `track-${index + 1}`, exitCode: 0, signal: null });
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
     expect(output.at(-1)).toBe("That station’s done. Press Enter to continue this vibe, or tell me where to take it next.");
@@ -962,10 +1163,12 @@ describe("runSessionTurn", () => {
     expect(stopCalls).toBe(0);
     expect(playbackState.currentIndex).toBe(currentIndex);
     expect(playbackState.currentTrackId).toBe(currentTrackId);
-    expect(prompts).toEqual([]);
+    expect(prompts[0]).toContain("For current-track questions");
+    expect(prompts[0]).toContain("Current track:");
+    expect(prompts[0]).toContain("Test Artist");
   });
 
-  it("routes artist background questions during playback to LLM conversation", async () => {
+  it("routes artist background questions during playback to grounded LLM conversation", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
     const prompts: string[] = [];
@@ -1018,9 +1221,166 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("I can play a specific song");
     expect(prompts[0]).toContain("Tell me about Kenny Dorham");
     expect(prompts[0]).toContain("Current track:");
+    expect(prompts[0]).toContain("For artist or song background questions");
     expect(started).toHaveLength(1);
     expect(playbackState.currentIndex).toBe(currentIndex);
     expect(playbackState.currentTrackId).toBe(currentTrackId);
+  });
+
+  it("resolves 'the singer' background questions against current playback instead of starting music", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const prompts: string[] = [];
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    const currentIndex = playbackState.currentIndex;
+    const currentTrackId = playbackState.currentTrackId;
+    const result = await runSessionTurn({
+      input: "Tell me about the singer",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: {
+        generateJson: async () => ({ ok: true, value: { type: "single_track_playback", confidence: "high" } }),
+        generateText: async (prompt) => {
+          prompts.push(prompt);
+          return { ok: true, value: "The listed artist here is Test Artist. I’d start there before guessing at unverified credits." };
+        }
+      },
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.station).toBeUndefined();
+    expect(result.response).toContain("Test Artist");
+    expect(prompts[0]).toContain("Tell me about the singer");
+    expect(prompts[0]).toContain("Current track:");
+    expect(started).toHaveLength(1);
+    expect(playbackState.currentIndex).toBe(currentIndex);
+    expect(playbackState.currentTrackId).toBe(currentTrackId);
+  });
+
+  it("keeps English LLM music background answers that preserve CJK artist names", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const prompts: string[] = [];
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "play Moon River",
+      config,
+      playbackState,
+      provider: new CjkDirectSongProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "Tell me about this song.",
+      config,
+      playbackState,
+      provider: new CjkDirectSongProvider(),
+      llm: {
+        generateJson: async () => ({ ok: true, value: { type: "conversation", confidence: "high" } }),
+        generateText: async (prompt) => {
+          prompts.push(prompt);
+          return { ok: true, value: "Moon River began as a Henry Mancini and Johnny Mercer song for Breakfast at Tiffany’s. 小野リサ’s version leans into bossa nova ease, so it lands softer and more intimate here." };
+        }
+      }
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.response).toContain("Breakfast at Tiffany");
+    expect(result.response).toContain("小野リサ");
+    expect(result.response).not.toContain("I do not have verified credits");
+    expect(prompts[0]).toContain("Moon River - 小野リサ");
+    expect(started).toHaveLength(1);
+  });
+
+  it("recognizes song background questions even when background comes after the song reference", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const prompts: string[] = [];
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "play Moon River",
+      config,
+      playbackState,
+      provider: new CjkDirectSongProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "I mean the song you are playing, any background?",
+      config,
+      playbackState,
+      provider: new CjkDirectSongProvider(),
+      llm: {
+        generateJson: async () => ({ ok: true, value: { type: "single_track_playback", confidence: "high" } }),
+        generateText: async (prompt) => {
+          prompts.push(prompt);
+          return { ok: true, value: "Yes, I mean Moon River here: originally a cinematic standard, now softened by 小野リサ’s bossa nova phrasing." };
+        }
+      },
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.response).toContain("Moon River");
+    expect(result.response).toContain("小野リサ");
+    expect(result.station).toBeUndefined();
+    expect(prompts[0]).toContain("I mean the song you are playing, any background?");
+    expect(started).toHaveLength(1);
   });
 
   it("answers personal taste insights even when no station is playing", async () => {
@@ -1294,18 +1654,37 @@ describe("runSessionTurn", () => {
   it("does not treat Enter as playback consent when nothing is pending", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const statuses: string[] = [];
 
     const result = await runSessionTurn({
       input: "",
       config,
       playbackState,
       provider: new FakeProvider(),
-      llm: unavailableLlm()
+      llm: {
+        generateJson: async () => ({ ok: true, value: { type: "playback_request", confidence: "high" } }),
+        generateText: async () => ({ ok: true, value: "unused" })
+      },
+      writeStatus: (text) => {
+        statuses.push(text);
+        return () => undefined;
+      },
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
     });
 
     expect(result.intent.type).toBe("conversation");
     expect(result.station).toBeUndefined();
     expect(result.response).toContain("Tell me what you want to hear");
+    expect(started).toEqual([]);
+    expect(statuses).toEqual([]);
   });
 
   it("reshapes a pending station before playback", async () => {
@@ -1548,6 +1927,7 @@ describe("runSessionTurn", () => {
     expect(result.intent.type).toBe("pending_station_dj_program");
     expect(result.response).toContain("Pockedio:");
     expect(result.response).toContain("Pockedio here.");
+    expect(result.response).toContain("Pockedio here. I’ll open this softly, then let the first track carry the room.\n\nNow playing:");
     expect(result.response).toContain("Queue:");
     expect(result.response).toContain("Now playing:");
     expect(started).toHaveLength(1);
@@ -1613,6 +1993,114 @@ describe("runSessionTurn", () => {
     expect(rows).toEqual([{ status: "played", audioPath: "/tmp/pockedio-dj-intro.wav" }]);
   });
 
+  it("stops current playback before preparing a pending DJ program", async () => {
+    const config = makeConfig();
+    const events: string[] = [];
+    const playbackState: InteractivePlaybackState = {
+      pendingStationRequest: "something calm for late night",
+      pendingStationOriginalRequest: "something calm for late night",
+      activePlayback: {
+        target: "https://example.com/current.mp3",
+        done: new Promise(() => undefined),
+        stop: () => {
+          events.push("stop-current");
+        }
+      },
+      currentTrackId: "track-current"
+    };
+
+    const result = await runSessionTurn({
+      input: "dj",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Mina here. I’ll bring this in gently."),
+      buildContext: async () => {
+        events.push("read-context");
+        return { personality: config.personality };
+      },
+      synthesizeFishAudio: async () => {
+        events.push("synthesize-intro");
+        return {
+          ok: true,
+          audioPath: "/tmp/pockedio-dj-intro.wav",
+          latencyMs: 15
+        };
+      },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        events.push(`start-ducked:${url}:${introFilePath}`);
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("pending_station_dj_program");
+    expect(events[0]).toBe("stop-current");
+    expect(events).toContain("read-context");
+    expect(events).toContain("synthesize-intro");
+    expect(events.some((event) => event.startsWith("start-ducked:"))).toBe(true);
+    expect(events.indexOf("stop-current")).toBeLessThan(events.indexOf("read-context"));
+  });
+
+  it("starts an explicit DJ program without asking for playback confirmation again", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+    const events: string[] = [];
+    const playbackState: InteractivePlaybackState = {
+      activePlayback: {
+        target: "https://example.com/current.mp3",
+        done: new Promise(() => undefined),
+        stop: () => {
+          events.push("stop-current");
+        }
+      },
+      currentTrackId: "track-current"
+    };
+    const llm: LlmClient = {
+      generateJson: async () => ({ ok: true, value: { type: "playback_request", confidence: "high" } }),
+      generateText: async () => ({ ok: true, value: "Mina here. I’ll turn this into a short radio-style opening." })
+    };
+
+    const result = await runSessionTurn({
+      input: "play a DJ program for late night focus",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => {
+        events.push("read-context");
+        return { personality: config.personality };
+      },
+      synthesizeFishAudio: async () => ({
+        ok: true,
+        audioPath: "/tmp/pockedio-explicit-dj.wav",
+        latencyMs: 15
+      }),
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        events.push(`start-ducked:${introFilePath}`);
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(events[0]).toBe("stop-current");
+    expect(result.response).toContain("Mina:");
+    expect(result.response).toContain("Mina here. I’ll turn this into a short radio-style opening.\n\nNow playing:");
+    expect(result.response).toContain("Now playing:");
+    expect(result.response).not.toContain("Press Enter to play it");
+    expect(result.response).not.toContain('type "dj"');
+    expect(playbackState.djProgram).toBeDefined();
+  });
+
   it("keeps the default ducked intro player on interactive playback state", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -1628,7 +2116,7 @@ describe("runSessionTurn", () => {
     expect(playbackState.startDuckedIntroPlayback).toEqual(expect.any(Function));
   });
 
-  it("prepares the next song DJ intro while the first DJ program track is playing", async () => {
+  it("keeps the first DJ program transition quiet for pacing", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
     const synthesized: string[] = [];
@@ -1668,18 +2156,19 @@ describe("runSessionTurn", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(synthesized).toHaveLength(2);
-    expect(synthesized[1]).toContain("Mina keeps this short and warm.");
+    expect(synthesized).toHaveLength(1);
+    expect(playbackState.djProgram?.quietTrackIndexes.has(1)).toBe(true);
   });
 
-  it("uses a prepared DJ intro when auto-advancing to the next track", async () => {
+  it("uses a prepared DJ intro at the first standard middle transition", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
     const playbackState: InteractivePlaybackState = {};
     const output: string[] = [];
     const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
     const directStarts: string[] = [];
-    let finishFirstTrack: ((result: { ok: boolean; target: string; exitCode: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
+    const finishers: Array<(result: { ok: boolean; target: string; exitCode: number | null; signal: NodeJS.Signals | null }) => void> = [];
+    const directFinishers: Array<(result: { ok: boolean; target: string; exitCode: number | null; signal: NodeJS.Signals | null }) => void> = [];
 
     await runSessionTurn({
       input: "I'm exhausted now, want some relaxation.",
@@ -1699,16 +2188,101 @@ describe("runSessionTurn", () => {
         generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
         generateText: async (prompt) => ({
           ok: true,
-          value: prompt.includes("Track 2") ? "Track 2 intro is ready." : "Mina keeps this short and warm."
+          value: prompt.includes("Track 3") ? "Track 3 intro is ready." : "Mina keeps this short and warm."
         })
       },
       buildContext: async () => ({ personality: config.personality }),
       writeOutput: (text) => output.push(text),
       synthesizeFishAudio: async (_config, text) => ({
         ok: true,
-        audioPath: text.includes("Track 2") ? "/tmp/track-2-intro.wav" : "/tmp/opening-intro.wav",
+        audioPath: text.includes("Track 3") ? "/tmp/track-3-intro.wav" : "/tmp/opening-intro.wav",
         latencyMs: 15
       }),
+      startUrlPlayback: async (url) => {
+        directStarts.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            directFinishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: new Promise((resolve) => {
+            finishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    finishers[0]?.({ ok: true, target: duckedStarts[0].url, exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+    await Promise.resolve();
+    directFinishers[0]?.({ ok: true, target: directStarts[0], exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(duckedStarts).toHaveLength(2);
+    expect(duckedStarts[1]).toEqual({
+      url: expect.stringContaining("https://example.com/"),
+      introFilePath: "/tmp/track-3-intro.wav"
+    });
+    expect(directStarts).toHaveLength(1);
+    expect(output.join("\n")).toContain("Mina:");
+    expect(output.join("\n")).toContain("Track 3 intro is ready.");
+    expect(output.join("\n")).toContain("Track 3 intro is ready.\n\nNow playing:");
+  });
+
+  it("keeps manual next moving with feedback when DJ intro is not ready", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+    const playbackState: InteractivePlaybackState = {};
+    const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
+    const directStarts: string[] = [];
+    let resolveTrackThreeIntro: ((result: FishAudioResult) => void) | undefined;
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    await runSessionTurn({
+      input: "dj",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: {
+        generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
+        generateText: async (prompt) => ({
+          ok: true,
+          value: prompt.includes("Track 3") ? "Track 3 intro is still rendering." : "Mina opens this softly."
+        })
+      },
+      buildContext: async () => ({ personality: config.personality }),
+      synthesizeFishAudio: async (_config, text) => {
+        if (text.includes("Track 3")) {
+          return new Promise((resolve) => {
+            resolveTrackThreeIntro = resolve;
+          });
+        }
+        return {
+          ok: true,
+          audioPath: "/tmp/opening-intro.wav",
+          latencyMs: 15
+        };
+      },
       startUrlPlayback: async (url) => {
         directStarts.push(url);
         return {
@@ -1722,29 +2296,115 @@ describe("runSessionTurn", () => {
         return {
           target: url,
           introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
-          done: new Promise((resolve) => {
-            if (!finishFirstTrack) {
-              finishFirstTrack = resolve;
-            }
-          }),
+          done: new Promise(() => undefined),
           stop: () => undefined
         };
       }
     });
 
-    await Promise.resolve();
-    await Promise.resolve();
-    finishFirstTrack?.({ ok: true, target: duckedStarts[0].url, exitCode: 0, signal: null });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(duckedStarts).toHaveLength(2);
-    expect(duckedStarts[1]).toEqual({
-      url: expect.stringContaining("https://example.com/"),
-      introFilePath: "/tmp/track-2-intro.wav"
+    const quietResult = await runSessionTurn({
+      input: "next",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
     });
-    expect(directStarts).toEqual([]);
-    expect(output.join("\n")).toContain("Mina:");
-    expect(output.join("\n")).toContain("Track 2 intro is ready.");
+
+    expect(quietResult.response).not.toContain("still preparing");
+    expect(quietResult.response).toContain("Now playing: 2/5");
+
+    const result = await runSessionTurn({
+      input: "next",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.response).toContain("Mina is still preparing the next voice break");
+    expect(result.response).toContain("Now playing: 3/5");
+    expect(duckedStarts).toHaveLength(1);
+    expect(directStarts).toHaveLength(2);
+
+    resolveTrackThreeIntro?.({
+      ok: true,
+      audioPath: "/tmp/track-3-intro.wav",
+      latencyMs: 15
+    });
+  });
+
+  it("plays a short DJ outro when a DJ program station finishes", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    const playedFiles: string[] = [];
+    const finishers: Array<(result: { ok: boolean; target: string; exitCode: number | null; signal: NodeJS.Signals | null }) => void> = [];
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    await runSessionTurn({
+      input: "dj",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: {
+        generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
+        generateText: async (prompt) => ({
+          ok: true,
+          value: prompt.includes("completed DJ program")
+            ? "Mina here. That set has landed softly. Press Enter and I can keep the room in this glow, or point me somewhere new."
+            : prompt.includes("Track 3")
+              ? "Track 3 intro is ready."
+              : "Mina opens this softly."
+        })
+      },
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      synthesizeFishAudio: async (_config, text) => ({
+        ok: true,
+        audioPath: text.includes("landed softly") ? "/tmp/outro.wav" : `/tmp/${text.length}.wav`,
+        latencyMs: 15
+      }),
+      playFile: async (filePath) => {
+        playedFiles.push(filePath);
+        return { ok: true, target: filePath, exitCode: 0, signal: null };
+      },
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+        stop: () => undefined
+      }),
+      startDuckedIntroPlayback: async (url, introFilePath) => ({
+        target: url,
+        introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+        done: new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+        stop: () => undefined
+      })
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      finishers[index]?.({ ok: true, target: `track-${index + 1}`, exitCode: 0, signal: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+
+    expect(playedFiles).toContain("/tmp/outro.wav");
+    expect(output.at(-1)).toContain("Mina:");
+    expect(output.at(-1)).toContain("That set has landed softly");
+    expect(output.at(-1)).toContain("That station’s done. Press Enter to continue this vibe");
   });
 
   it("keeps explicit mood playback requests as playback", async () => {
@@ -1766,6 +2426,108 @@ describe("runSessionTurn", () => {
     expect(result.intent.type).toBe("playback_request");
     expect(result.station?.tracks).toHaveLength(5);
     expect(playedUrls).toHaveLength(1);
+  });
+
+  it("starts explicit station playback from the 3.8 examples", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const output: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "put on something for a rainy commute",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.station?.request).toBe("put on something for a rainy commute");
+    expect(result.station?.tracks).toHaveLength(5);
+    expect(started).toHaveLength(1);
+    expect(output.join("\n")).toContain("Now playing: 1/5");
+    expect(playbackState.pendingStationRequest).toBeUndefined();
+  });
+
+  it("starts artist-only stations without unrelated artists or duplicate songs", async () => {
+    const config = makeConfig();
+    const provider = new ArtistStationProvider();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "play songs by Sufjan Stevens",
+      config,
+      playbackState,
+      provider,
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(provider.searches.map((query) => query.keyword)).toEqual(["Sufjan Stevens"]);
+    expect(result.station?.tracks.map((track) => `${track.title} - ${track.artist}`)).toEqual([
+      "Chicago - Sufjan Stevens",
+      "Should Have Known Better - Sufjan Stevens"
+    ]);
+    expect(started).toEqual(["https://example.com/chicago.mp3"]);
+    expect(result.response).not.toContain("five-track station");
+    expect(result.response).toContain("Now playing: 1/2  Chicago - Sufjan Stevens");
+  });
+
+  it("keeps Wang OK artist-only station results unique and artist-scoped", async () => {
+    const config = makeConfig();
+    const provider = new ArtistStationProvider();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "play songs by Wang OK",
+      config,
+      playbackState,
+      provider,
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(provider.searches.map((query) => query.keyword)).toEqual(["Wang OK"]);
+    expect(result.station?.tracks.map((track) => `${track.title} - ${track.artist}`)).toEqual([
+      "Before spring ends - Wang OK, Duke Lee",
+      "Another Wang OK Song - Wang OK"
+    ]);
+    expect(started).toEqual(["https://example.com/before-spring.mp3"]);
+    expect(result.response).toContain("Now playing: 1/2  Before spring ends - Wang OK, Duke Lee");
+    expect(result.response).not.toContain("晚风");
+    expect(result.response).not.toContain("追光者");
+    expect(result.response).not.toContain("雨天");
   });
 
   it("generates and records FishAudio only for explicit DJ audio", async () => {

@@ -66,8 +66,10 @@ export async function parseIntent(input: string, llm?: LlmClient): Promise<Sessi
   const result = await llm.generateJson<LlmIntentResponse>(
     [
       "Classify this Pockedio user message into one intent.",
+      "Default to conversation unless the user clearly asks for playback, a recommendation, setup-like capability information, or a local playback control.",
       "Use identity_capability when the user asks who Pockedio is, who is talking, or what Pockedio can do.",
-      "Prefer playback_request for ordinary music requests.",
+      "Use conversation for artist/song background questions, current-track questions, daily chat, personal reflections, or listening observations.",
+      "Use playback_request only when the user asks to start music with words like play, put on, queue, or start.",
       "Use single_track_playback when the user asks to play one specific song title, especially 'play [song] by [artist]'.",
       "Use music_recommendation when the user asks what music they should listen to but does not ask to play it.",
       "Use explicit_dj_audio_request only when the user asks for spoken/audio DJ narration.",
@@ -125,6 +127,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(like this|love this|good pick|nice pick)\b/.test(text)) {
     return { type: "feedback_like", confidence: "high" };
   }
+  if (isDjProgramPlaybackText(text)) {
+    return { type: "playback_request", confidence: "high" };
+  }
   if (/\b(spoken|voice|audio intro|dj intro|dj-like audio|talk over|narrate)\b/.test(text)) {
     return { type: "explicit_dj_audio_request", confidence: "high" };
   }
@@ -167,6 +172,11 @@ function isPlaybackRequestText(text: string): boolean {
   return hasPlaybackCommand(text)
     || hasMusicSubjectWithAction(text)
     || hasMusicSubjectWithUseCase(text);
+}
+
+function isDjProgramPlaybackText(text: string): boolean {
+  return /\b(dj program|dj version|radio show|radio version|spoken version)\b/.test(text)
+    && /\b(play|start|create|make|build|give me|put on|queue)\b/.test(text);
 }
 
 function isSingleTrackPlaybackText(text: string): boolean {

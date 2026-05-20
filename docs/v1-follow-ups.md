@@ -12,15 +12,16 @@ Manual checks:
 
 - Setup is using the selected DJ preview file as the FishAudio reference.
 - DJ station opening voice is audible before track 1.
-- `next` from track 1 plays the prepared track 2 DJ voice before music resumes normally.
+- Standard DJ mode intentionally keeps the first transition quiet; a middle transition voice appears only when selected by the pacing rules and ready in time.
 - Opening voice and transition voice sound like the same DJ.
 - If a transition voice is not ready, music still advances and the CLI does not show a false success.
+- DJ program closing voice is audible after the final playable track before the station-complete prompt.
 
 ### Expand DJ mode into real radio-style programs
 
 Status: open
 
-DJ station mode now has a spoken opening and prepared transition intros, but the broader radio-program layer is still not complete. A prompt such as `make me a short DJ intro for tonight` should feel like a real car-radio segment, not an eight-word confirmation.
+DJ station mode now has a spoken opening, pacing-based transition cues, and a short closing voice, but the broader radio-program layer is still not complete. A prompt such as `make me a short DJ intro for tonight` should feel like a real car-radio segment, not an eight-word confirmation.
 
 Expected behavior:
 
@@ -28,7 +29,7 @@ Expected behavior:
 - Treat explicit DJ mode as a short radio program, not a one-sentence intro.
 - Support program length presets such as short, standard, and extended.
 - Even the short preset should have enough substance to feel intentional, roughly 30-60 seconds of spoken copy.
-- Standard program mode should include scene-setting, station framing, and a transition into music.
+- Standard program mode should include scene-setting, station framing, selective transition voice, and a closing.
 - DJ copy should use the active persona, user taste, mood/context, and current prompt.
 - If LLM generation is unavailable, show a clear unavailable/fallback message instead of pretending a generic sentence is a real DJ program.
 - Keep ordinary playback silent by default; this applies only when the user explicitly asks for DJ-like audio or scheduled DJ jobs run.

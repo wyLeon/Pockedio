@@ -20,6 +20,7 @@ export type PlaybackHandle = {
   stop: () => void;
   pause?: () => Promise<boolean> | boolean;
   resume?: () => Promise<boolean> | boolean;
+  setVolume?: (volume: number) => Promise<boolean> | boolean;
   introResult?: PlayerResult;
 };
 
@@ -28,10 +29,13 @@ export type ProcessStarter = (command: string, args: string[], timeoutMs?: numbe
 export type DuckedIntroOptions = {
   musicVolume?: number;
   introTimeoutMs?: number;
+  downloadTimeoutMs?: number;
   starter?: ProcessStarter;
   runner?: ProcessRunner;
   fetchImpl?: typeof fetch;
 };
+
+export const DEFAULT_REMOTE_AUDIO_DOWNLOAD_TIMEOUT_MS = 12_000;
 
 export async function playUrl(
   url: string,
@@ -60,7 +64,9 @@ export async function startDuckedUrlWithIntro(
 ): Promise<PlaybackHandle> {
   const starter = options.starter ?? startProcess;
   const runner = options.runner ?? runProcess;
-  const target = isRemoteUrl(url) ? await downloadRemoteAudio(url, options.fetchImpl ?? fetch) : url;
+  const target = isRemoteUrl(url)
+    ? await downloadRemoteAudio(url, options.fetchImpl ?? fetch, options.downloadTimeoutMs)
+    : url;
   const quietHandle = starter("afplay", ["-v", String(options.musicVolume ?? 0.18), target]);
   let introResult: PlayerResult;
   try {
@@ -78,8 +84,30 @@ export async function playFile(filePath: string, timeoutMs?: number, runner: Pro
   return runner("afplay", [filePath], timeoutMs);
 }
 
-export async function downloadRemoteAudio(url: string, fetchImpl: typeof fetch): Promise<string> {
-  const response = await fetchImpl(url);
+export async function downloadRemoteAudio(
+  url: string,
+  fetchImpl: typeof fetch,
+  timeoutMs = DEFAULT_REMOTE_AUDIO_DOWNLOAD_TIMEOUT_MS
+): Promise<string> {
+  const controller = new AbortController();
+  const timer = timeoutMs > 0
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : undefined;
+  timer?.unref();
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Audio download timed out after ${timeoutMs}ms.`);
+    }
+    throw error;
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
   if (!response.ok) {
     throw new Error(`Audio download failed with HTTP ${response.status}.`);
   }

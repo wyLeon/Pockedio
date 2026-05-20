@@ -2,6 +2,9 @@ import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ensureRuntimeDirs, loadConfig } from "../src/config/load.js";
 import { saveNetEaseCookie } from "../src/config/neteaseAuth.js";
+import { startDuckedUrlWithIntro as startDefaultDuckedUrlWithIntro, startUrlPlayback as startDefaultUrlPlayback } from "../src/player/defaultPlayer.js";
+import { buildFfplayArgs } from "../src/player/ffplay.js";
+import { buildMpvArgs, createMpvIpcPath } from "../src/player/mpv.js";
 import { playFile, playUrl, startDuckedUrlWithIntro, startUrlPlayback, type PlaybackHandle, type ProcessRunner, type ProcessStarter } from "../src/player/afplay.js";
 import { NetEaseProvider } from "../src/providers/netease.js";
 
@@ -223,5 +226,154 @@ describe("afplay adapter", () => {
     expect(stopped[0]).toMatch(/pockedio-playback-.*\.mp3$/);
     expect(handle.target).toMatch(/pockedio-playback-.*\.mp3$/);
     expect(handle.introResult).toMatchObject({ ok: true, target: "/tmp/intro.wav" });
+  });
+});
+
+describe("streaming player routing", () => {
+  const handleFor = (target: string): PlaybackHandle => ({
+    target,
+    done: Promise.resolve({ ok: true, target, exitCode: 0, signal: null }),
+    stop: () => undefined
+  });
+
+  it("passes remote URLs directly to mpv", () => {
+    expect(buildMpvArgs("https://example.com/song.mp3", "/tmp/pockedio.sock")).toEqual([
+      "--no-video",
+      "--really-quiet",
+      "--input-ipc-server=/tmp/pockedio.sock",
+      "https://example.com/song.mp3"
+    ]);
+  });
+
+  it("uses a short mpv IPC path for macOS Unix socket limits", () => {
+    const ipcPath = createMpvIpcPath();
+
+    expect(ipcPath.length).toBeLessThan(90);
+    expect(ipcPath).toMatch(process.platform === "win32" ? /^\\\\\.\\pipe\\pockedio-mpv-/ : /^\/tmp\/pockedio-mpv-/);
+  });
+
+  it("can start mpv quietly for spoken DJ intros without downloading first", () => {
+    expect(buildMpvArgs("https://example.com/song.mp3", "/tmp/pockedio.sock", 18)).toEqual([
+      "--no-video",
+      "--really-quiet",
+      "--input-ipc-server=/tmp/pockedio.sock",
+      "--volume=18",
+      "https://example.com/song.mp3"
+    ]);
+  });
+
+  it("passes remote URLs directly to ffplay", () => {
+    expect(buildFfplayArgs("https://example.com/song.mp3")).toEqual([
+      "-nodisp",
+      "-autoexit",
+      "-loglevel",
+      "error",
+      "https://example.com/song.mp3"
+    ]);
+  });
+
+  it("prefers mpv for streaming and controllable pause/resume", async () => {
+    const calls: string[] = [];
+    const handle = await startDefaultUrlPlayback("https://example.com/song.mp3", {
+      isMpvAvailable: () => true,
+      startMpvUrlPlayback: async (url) => {
+        calls.push(`mpv:${url}`);
+        return handleFor(url);
+      },
+      isFfplayAvailable: () => true,
+      startFfplayUrlPlayback: async (url) => {
+        calls.push(`ffplay:${url}`);
+        return handleFor(url);
+      },
+      startAfplayUrlPlayback: async (url) => {
+        calls.push(`afplay:${url}`);
+        return handleFor(url);
+      }
+    });
+
+    expect(handle.target).toBe("https://example.com/song.mp3");
+    expect(calls).toEqual(["mpv:https://example.com/song.mp3"]);
+  });
+
+  it("falls back to ffplay before afplay when mpv is unavailable", async () => {
+    const calls: string[] = [];
+    const handle = await startDefaultUrlPlayback("https://example.com/song.mp3", {
+      isMpvAvailable: () => false,
+      startMpvUrlPlayback: async (url) => {
+        calls.push(`mpv:${url}`);
+        return handleFor(url);
+      },
+      isFfplayAvailable: () => true,
+      startFfplayUrlPlayback: async (url) => {
+        calls.push(`ffplay:${url}`);
+        return handleFor(url);
+      },
+      startAfplayUrlPlayback: async (url) => {
+        calls.push(`afplay:${url}`);
+        return handleFor(url);
+      }
+    });
+
+    expect(handle.target).toBe("https://example.com/song.mp3");
+    expect(calls).toEqual(["ffplay:https://example.com/song.mp3"]);
+  });
+
+  it("uses afplay only as the final fallback", async () => {
+    const calls: string[] = [];
+    const handle = await startDefaultUrlPlayback("https://example.com/song.mp3", {
+      isMpvAvailable: () => false,
+      startMpvUrlPlayback: async (url) => {
+        calls.push(`mpv:${url}`);
+        return handleFor(url);
+      },
+      isFfplayAvailable: () => false,
+      startFfplayUrlPlayback: async (url) => {
+        calls.push(`ffplay:${url}`);
+        return handleFor(url);
+      },
+      startAfplayUrlPlayback: async (url) => {
+        calls.push(`afplay:${url}`);
+        return handleFor(url);
+      }
+    });
+
+    expect(handle.target).toBe("https://example.com/song.mp3");
+    expect(calls).toEqual(["afplay:https://example.com/song.mp3"]);
+  });
+
+  it("uses mpv for ducked DJ intros when available", async () => {
+    const calls: string[] = [];
+    const handle = await startDefaultDuckedUrlWithIntro("https://example.com/song.mp3", "/tmp/intro.wav", {
+      isMpvAvailable: () => true,
+      startMpvDuckedUrlWithIntro: async (url, introFilePath) => {
+        calls.push(`mpv:${url}:${introFilePath}`);
+        return handleFor(url);
+      },
+      startAfplayDuckedUrlWithIntro: async (url, introFilePath) => {
+        calls.push(`afplay:${url}:${introFilePath}`);
+        return handleFor(url);
+      }
+    });
+
+    expect(handle.target).toBe("https://example.com/song.mp3");
+    expect(calls).toEqual(["mpv:https://example.com/song.mp3:/tmp/intro.wav"]);
+  });
+
+  it("falls back to afplay for ducked DJ intros without mpv", async () => {
+    const calls: string[] = [];
+    const handle = await startDefaultDuckedUrlWithIntro("https://example.com/song.mp3", "/tmp/intro.wav", {
+      isMpvAvailable: () => false,
+      startMpvDuckedUrlWithIntro: async (url, introFilePath) => {
+        calls.push(`mpv:${url}:${introFilePath}`);
+        return handleFor(url);
+      },
+      startAfplayDuckedUrlWithIntro: async (url, introFilePath) => {
+        calls.push(`afplay:${url}:${introFilePath}`);
+        return handleFor(url);
+      }
+    });
+
+    expect(handle.target).toBe("https://example.com/song.mp3");
+    expect(calls).toEqual(["afplay:https://example.com/song.mp3:/tmp/intro.wav"]);
   });
 });

@@ -38,6 +38,15 @@ const providerSearchArtist = "__provider_search__";
 export async function generateStation(input: GenerateStationInput): Promise<GeneratedStation> {
   const provider = input.provider ?? new NetEaseProvider(input.config);
   const llm = input.llm ?? createLlmClient(input.config);
+  const artistRequest = parseArtistStationRequest(input.request);
+  if (artistRequest) {
+    const artistTracks = await resolveArtistStation(artistRequest.artist, provider);
+    return {
+      request: input.request,
+      source: "fallback",
+      tracks: artistTracks
+    };
+  }
   const tasteSummary = readTasteSummary(input.config.paths.taste);
   const plan = await planTracks(input, llm, tasteSummary);
   const tracks = await Promise.all(plan.tracks.map((track, index) => resolveTrack(track, index + 1, provider, input.request)));
@@ -47,6 +56,80 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
     source: plan.source,
     tracks
   };
+}
+
+async function resolveArtistStation(artist: string, provider: MusicProvider): Promise<StationTrack[]> {
+  try {
+    const candidates = await provider.search({ keyword: artist }, 25);
+    const tracks: StationTrack[] = [];
+    const seen = new Set<string>();
+
+    for (const candidate of candidates) {
+      if (!candidateMatchesArtist(candidate, artist)) {
+        continue;
+      }
+
+      const key = normalizeSongKey(candidate.title, candidate.artists.join(", "));
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+
+      const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+      if (!playable.available) {
+        continue;
+      }
+
+      tracks.push(stationTrackFromCandidate({
+        title: candidate.title,
+        artist: candidate.artists.join(", "),
+        rationale: `selected from ${artist}'s catalog`
+      }, tracks.length + 1, candidate, playable));
+      if (tracks.length >= 5) {
+        break;
+      }
+    }
+
+    return tracks.length > 0
+      ? tracks
+      : [unavailableStationTrack({
+          title: artist,
+          artist,
+          rationale: `selected from ${artist}'s catalog`
+        }, 1, `No matching playable tracks found for ${artist}.`)];
+  } catch (error) {
+    return [unavailableStationTrack({
+      title: artist,
+      artist,
+      rationale: `selected from ${artist}'s catalog`
+    }, 1, error instanceof Error ? error.message : String(error))];
+  }
+}
+
+function parseArtistStationRequest(request: string): { artist: string } | null {
+  const text = request.trim().replace(/[.!?。！？]+$/g, "");
+  const match = text.match(/^(?:please\s+)?(?:play|put on|queue|start)\s+(?:some\s+)?(?:songs|tracks|music)\s+(?:from|by)\s+(.+)$/i)
+    ?? text.match(/^(?:please\s+)?(?:i\s+)?(?:want|wanna|would like|need)\s+to\s+(?:listen to|listen|hear|play)\s+(?:some\s+)?(?:songs|tracks|music)\s+(?:from|by)\s+(.+)$/i)
+    ?? text.match(/^(?:播放|放点|来点|我想听|想听)(.+?)(?:的)?(?:歌|歌曲|音乐)$/);
+  const artist = match?.[1]?.trim();
+  return artist ? { artist } : null;
+}
+
+function candidateMatchesArtist(candidate: MusicTrackCandidate, requestedArtist: string): boolean {
+  const requested = normalizeComparableText(requestedArtist);
+  return candidate.artists.some((artist) => normalizeComparableText(artist) === requested);
+}
+
+function normalizeSongKey(title: string, artist: string): string {
+  return `${normalizeComparableText(title)}::${normalizeComparableText(artist)}`;
+}
+
+function normalizeComparableText(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 async function planTracks(
