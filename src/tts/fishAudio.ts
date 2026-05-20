@@ -57,6 +57,7 @@ export async function synthesizeFishAudio(
   const scriptPath = resolveRuntimePath(config.fishAudio.scriptPath);
   const modelDir = resolveRuntimePath(config.fishAudio.modelDir);
   const runner = options.runner ?? runFishAudioProcess;
+  const referenceArgs = fishAudioReferenceArgs(config);
 
   fs.mkdirSync(config.paths.djAudioDir, { recursive: true });
 
@@ -67,7 +68,8 @@ export async function synthesizeFishAudio(
     "--model-dir",
     modelDir,
     "--output",
-    audioPath
+    audioPath,
+    ...referenceArgs
   ], options.timeoutMs);
 
   const latencyMs = Date.now() - startedAt;
@@ -94,6 +96,22 @@ export async function synthesizeFishAudio(
     audioPath,
     latencyMs
   };
+}
+
+function fishAudioReferenceArgs(config: PockedioConfig): string[] {
+  const referenceAudioPath = config.fishAudio.referenceAudioPath
+    ? resolveRuntimePath(config.fishAudio.referenceAudioPath)
+    : undefined;
+  const referenceText = config.fishAudio.referenceText?.trim();
+  if (!referenceAudioPath || !referenceText || !fs.existsSync(referenceAudioPath)) {
+    return [];
+  }
+  return [
+    "--reference-audio",
+    referenceAudioPath,
+    "--reference-text",
+    referenceText
+  ];
 }
 
 export function resolveRuntimePath(value: string): string {

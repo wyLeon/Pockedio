@@ -143,6 +143,8 @@ Rules:
 - Define required reply structure instead.
 - Keep the reply concise.
 - Use the configured DJ name and style where appropriate.
+- Use English by default for Pockedio's own terminal and spoken-DJ copy, even when the user writes in another language.
+- Preserve song titles and artist names in their original language.
 - Do not claim playback has started before playback starts.
 - Do not show queue details inside a pre-confirmation DJ reply.
 
@@ -359,6 +361,7 @@ Supported commands:
 ```text
 pockedio setup
 pockedio setup calendar
+pockedio setup netease
 pockedio import-taste <file>
 ```
 
@@ -380,6 +383,59 @@ $ pockedio setup
 
 Pockedio first setup
 
+Music provider
+
+Music provider
+  NetEase Cloud Music
+
+Connect NetEase account now?
+  Yes, scan QR
+  Yes, paste MUSIC_U cookie
+  Not now, use anonymous playback
+```
+
+If the user chooses account setup:
+
+```text
+Preferred playback quality
+  hires - best quality, may be unavailable
+  lossless - very high quality, needs support
+  exhigh - best daily default
+  higher - good fallback
+  standard - safest fallback
+  Back to account options
+```
+
+If the user chooses cookie setup:
+
+```text
+Paste MUSIC_U cookie
+> ********
+```
+
+If the user chooses QR setup:
+
+```text
+Waiting for NetEase QR login...
+Open and scan this QR image with NetEase Cloud Music: /Users/leonw/.pockedio/secrets/netease-login-qr.png
+The QR code is valid for about 90 seconds.
+Waiting for NetEase QR confirmation...
+
+NetEase connected.
+Pockedio will use your account for playback when available.
+```
+
+If QR login fails:
+
+```text
+Could not verify NetEase login.
+NetEase QR login timed out.
+Continuing with anonymous playback for now.
+```
+
+Then setup continues:
+
+```text
 Hear DJs you can choose? [Y/n]
 ```
 
@@ -562,6 +618,7 @@ The preparation offset is not shown in setup. Pockedio stores the ready time as 
 
 ```text
 Setup complete
+  Music            NetEase Cloud Music - account-backed (exhigh)
   DJ                Mina
   Taste             imported
   Calendar          enabled
@@ -576,6 +633,7 @@ Skipped items appear as `skipped`:
 
 ```text
 Setup complete
+  Music            NetEase Cloud Music - anonymous
   DJ                Nova
   Taste             skipped
   Calendar          skipped
@@ -589,6 +647,10 @@ Next
 ## 2.2 First Setup Decision Map
 
 ```text
+music provider            -> choose NetEase Cloud Music
+music account QR          -> show QR image path -> poll login -> save cookie or fall back anonymous
+music account cookie      -> save MUSIC_U cookie locally -> account-backed playback
+music anonymous           -> clear NetEase cookie -> anonymous playback
 hear DJs yes              -> open Hear DJ loop
 hear DJs no               -> choose DJ directly
 Hear DJ Mina/Nova         -> play preview, return to Hear DJ loop
@@ -624,7 +686,30 @@ Voice preview is not ready yet.
 You can still choose the DJ style now and configure voice later.
 ```
 
-## 2.3 `pockedio setup calendar`
+## 2.3 `pockedio setup netease`
+
+NetEase setup is available as a repair/change path after first setup.
+
+```text
+$ pockedio setup netease
+
+NetEase playback
+Connecting your account can reduce unavailable tracks and preview-only playback.
+
+Connect NetEase account now?
+  Yes, scan QR
+  Yes, paste MUSIC_U cookie
+  Not now, use anonymous playback
+```
+
+Completion:
+
+```text
+Saved
+  Music            NetEase Cloud Music - account-backed (exhigh)
+```
+
+## 2.4 `pockedio setup calendar`
 
 Calendar is the only dedicated setup subsection currently implemented.
 
@@ -668,7 +753,7 @@ normal conversation          -> read today, store as interactive context
 scheduled DJ                 -> read last 7 days + today, store as scheduled context
 ```
 
-## 2.4 `pockedio import-taste <file>`
+## 2.5 `pockedio import-taste <file>`
 
 This is not a setup subsection, but it is the current standalone import command.
 
@@ -760,23 +845,24 @@ Routing map:
 
 ```text
 User input                       Route
-quit / exit / Ctrl+C             3.14 Session Exit
-next                             3.9 Playback Controls
-stop                             3.9 Playback Controls
-what's playing?                  3.10 Queue And Status Questions
-show queue                       3.10 Queue And Status Questions
+quit / exit / Ctrl+C             3.15 Session Exit
+next                             3.10 Playback Controls
+stop                             3.10 Playback Controls
+what's playing?                  3.11 Queue And Status Questions
+show queue                       3.11 Queue And Status Questions
 dj, when a station is pending    3.5 Pending Station Confirmation
-make me a short DJ intro         3.12 Explicit DJ Audio Request
+make me a short DJ intro         3.13 Explicit DJ Audio Request
 yes / play it                    3.5 Pending Station Confirmation, if pending
 no / not now                     3.5 Pending Station Confirmation, if pending
 Who are you?                     3.3 Identity And Capability Questions
 What can you do?                 3.3 Identity And Capability Questions
-play jazz for deep work          3.7 Explicit Playback Request
+play To Be Alone With You        3.7 Specific Song Playback
+play jazz for deep work          3.8 Explicit Station Playback Request
 I'm exhausted, want relaxation   3.4 Mood / Life Context Conversation
-more like this                   3.11 Feedback Actions
-I like this                      3.11 Feedback Actions
-This reminds me of college       3.8 During-Playback Conversation
-unclear input                    3.13 Unknown / Fallback Conversation
+more like this                   3.12 Feedback Actions
+I like this                      3.12 Feedback Actions
+This reminds me of college       3.9 During-Playback Conversation
+unclear input                    3.14 Unknown / Fallback Conversation
 ```
 
 Processing display:
@@ -1065,8 +1151,9 @@ Rules:
 - Do not show queue before confirmation.
 - Keep the pending station alive after refinements and questions.
 - Clear the pending station after confirmation, decline, explicit playback replacement, or session exit.
-- A new explicit playback request replaces the pending station and routes to 3.7.
+- A new explicit playback request replaces the pending station and routes to 3.7 or 3.8.
 - `dj` is only a shortcut when a station is pending. It means spoken opening plus normal station playback.
+- DJ mode should be a before-playback fork, not a mid-station toggle. If the user asks for DJ mode while a station is already playing, explain that they can choose DJ mode before the next station.
 
 ## 3.6 Station Building And Playback Start
 
@@ -1077,7 +1164,7 @@ User entry:
   Command:
     `pockedio`
   User input:
-    Confirmation from 3.5 or explicit playback from 3.7.
+    Confirmation from 3.5 or explicit station playback from 3.8.
 
 Preconditions:
   Pockedio has a station request to build and play.
@@ -1096,15 +1183,19 @@ Main output:
 ```text
 [Short station framing.]
 
-Queue:
-1. Track - Artist
-2. Track - Artist
-3. Track - Artist
-4. Track - Artist
-5. Track - Artist
-
-Now playing: 1. Track - Artist
+Now playing: 1/5  Track - Artist
 [>...................] 00:00 elapsed
+
+Up next:
+  2. Track - Artist
+  3. Track - Artist
+
+Queue:
+> 1. Track - Artist
+  2. Track - Artist
+  3. Track - Artist
+  4. Track - Artist
+  5. Track - Artist
 
 Mina's note:
 [One concise note about why this track starts here.]
@@ -1114,10 +1205,20 @@ Track-start rule:
 
 ```text
 Every time a track starts, show:
-  Now playing
+  Now playing with position count, for example 3/5
   elapsed bar
+  Up next, when tracks remain
+  full compact queue with current track marked by >
   selected DJ name plus note
 ```
+
+Station-complete rule:
+
+```text
+That station’s done. Press Enter to continue this vibe, or tell me where to take it next.
+```
+
+When the final playable track finishes, return control to the user with this closure message. Keep the finished station’s request as a pending station direction so Enter continues the same vibe, while any typed response can reshape the next station.
 
 The DJ note should be text in normal station mode and should use the selected DJ name in the label, for example `Mina's note:`. It should sound warm and first-person. It may mention one useful angle:
 
@@ -1135,7 +1236,7 @@ Rules:
 - Do not show long track biographies.
 - Use track rationale as the fallback note when richer context is unavailable, but rewrite it as a first-person recommendation.
 - Show DJ notes when the first track starts, on manual `next`, and on auto-advance.
-- Previous, next, pause, resume, and favorite controls belong to 3.9 and 3.11.
+- Previous, next, pause, resume, and favorite controls belong to 3.10 and 3.12.
 
 DJ program mode:
 
@@ -1144,9 +1245,57 @@ dj
 play it as a DJ program
 ```
 
-This should be explicit. In the first implementation, DJ program mode prepares one spoken opening, starts the first song quietly under that DJ voice, then hands off to normal-volume playback. Later versions may prepare a spoken break for each next song while the current song is playing. Normal station mode should remain text-first and fast.
+This should be explicit. DJ program mode prepares one spoken opening, starts the first song quietly under that DJ voice, then hands off to normal-volume playback. While each song is playing, Pockedio should prepare the next song's spoken intro in the background. At auto-advance or manual `next`, if the next intro is ready, start the next song quietly under that voice; if it is not ready or TTS failed, start the next song normally and keep the text note. Normal station mode should remain text-first and fast.
 
-## 3.7 Explicit Playback Request
+Whenever DJ program voice is played, the terminal should also show the spoken transcript before the now-playing surface:
+
+```text
+Mina:
+[spoken DJ copy]
+
+Now playing: 2. Track - Artist
+```
+
+DJ mode is not a mid-station toggle. Once normal playback starts, `dj` / `dj mode` should not retrofit spoken mode into that station. The user can stop and ask for a new DJ version, or choose DJ mode before the next station starts.
+
+## 3.7 Specific Song Playback
+
+Use when the user asks for one song, not a station.
+
+```text
+> play To Be Alone With You by Sufjan Stevens
+Searching NetEase...
+Starting playback...
+Now playing: To Be Alone With You - Sufjan Stevens
+[>...................] 00:00 elapsed
+
+Mina's note:
+Playing this one directly. I can keep the station door open after it lands.
+```
+
+If the title is ambiguous:
+
+```text
+> play Intro
+Searching NetEase...
+I found a few close matches:
+1. Intro - The xx
+2. Intro - M83
+3. Intro - Ariana Grande
+
+Which one?
+> 2
+Starting playback...
+Now playing: Intro - M83
+```
+
+Rules:
+- `play [song] by [artist]` plays one track.
+- `play [song]` searches one track and asks if there are close matches.
+- `play something like [song]`, `make a station from [song]`, or mood/use-case language remains station flow.
+- Direct song playback replaces current playback and must not create a five-song queue.
+
+## 3.8 Explicit Station Playback Request
 
 Examples:
 
@@ -1155,7 +1304,7 @@ play some jazz for deep work
 put on something for a rainy commute
 ```
 
-## 3.8 During-Playback Conversation
+## 3.9 During-Playback Conversation
 
 Examples:
 
@@ -1165,7 +1314,7 @@ Why did you pick this?
 I feel calmer now.
 ```
 
-## 3.9 Playback Controls
+## 3.10 Playback Controls
 
 Examples:
 
@@ -1176,7 +1325,7 @@ pause
 resume
 ```
 
-## 3.10 Queue And Status Questions
+## 3.11 Queue And Status Questions
 
 Examples:
 
@@ -1186,7 +1335,7 @@ show queue
 what's next?
 ```
 
-## 3.11 Feedback Actions
+## 3.12 Feedback Actions
 
 Examples:
 
@@ -1198,7 +1347,7 @@ don't play this again
 save this vibe
 ```
 
-## 3.12 Explicit DJ Audio Request
+## 3.13 Explicit DJ Audio Request
 
 Examples:
 
@@ -1207,11 +1356,11 @@ make me a short DJ intro
 say something before the next track
 ```
 
-## 3.13 Unknown / Fallback Conversation
+## 3.14 Unknown / Fallback Conversation
 
 Use when the request is unclear, unsupported, or not actionable as music control.
 
-## 3.14 Session Exit
+## 3.15 Session Exit
 
 Examples:
 

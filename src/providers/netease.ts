@@ -1,4 +1,5 @@
 import type { PockedioConfig } from "../config/schema.js";
+import { readNetEaseCookie } from "../config/neteaseAuth.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "./musicProvider.js";
 
 type FetchLike = typeof fetch;
@@ -41,10 +42,12 @@ type NetEaseUrlResponse = {
 
 export class NetEaseProvider implements MusicProvider {
   private readonly baseUrl: string;
+  private readonly config: PockedioConfig;
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
 
   constructor(config: PockedioConfig, fetchImpl: FetchLike = fetch, timeoutMs = 10_000) {
+    this.config = config;
     this.baseUrl = config.netease.baseUrl.replace(/\/$/, "");
     this.fetchImpl = fetchImpl;
     this.timeoutMs = timeoutMs;
@@ -74,7 +77,7 @@ export class NetEaseProvider implements MusicProvider {
 
   async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
     const json = await this.getJson<NetEaseUrlResponse>(
-      `/song/url/v1?id=${encodeURIComponent(trackId)}&level=standard`
+      `/song/url/v1?id=${encodeURIComponent(trackId)}&level=${encodeURIComponent(this.config.netease.qualityLevel)}`
     );
     const item = Array.isArray(json.data) ? json.data[0] : undefined;
     const playableUrl = valueToString(item?.url);
@@ -111,7 +114,7 @@ export class NetEaseProvider implements MusicProvider {
   }
 
   private async getJson<T>(path: string): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
+    const url = this.withAccountParams(`${this.baseUrl}${path}`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let response: Response;
@@ -133,6 +136,18 @@ export class NetEaseProvider implements MusicProvider {
     } catch {
       throw new Error("NetEase request returned invalid JSON.");
     }
+  }
+
+  private withAccountParams(rawUrl: string): string {
+    const cookie = readNetEaseCookie(this.config);
+    if (!cookie) {
+      return rawUrl;
+    }
+
+    const url = new URL(rawUrl);
+    url.searchParams.set("cookie", cookie);
+    url.searchParams.set("os", "pc");
+    return url.toString();
   }
 }
 

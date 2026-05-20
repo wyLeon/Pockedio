@@ -10,6 +10,8 @@ export type SessionIntentType =
   | "pending_station_refinement"
   | "playback_request"
   | "direct_playback_request"
+  | "single_track_playback"
+  | "single_track_selection"
   | "feedback_like"
   | "feedback_skip"
   | "feedback_ban"
@@ -39,6 +41,8 @@ const intentTypes = new Set<SessionIntentType>([
   "pending_station_refinement",
   "playback_request",
   "direct_playback_request",
+  "single_track_playback",
+  "single_track_selection",
   "feedback_like",
   "feedback_skip",
   "feedback_ban",
@@ -60,6 +64,7 @@ export async function parseIntent(input: string, llm?: LlmClient): Promise<Sessi
       "Classify this Pockedio user message into one intent.",
       "Use identity_capability when the user asks who Pockedio is, who is talking, or what Pockedio can do.",
       "Prefer playback_request for ordinary music requests.",
+      "Use single_track_playback when the user asks to play one specific song title, especially 'play [song] by [artist]'.",
       "Use music_recommendation when the user asks what music they should listen to but does not ask to play it.",
       "Use explicit_dj_audio_request only when the user asks for spoken/audio DJ narration.",
       `Message: ${input}`
@@ -116,7 +121,13 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(play it directly|play directly|direct playback|start playback|just play|no discussion)\b/.test(text)) {
     return { type: "direct_playback_request", confidence: "high" };
   }
+  if (isSingleTrackPlaybackText(text)) {
+    return { type: "single_track_playback", confidence: "high" };
+  }
   if (isMusicRecommendationText(text)) {
+    return { type: "music_recommendation", confidence: "high" };
+  }
+  if (isOpenEndedStationSuggestionText(text)) {
     return { type: "music_recommendation", confidence: "high" };
   }
   if (isPlaybackRequestText(text)) {
@@ -133,7 +144,13 @@ function isIdentityCapabilityText(text: string): boolean {
 
 function isMusicRecommendationText(text: string): boolean {
   return /\b(what music should i listen to|what music would .*suggest|what should i listen to|what should i play|recommend music|recommend some music|suggest music|suggest some music|suggest something|what .*music.*suggest)\b/.test(text)
-    || /\b(i'?m|i am|feeling|feel)\b.*\b(exhausted|tired|stressed|grumpy|sad|anxious)\b.*\b(relax|relaxation|calm|rest|unwind)\b/.test(text);
+    || /\b(i'?m|i am|feeling|feel)\b.*\b(exhausted|tired|stressed|grumpy|sad|anxious)\b.*\b(relax|relaxation|calm|rest|unwind)\b/.test(text)
+    || /(应该|适合).{0,8}听什么|听什么.{0,8}(好|合适|适合)|推荐.{0,8}(音乐|歌|歌曲)|建议.{0,8}(音乐|歌|歌曲)/.test(text);
+}
+
+function isOpenEndedStationSuggestionText(text: string): boolean {
+  return /^want\s+(?:some|something)\b/.test(text)
+    || /^(?:give me|give something|something for)\b/.test(text);
 }
 
 function isPlaybackRequestText(text: string): boolean {
@@ -142,12 +159,36 @@ function isPlaybackRequestText(text: string): boolean {
     || hasMusicSubjectWithUseCase(text);
 }
 
+function isSingleTrackPlaybackText(text: string): boolean {
+  const directSong = text.match(/^(?:please\s+)?(?:play|put on|queue|start)\s+(.+)$/);
+  if (!directSong) {
+    return false;
+  }
+
+  const requested = directSong[1].trim();
+  if (!requested || requested.length > 90) {
+    return false;
+  }
+  if (/\b(song|track|music|songs|tracks|playlist|station|set|vibe|mood|something|some|anything|more|similar|like this|like that)\b/.test(requested)) {
+    return false;
+  }
+  if (/\b(for|around|based on|in the style of|sounds like|similar to)\b/.test(requested)) {
+    return false;
+  }
+  if (/^(jazz|ambient|classical|piano|lofi|lo-fi|rock|pop|edm|folk|hip hop|r&b|instrumental|chill|relaxing|focus)$/i.test(requested)) {
+    return false;
+  }
+
+  return /\sby\s.+/.test(requested) || requested.split(/\s+/).length <= 8;
+}
+
 function hasPlaybackCommand(text: string): boolean {
   return /\b(play|put on|give me|queue|start)\b/.test(text);
 }
 
 function hasMusicSubjectWithAction(text: string): boolean {
-  return /\b(listen|hear|want|need|would like)\b.*\b(music|musics|song|songs|track|tracks|playlist|set)\b/.test(text);
+  return /\b(listen|hear|want|need|would like)\b.*\b(music|musics|song|songs|track|tracks|playlist|set)\b/.test(text)
+    || /(想听|想要听|放点|来点|播放|给我).{0,16}(音乐|歌|歌曲|钢琴|爵士|氛围|放松|纯音乐)/.test(text);
 }
 
 function hasMusicSubjectWithUseCase(text: string): boolean {

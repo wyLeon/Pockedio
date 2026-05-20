@@ -163,6 +163,70 @@ describe("generateStation", () => {
     ]);
   });
 
+  it("keeps provider promotion out of station planning prompts and rationales", async () => {
+    const provider = new FakeProvider();
+    let observedPrompt = "";
+    const llm: StationLlmClient = {
+      generateJson: async (prompt) => {
+        observedPrompt = prompt;
+        return {
+          ok: true,
+          value: {
+            tracks: [
+              { title: "A", artist: "Artist A", rationale: "网易云资源丰富，所以适合这个请求。" },
+              { title: "B", artist: "Artist B", rationale: "网易云可搜到，平台资源方便。" },
+              { title: "C", artist: "Artist C", rationale: "calm texture for the morning" },
+              { title: "D", artist: "Artist D", rationale: "gentle pace" },
+              { title: "E", artist: "Artist E", rationale: "soft landing" }
+            ]
+          }
+        };
+      },
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    const station = await generateStation({
+      request: "give me something calm",
+      config: makeConfig(),
+      provider,
+      llm
+    });
+
+    expect(observedPrompt).not.toContain("NetEase-searchable");
+    expect(observedPrompt).toContain("Do not mention the music provider");
+    expect(station.tracks[0].rationale).toBe("Fits the requested station.");
+    expect(station.tracks[1].rationale).toBe("Fits the requested station.");
+  });
+
+  it("keeps generated rationales in English by default", async () => {
+    const provider = new FakeProvider();
+    const llm: StationLlmClient = {
+      generateJson: async () => ({
+        ok: true,
+        value: {
+          tracks: [
+            { title: "A", artist: "Artist A", rationale: "这首歌适合放松。" },
+            { title: "B", artist: "Artist B", rationale: "soft focus texture" },
+            { title: "C", artist: "Artist C", rationale: "calm texture" },
+            { title: "D", artist: "Artist D", rationale: "gentle pace" },
+            { title: "E", artist: "Artist E", rationale: "soft landing" }
+          ]
+        }
+      }),
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    const station = await generateStation({
+      request: "我今天很累",
+      config: makeConfig(),
+      provider,
+      llm
+    });
+
+    expect(station.tracks[0].rationale).toBe("Fits the requested station.");
+    expect(station.tracks[1].rationale).toBe("soft focus texture");
+  });
+
   it("keeps unavailable provider results in the station instead of throwing", async () => {
     const provider = new FakeProvider();
     provider.getPlayableUrl = async (trackId: string) => ({

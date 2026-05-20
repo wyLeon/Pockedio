@@ -93,7 +93,13 @@ describe("status report", () => {
         currentPlayback: "Title - Artist",
         scheduledJobs: "Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled; mood checks hourly while serve runs"
       },
-      netease: { baseUrl: "http://127.0.0.1:3000", reachable: true },
+      netease: {
+        baseUrl: "http://127.0.0.1:3000",
+        reachable: true,
+        authMode: "account",
+        qualityLevel: "exhigh",
+        cookiePresent: true
+      },
       llm: {
         provider: "OpenAI-compatible",
         model: "deepseek-chat",
@@ -119,7 +125,7 @@ describe("status report", () => {
     expect(text).toContain("- Current playback: Title - Artist");
     expect(text).toContain("- Scheduled jobs: Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled");
     expect(text).toContain("Integrations");
-    expect(text).toContain("- NetEase music: reachable");
+    expect(text).toContain("- NetEase music: reachable (account-backed, exhigh, http://127.0.0.1:3000)");
     expect(text).toContain("- LLM: configured (OpenAI-compatible, deepseek-chat, https://api.deepseek.com, key env DEEPSEEK_API_KEY)");
     expect(text).toContain("Memory");
     expect(text).toContain("- Last session: 2026-05-19T02:00:00.000Z");

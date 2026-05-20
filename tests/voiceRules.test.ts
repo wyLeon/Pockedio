@@ -83,4 +83,33 @@ describe("FishAudio adapter", () => {
       expect(fs.existsSync(result.audioPath)).toBe(true);
     }
   });
+
+  it("passes configured reference audio and text to FishAudio", async () => {
+    const config = makeConfig();
+    const referenceAudioPath = path.join(path.dirname(config.paths.database), "mina.wav");
+    fs.mkdirSync(path.dirname(referenceAudioPath), { recursive: true });
+    fs.writeFileSync(referenceAudioPath, "fake reference wav");
+    config.fishAudio.referenceAudioPath = referenceAudioPath;
+    config.fishAudio.referenceText = "Mina is here. Soft lights, warm songs, and a little room to breathe.";
+    let observedArgs: string[] = [];
+    const runner: FishAudioProcessRunner = async (_command, args) => {
+      observedArgs = args;
+      const outputIndex = args.indexOf("--output");
+      fs.writeFileSync(args[outputIndex + 1], "fake wav");
+      return {
+        ok: true,
+        exitCode: 0,
+        signal: null,
+        stdout: "",
+        stderr: ""
+      };
+    };
+
+    await synthesizeFishAudio(config, "Track two is ready.", { runner });
+
+    expect(observedArgs).toContain("--reference-audio");
+    expect(observedArgs).toContain(referenceAudioPath);
+    expect(observedArgs).toContain("--reference-text");
+    expect(observedArgs).toContain(config.fishAudio.referenceText);
+  });
 });

@@ -30,11 +30,38 @@ describe("parseIntent", () => {
     })).toBe(false);
   });
 
+  it("maps specific song requests to single-track playback", async () => {
+    await expect(parseIntent("play To Be Alone With You by Sufjan Stevens")).resolves.toEqual({
+      type: "single_track_playback",
+      confidence: "high"
+    });
+    await expect(parseIntent("play Intro")).resolves.toEqual({
+      type: "single_track_playback",
+      confidence: "high"
+    });
+  });
+
+  it("keeps broad playback requests as station playback", async () => {
+    for (const input of [
+      "play something for deep work",
+      "play some late night jazz",
+      "play something like To Be Alone With You",
+      "play relaxing music"
+    ]) {
+      await expect(parseIntent(input)).resolves.toEqual({
+        type: "playback_request",
+        confidence: "high"
+      });
+    }
+  });
+
   it("maps recommendation-only listening questions without starting playback", async () => {
     for (const input of [
       "I'm a little grumpy, what music should I listen to?",
       "I'm a little exhausted and want some relaxation, what music would suggest to me.",
       "I'm exhausted now, want some relaxation.",
+      "Want some soft jazz to start a rainy morning.",
+      "Give me something to start my new day.",
       "what should I listen to?",
       "recommend music for a low mood",
       "suggest something relaxing for me",

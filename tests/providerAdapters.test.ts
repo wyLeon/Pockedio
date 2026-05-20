@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config/load.js";
+import { ensureRuntimeDirs, loadConfig } from "../src/config/load.js";
+import { saveNetEaseCookie } from "../src/config/neteaseAuth.js";
 import { playFile, playUrl, startDuckedUrlWithIntro, startUrlPlayback, type PlaybackHandle, type ProcessRunner, type ProcessStarter } from "../src/player/afplay.js";
 import { NetEaseProvider } from "../src/providers/netease.js";
 
@@ -59,6 +60,29 @@ describe("NetEaseProvider", () => {
       playableUrl: "https://example.com/song.mp3",
       urlType: "mp3"
     });
+  });
+
+  it("requests account-backed playable URLs with configured quality and cookie", async () => {
+    const config = makeConfig();
+    config.netease.authMode = "account";
+    config.netease.qualityLevel = "lossless";
+    ensureRuntimeDirs(config, { POCKEDIO_HOME: "/tmp/pockedio-provider-test" });
+    saveNetEaseCookie(config, "MUSIC_U=member-token");
+    const requestedUrls: string[] = [];
+    const provider = new NetEaseProvider(config, async (url) => {
+      requestedUrls.push(String(url));
+      return jsonResponse({
+        data: [{ id: 1, url: "https://example.com/song.mp3", type: "mp3", code: 200 }]
+      });
+    });
+
+    await provider.getPlayableUrl("1");
+
+    const requested = new URL(requestedUrls[0]);
+    expect(requested.pathname).toBe("/song/url/v1");
+    expect(requested.searchParams.get("level")).toBe("lossless");
+    expect(requested.searchParams.get("cookie")).toBe("MUSIC_U=member-token");
+    expect(requested.searchParams.get("os")).toBe("pc");
   });
 
   it("returns unavailable when URL is missing", async () => {

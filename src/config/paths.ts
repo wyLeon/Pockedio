@@ -28,3 +28,7 @@ export function getPersonaPath(env: PockedioEnv = process.env): string {
 export function getDjAudioDir(env: PockedioEnv = process.env): string {
   return path.join(getPockedioHome(env), "audio", "dj");
 }
+
+export function getNetEaseCookiePath(env: PockedioEnv = process.env): string {
+  return path.join(getPockedioHome(env), "secrets", "netease.cookie");
+}

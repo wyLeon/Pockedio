@@ -2,18 +2,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getConfigPath, getDatabasePath, getDjAudioDir, getPockedioHome } from "../src/config/paths.js";
+import { getConfigPath, getDatabasePath, getDjAudioDir, getNetEaseCookiePath, getPockedioHome } from "../src/config/paths.js";
 import { ensureRuntimeDirs, loadConfig, saveConfig } from "../src/config/load.js";
+import { normalizeNetEaseCookie, readNetEaseCookie, saveNetEaseCookie } from "../src/config/neteaseAuth.js";
 import {
+  __netEaseQrLoginForTests,
   buildConfigFromAnswers,
   buildConfigFromFirstSetupAnswers,
   formatCalendarSetupSummary,
   formatDiarySetupSummary,
   formatScheduledDjSetupSummary,
   formatSetupTasteImportSummary,
+  formatNetEaseSetupSummary,
   formatWeatherSetupSummary,
   getDjPreviewPath,
-  getDjTrialMenuChoices
+  getDjTrialMenuChoices,
+  getNetEaseQualityMenuChoices,
+  getNetEaseSetupMethodChoices
 } from "../src/config/setup.js";
 
 const tempDirs: string[] = [];
@@ -22,6 +27,12 @@ function makeEnv(): NodeJS.ProcessEnv {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-config-test-"));
   tempDirs.push(home);
   return { POCKEDIO_HOME: home };
+}
+
+function saveConfigAndReload(env: NodeJS.ProcessEnv, config: ReturnType<typeof loadConfig>): ReturnType<typeof loadConfig> {
+  ensureRuntimeDirs(config, env);
+  saveConfig(config, env);
+  return loadConfig(env);
 }
 
 afterEach(() => {
@@ -38,6 +49,7 @@ describe("config paths", () => {
     expect(getConfigPath(env)).toBe(path.join(env.POCKEDIO_HOME!, "config.json"));
     expect(getDatabasePath(env)).toBe(path.join(env.POCKEDIO_HOME!, "pockedio.sqlite"));
     expect(getDjAudioDir(env)).toBe(path.join(env.POCKEDIO_HOME!, "audio", "dj"));
+    expect(getNetEaseCookiePath(env)).toBe(path.join(env.POCKEDIO_HOME!, "secrets", "netease.cookie"));
   });
 });
 
@@ -46,6 +58,10 @@ describe("config load and save", () => {
     const config = loadConfig(makeEnv());
 
     expect(config.netease.baseUrl).toBe("http://127.0.0.1:3000");
+    expect(config.music.provider).toBe("netease");
+    expect(config.netease.authMode).toBe("anonymous");
+    expect(config.netease.qualityLevel).toBe("standard");
+    expect(config.paths.neteaseCookie).toContain(path.join("secrets", "netease.cookie"));
     expect(config.weather.location).toBe("Shanghai");
     expect(config.calendar.enabled).toBe(true);
     expect(config.diary.enabled).toBe(false);
@@ -87,6 +103,43 @@ describe("config load and save", () => {
     expect(config.llm.model).toBe("deepseek-v4-flash");
     expect(config.llm.baseUrl).toBe("https://api.deepseek.com");
     expect(config.llm.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
+  });
+
+  it("loads FishAudio reference voice settings", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+    current.fishAudio.referenceAudioPath = "/tmp/mina.wav";
+    current.fishAudio.referenceText = "Mina is here.";
+
+    saveConfig(current, env);
+    const config = loadConfig(env);
+
+    expect(config.fishAudio.referenceAudioPath).toBe("/tmp/mina.wav");
+    expect(config.fishAudio.referenceText).toBe("Mina is here.");
+  });
+
+  it("stores NetEase account cookies outside normal config", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+    const config = saveConfigAndReload(env, {
+      ...current,
+      netease: {
+        ...current.netease,
+        authMode: "account",
+        qualityLevel: "exhigh"
+      }
+    });
+
+    ensureRuntimeDirs(config, env);
+    saveNetEaseCookie(config, "abc123");
+
+    expect(readNetEaseCookie(config)).toBe("MUSIC_U=abc123");
+    expect(fs.readFileSync(config.paths.neteaseCookie, "utf8")).toContain("MUSIC_U=abc123");
+  });
+
+  it("normalizes pasted NetEase cookies", () => {
+    expect(normalizeNetEaseCookie("MUSIC_U=abc; other=1")).toBe("MUSIC_U=abc; other=1");
+    expect(normalizeNetEaseCookie("abc")).toBe("MUSIC_U=abc");
   });
 
   it("saves and loads a valid MBTI type", () => {
@@ -193,6 +246,10 @@ describe("config load and save", () => {
     });
 
     expect(config.netease.baseUrl).toBe("http://localhost:3000");
+    expect(config.netease).toMatchObject({
+      authMode: "anonymous",
+      qualityLevel: "standard"
+    });
     expect(config.llm).toMatchObject({
       model: "deepseek-chat",
       baseUrl: "https://api.deepseek.com",
@@ -203,9 +260,35 @@ describe("config load and save", () => {
       style: "direct",
       personaPreference: "modern male radio DJ"
     });
+    expect(config.fishAudio.referenceAudioPath).toBe(path.join(os.homedir(), ".pockedio", "audio", "previews", "nova.wav"));
+    expect(config.fishAudio.referenceText).toBe("Nova here. Bright rhythm, clean motion, and just enough spark to move.");
     expect(config.weather.location).toBe("Guangzhou");
     expect(config.calendar.enabled).toBe(false);
     expect(config.diary).toEqual({ enabled: true, path: "/Users/leonw/Diary" });
+  });
+
+  it("builds first setup music provider account settings", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+
+    const config = buildConfigFromFirstSetupAnswers(current, {
+      neteaseSetupMethod: "cookie",
+      musicProvider: "netease",
+      neteaseQualityLevel: "lossless",
+      djChoice: "Mina",
+      listenToDjTrial: false,
+      importTasteNow: false,
+      useWeather: false,
+      useCalendar: false,
+      useDiary: false
+    });
+
+    expect(config.netease).toMatchObject({
+      authMode: "account",
+      qualityLevel: "lossless"
+    });
+    expect(config.music.provider).toBe("netease");
+    expect(formatNetEaseSetupSummary(config)).toBe("NetEase Cloud Music - account-backed (lossless)");
   });
 
   it("enables calendar from first setup when user chooses other context", () => {
@@ -294,6 +377,53 @@ describe("config load and save", () => {
       { name: "Nova", value: "Nova" },
       { name: "Choose your DJ", value: "choose" }
     ]);
+  });
+
+  it("labels NetEase setup options for first setup", () => {
+    expect(getNetEaseSetupMethodChoices()).toEqual([
+      { name: "Yes, scan QR", value: "qr" },
+      { name: "Yes, paste MUSIC_U cookie", value: "cookie" },
+      { name: "Not now, use anonymous playback", value: "anonymous" }
+    ]);
+    expect(getNetEaseQualityMenuChoices().slice(0, 5)).toEqual([
+      { name: "hires - best quality, may be unavailable", value: "hires" },
+      { name: "lossless - very high quality, needs support", value: "lossless" },
+      { name: "exhigh - best daily default", value: "exhigh" },
+      { name: "higher - good fallback", value: "higher" },
+      { name: "standard - safest fallback", value: "standard" }
+    ]);
+    expect(getNetEaseQualityMenuChoices()).toContainEqual({
+      name: "Back to account options",
+      value: "back"
+    });
+  });
+
+  it("creates a visible NetEase QR image before polling", async () => {
+    const env = makeEnv();
+    const config = loadConfig(env);
+    ensureRuntimeDirs(config, env);
+    const pngBase64 = Buffer.from("fake-png").toString("base64");
+    const fetchImpl: typeof fetch = async (url) => {
+      const pathname = new URL(String(url)).pathname;
+      if (pathname === "/login/qr/key") {
+        return new Response(JSON.stringify({ data: { unikey: "qr-key" } }), { status: 200 });
+      }
+      if (pathname === "/login/qr/create") {
+        return new Response(JSON.stringify({ data: { qrimg: `data:image/png;base64,${pngBase64}` } }), { status: 200 });
+      }
+      throw new Error(`unexpected URL ${String(url)}`);
+    };
+
+    const result = await __netEaseQrLoginForTests.start(config, fetchImpl);
+
+    expect(result).toMatchObject({
+      ok: true,
+      key: "qr-key",
+      qrPath: path.join(env.POCKEDIO_HOME!, "secrets", "netease-login-qr.png")
+    });
+    if (result.ok && result.qrPath) {
+      expect(fs.readFileSync(result.qrPath, "utf8")).toBe("fake-png");
+    }
   });
 
   it("keeps setup taste import summaries concise", () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { runCalendarSetup, runSetup } from "./config/setup.js";
+import { runCalendarSetup, runNetEaseSetup, runSetup } from "./config/setup.js";
 import { pockedioVersion } from "./index.js";
 import { runServe } from "./scheduler/serve.js";
 import { runInteractiveSession } from "./session/sessionRunner.js";
@@ -24,6 +24,10 @@ program
   .action(async (section?: string) => {
     if (section === "calendar") {
       await runCalendarSetup();
+      return;
+    }
+    if (section === "netease") {
+      await runNetEaseSetup();
       return;
     }
     if (section) {

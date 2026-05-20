@@ -12,14 +12,19 @@ import { readWeatherContext, type WeatherContext } from "../context/weather.js";
 import type { TasteImportResult } from "../taste/importTaste.js";
 import { importTasteFromNetEasePlaylist } from "../taste/neteasePlaylist.js";
 import { ensureRuntimeDirs, loadConfig, saveConfig } from "./load.js";
+import { clearNetEaseCookie, saveNetEaseCookie } from "./neteaseAuth.js";
 import {
   djProgramLengths,
   djStyles,
   mbtiTypes,
+  musicProviders,
+  neteaseQualityLevels,
   pockedioConfigSchema,
   type DjProgramLength,
   type DjStyle,
   type MbtiType,
+  type MusicProviderName,
+  type NetEaseQualityLevel,
   type PockedioConfig
 } from "./schema.js";
 
@@ -28,6 +33,9 @@ type DjChoice = typeof djChoices[number];
 type DjTrialMenuValue = DjChoice | "choose";
 const scheduledDjSetupChoices = ["not_now", "morning", "evening", "both"] as const;
 type ScheduledDjSetupChoice = typeof scheduledDjSetupChoices[number];
+const neteaseSetupMethods = ["qr", "cookie", "anonymous"] as const;
+type NetEaseSetupMethod = typeof neteaseSetupMethods[number];
+type NetEaseQualityMenuValue = NetEaseQualityLevel | "back";
 
 type SetupAnswers = {
   neteaseBaseUrl: string;
@@ -56,6 +64,11 @@ type SetupAnswers = {
 };
 
 export type FirstSetupAnswers = {
+  musicProvider?: MusicProviderName;
+  neteaseSetupMethod?: NetEaseSetupMethod;
+  neteaseCookie?: string;
+  neteaseQualityLevel?: NetEaseQualityLevel;
+  neteaseSetupApplied?: boolean;
   listenToDjTrial: boolean;
   previewDj?: DjChoice;
   djChoice: DjChoice;
@@ -64,7 +77,11 @@ export type FirstSetupAnswers = {
   useWeather: boolean;
   weatherLocation?: string;
   useCalendar: boolean;
+  calendarSetupApplied?: boolean;
+  calendarSetupAvailable?: boolean;
   useDiary: boolean;
+  diarySetupApplied?: boolean;
+  diarySetupAvailable?: boolean;
   diaryPath?: string;
   scheduledDjPrograms?: ScheduledDjSetupChoice;
   morningDjReadyTime?: string;
@@ -74,14 +91,21 @@ export type FirstSetupAnswers = {
 export async function runSetup(): Promise<void> {
   const current = loadConfig();
   const answers = await promptForSetup(current);
-  const config = buildConfigFromFirstSetupAnswers(current, answers);
+  let config = buildConfigFromFirstSetupAnswers(current, answers);
   ensureRuntimeDirs(config);
   saveConfig(config);
+  if (!answers.neteaseSetupApplied) {
+    config = await applyNetEaseSetupChoice(config, answers);
+  }
   runMigrations(config);
   ensurePersonaFile(config);
 
-  let calendarStatus = answers.useCalendar ? "enabled" : "skipped";
-  if (answers.useCalendar) {
+  let calendarStatus = answers.useCalendar
+    ? answers.calendarSetupApplied
+      ? answers.calendarSetupAvailable ? "enabled" : "unavailable"
+      : "enabled"
+    : "skipped";
+  if (answers.useCalendar && !answers.calendarSetupApplied) {
     console.log("");
     console.log("If macOS asks for Calendar permission, choose Allow.");
     const calendar = await withSetupStatus("Checking calendar...", () => setupCalendarContext(config));
@@ -90,8 +114,12 @@ export async function runSetup(): Promise<void> {
     console.log(formatCalendarSetupSummary(calendar));
   }
 
-  let diaryStatus = answers.useDiary ? "enabled" : "skipped";
-  if (answers.useDiary) {
+  let diaryStatus = answers.useDiary
+    ? answers.diarySetupApplied
+      ? answers.diarySetupAvailable ? "enabled" : "unavailable"
+      : "enabled"
+    : "skipped";
+  if (answers.useDiary && !answers.diarySetupApplied) {
     console.log("");
     const diary = await withSetupStatus("Checking diary...", () => setupDiaryContext(config));
     diaryStatus = diary ? "enabled" : "unavailable";
@@ -109,6 +137,7 @@ export async function runSetup(): Promise<void> {
 
   console.log("");
   console.log("Setup complete");
+  console.log(`  Music            ${formatNetEaseSetupSummary(config)}`);
   console.log(`  DJ                ${config.dj.displayName}`);
   console.log(`  Taste             ${answers.importTasteNow ? "imported" : "skipped"}`);
   console.log(`  Calendar          ${calendarStatus}`);
@@ -117,6 +146,23 @@ export async function runSetup(): Promise<void> {
   console.log("");
   console.log("Next");
   console.log("  pockedio");
+}
+
+export async function runNetEaseSetup(): Promise<void> {
+  const current = loadConfig();
+  console.log("NetEase playback");
+  console.log("Connecting your account can reduce unavailable tracks and preview-only playback.");
+  console.log("");
+
+  const answers = await promptForNetEaseSetup(current);
+  let config = buildConfigFromNetEaseSetupAnswers(current, answers);
+  ensureRuntimeDirs(config);
+  saveConfig(config);
+  config = await applyNetEaseSetupChoice(config, answers);
+
+  console.log("");
+  console.log("Saved");
+  console.log(`  Music            ${formatNetEaseSetupSummary(config)}`);
 }
 
 export async function runCalendarSetup(): Promise<void> {
@@ -162,6 +208,17 @@ export async function runCalendarSetup(): Promise<void> {
 
 export async function promptForSetup(current: PockedioConfig): Promise<FirstSetupAnswers> {
   console.log("Pockedio first setup");
+  console.log("");
+
+  console.log("Music provider");
+  const musicProviderAnswer = await promptForMusicProvider(current);
+  const neteaseAnswers = musicProviderAnswer.musicProvider === "netease"
+    ? await promptForNetEaseSetup(current)
+    : { neteaseSetupMethod: "anonymous" as const };
+  const neteaseSetupResult = await applyFirstSetupNetEaseChoice(current, {
+    ...musicProviderAnswer,
+    ...neteaseAnswers
+  });
   console.log("");
 
   const trialAnswer = await inquirer.prompt<Pick<FirstSetupAnswers, "listenToDjTrial">>([
@@ -262,6 +319,7 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
       default: false
     }
   ]);
+  const calendarSetupResult = await applyFirstSetupCalendarChoice(current, calendarGate);
 
   console.log("");
   console.log("Diary summaries are stored locally. If your LLM is remote, summary generation may send a diary excerpt.");
@@ -280,6 +338,9 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
       when: (answers) => answers.useDiary
     }
   ]);
+  const diarySetupResult = await applyFirstSetupDiaryChoice(current, {
+    ...diaryGate
+  });
 
   console.log("");
   console.log("Scheduled DJ programs");
@@ -319,6 +380,9 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
   ]);
 
   return {
+    ...musicProviderAnswer,
+    ...neteaseAnswers,
+    ...neteaseSetupResult,
     ...trialAnswer,
     ...previewAnswer,
     ...djAnswers,
@@ -326,10 +390,150 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
     ...weatherGate,
     ...weatherAnswers,
     ...calendarGate,
+    ...calendarSetupResult,
     ...diaryGate,
+    ...diarySetupResult,
     ...scheduleGate,
     ...scheduleAnswers
   };
+}
+
+async function applyFirstSetupNetEaseChoice(
+  current: PockedioConfig,
+  answers: Pick<FirstSetupAnswers, "musicProvider" | "neteaseSetupMethod" | "neteaseCookie" | "neteaseQualityLevel">
+): Promise<Pick<FirstSetupAnswers, "neteaseSetupApplied" | "neteaseSetupMethod" | "neteaseQualityLevel">> {
+  if (answers.musicProvider !== "netease") {
+    return {};
+  }
+
+  const config = buildConfigFromNetEaseSetupAnswers(current, answers);
+  ensureRuntimeDirs(config);
+  saveConfig(config);
+  const appliedConfig = await applyNetEaseSetupChoice(config, answers);
+  return {
+    neteaseSetupApplied: true,
+    neteaseSetupMethod: appliedConfig.netease.authMode === "account" ? answers.neteaseSetupMethod : "anonymous",
+    neteaseQualityLevel: appliedConfig.netease.qualityLevel
+  };
+}
+
+async function applyFirstSetupCalendarChoice(
+  current: PockedioConfig,
+  answers: Pick<FirstSetupAnswers, "useCalendar">
+): Promise<Pick<FirstSetupAnswers, "calendarSetupApplied" | "calendarSetupAvailable">> {
+  if (!answers.useCalendar) {
+    return {};
+  }
+
+  const config = pockedioConfigSchema.parse({
+    ...current,
+    calendar: { enabled: true }
+  });
+  ensureRuntimeDirs(config);
+  saveConfig(config);
+  runMigrations(config);
+
+  console.log("");
+  console.log("If macOS asks for Calendar permission, choose Allow.");
+  const calendar = await withSetupStatus("Checking calendar...", () => setupCalendarContext(config));
+  console.log("");
+  console.log(formatCalendarSetupSummary(calendar));
+  return {
+    calendarSetupApplied: true,
+    calendarSetupAvailable: calendar.available
+  };
+}
+
+async function applyFirstSetupDiaryChoice(
+  current: PockedioConfig,
+  answers: Pick<FirstSetupAnswers, "useDiary" | "diaryPath">
+): Promise<Pick<FirstSetupAnswers, "diarySetupApplied" | "diarySetupAvailable">> {
+  if (!answers.useDiary) {
+    return {};
+  }
+
+  const config = pockedioConfigSchema.parse({
+    ...current,
+    diary: {
+      enabled: true,
+      path: answers.diaryPath
+    }
+  });
+  ensureRuntimeDirs(config);
+  saveConfig(config);
+
+  console.log("");
+  const diary = await withSetupStatus("Checking diary...", () => setupDiaryContext(config));
+  console.log("");
+  console.log(formatDiarySetupSummary(diary));
+  return {
+    diarySetupApplied: true,
+    diarySetupAvailable: Boolean(diary)
+  };
+}
+
+async function promptForMusicProvider(current: PockedioConfig): Promise<Pick<FirstSetupAnswers, "musicProvider">> {
+  return inquirer.prompt<Pick<FirstSetupAnswers, "musicProvider">>([
+    {
+      type: "list",
+      name: "musicProvider",
+      message: "Music provider",
+      choices: [
+        { name: "NetEase Cloud Music", value: "netease" }
+      ],
+      default: musicProviders.includes(current.music.provider) ? current.music.provider : "netease"
+    }
+  ]);
+}
+
+async function promptForNetEaseSetup(current: PockedioConfig): Promise<Pick<FirstSetupAnswers, "neteaseSetupMethod" | "neteaseCookie" | "neteaseQualityLevel">> {
+  while (true) {
+    const methodAnswer = await inquirer.prompt<Pick<FirstSetupAnswers, "neteaseSetupMethod">>([
+      {
+        type: "list",
+        name: "neteaseSetupMethod",
+        message: "Connect NetEase account now?",
+        choices: getNetEaseSetupMethodChoices(),
+        default: inferCurrentNetEaseSetupMethod(current)
+      }
+    ]);
+
+    if (methodAnswer.neteaseSetupMethod === "anonymous") {
+      return methodAnswer;
+    }
+
+    const qualityAnswer = await inquirer.prompt<{ neteaseQualityLevel: NetEaseQualityMenuValue }>([
+      {
+        type: "list",
+        name: "neteaseQualityLevel",
+        message: "Preferred playback quality",
+        choices: getNetEaseQualityMenuChoices(),
+        default: current.netease.qualityLevel === "standard" ? "exhigh" : current.netease.qualityLevel
+      }
+    ]);
+
+    if (qualityAnswer.neteaseQualityLevel === "back") {
+      continue;
+    }
+
+    const cookieAnswer = methodAnswer.neteaseSetupMethod === "cookie"
+      ? await inquirer.prompt<Pick<FirstSetupAnswers, "neteaseCookie">>([
+        {
+          type: "password",
+          name: "neteaseCookie",
+          message: "Paste MUSIC_U cookie",
+          mask: "*",
+          validate: (value) => value.trim().length > 0 || "Paste MUSIC_U=... or the MUSIC_U value."
+        }
+      ])
+      : {};
+
+    return {
+      ...methodAnswer,
+      neteaseQualityLevel: qualityAnswer.neteaseQualityLevel,
+      ...cookieAnswer
+    };
+  }
 }
 
 export async function promptForAdvancedSetup(current: PockedioConfig): Promise<SetupAnswers> {
@@ -482,19 +686,40 @@ export async function promptForAdvancedSetup(current: PockedioConfig): Promise<S
 export function buildConfigFromFirstSetupAnswers(current: PockedioConfig, answers: FirstSetupAnswers): PockedioConfig {
   const djProfile = getDjProfile(answers.djChoice);
   const scheduledChoice = answers.scheduledDjPrograms ?? inferCurrentScheduledDjChoice(current);
+  const musicProvider = answers.musicProvider ?? current.music.provider;
+  const neteaseSetupMethod = answers.neteaseSetupMethod ?? inferCurrentNetEaseSetupMethod(current);
   return pockedioConfigSchema.parse({
     ...current,
+    music: {
+      provider: musicProvider
+    },
+    netease: {
+      ...current.netease,
+      authMode: neteaseSetupMethod === "anonymous" ? "anonymous" : "account",
+      qualityLevel: neteaseSetupMethod === "anonymous"
+        ? "standard"
+        : answers.neteaseQualityLevel ?? current.netease.qualityLevel
+    },
     weather: {
       location: answers.useWeather
         ? answers.weatherLocation || current.weather.location
         : current.weather.location
     },
     calendar: {
-      enabled: answers.useCalendar
+      enabled: answers.calendarSetupApplied
+        ? Boolean(answers.calendarSetupAvailable)
+        : answers.useCalendar
     },
     diary: {
-      enabled: answers.useDiary,
+      enabled: answers.diarySetupApplied
+        ? Boolean(answers.diarySetupAvailable)
+        : answers.useDiary,
       path: answers.useDiary ? answers.diaryPath : undefined
+    },
+    fishAudio: {
+      ...current.fishAudio,
+      referenceAudioPath: getDjVoiceReferencePath(answers.djChoice),
+      referenceText: getDjVoiceReferenceText(answers.djChoice)
     },
     dj: {
       ...current.dj,
@@ -517,10 +742,28 @@ export function buildConfigFromFirstSetupAnswers(current: PockedioConfig, answer
   });
 }
 
+export function buildConfigFromNetEaseSetupAnswers(
+  current: PockedioConfig,
+  answers: Pick<FirstSetupAnswers, "neteaseSetupMethod" | "neteaseQualityLevel">
+): PockedioConfig {
+  const neteaseSetupMethod = answers.neteaseSetupMethod ?? inferCurrentNetEaseSetupMethod(current);
+  return pockedioConfigSchema.parse({
+    ...current,
+    netease: {
+      ...current.netease,
+      authMode: neteaseSetupMethod === "anonymous" ? "anonymous" : "account",
+      qualityLevel: neteaseSetupMethod === "anonymous"
+        ? "standard"
+        : answers.neteaseQualityLevel ?? current.netease.qualityLevel
+    }
+  });
+}
+
 export function buildConfigFromAnswers(current: PockedioConfig, answers: SetupAnswers): PockedioConfig {
   return pockedioConfigSchema.parse({
     ...current,
     netease: {
+      ...current.netease,
       baseUrl: answers.neteaseBaseUrl
     },
     weather: {
@@ -572,6 +815,16 @@ export function buildConfigFromAnswers(current: PockedioConfig, answers: SetupAn
 export function getDjPreviewPath(choice: DjChoice): string {
   const filename = choice === "Mina" ? "mina.wav" : "nova.wav";
   return path.join(os.homedir(), ".pockedio", "audio", "previews", filename);
+}
+
+export function getDjVoiceReferencePath(choice: DjChoice): string {
+  return getDjPreviewPath(choice);
+}
+
+export function getDjVoiceReferenceText(choice: DjChoice): string {
+  return choice === "Mina"
+    ? "Mina is here. Soft lights, warm songs, and a little room to breathe."
+    : "Nova here. Bright rhythm, clean motion, and just enough spark to move.";
 }
 
 export function getDjTrialMenuChoices(): Array<{ name: string; value: DjTrialMenuValue }> {
@@ -661,6 +914,158 @@ export function formatScheduledDjSetupSummary(config: PockedioConfig): string {
     parts.push(`Evening weekdays ${evening.playTime}`);
   }
   return parts.join("; ");
+}
+
+export function formatNetEaseSetupSummary(config: PockedioConfig): string {
+  return [
+    "NetEase Cloud Music",
+    config.netease.authMode === "account"
+      ? `account-backed (${config.netease.qualityLevel})`
+      : "anonymous"
+  ].join(" - ");
+}
+
+export function getNetEaseSetupMethodChoices(): Array<{ name: string; value: NetEaseSetupMethod }> {
+  return [
+    { name: "Yes, scan QR", value: "qr" },
+    { name: "Yes, paste MUSIC_U cookie", value: "cookie" },
+    { name: "Not now, use anonymous playback", value: "anonymous" }
+  ];
+}
+
+export function getNetEaseQualityMenuChoices(): Array<{ name: string; value: NetEaseQualityMenuValue }> {
+  return [
+    { name: "hires - best quality, may be unavailable", value: "hires" },
+    { name: "lossless - very high quality, needs support", value: "lossless" },
+    { name: "exhigh - best daily default", value: "exhigh" },
+    { name: "higher - good fallback", value: "higher" },
+    { name: "standard - safest fallback", value: "standard" },
+    { name: "Back to account options", value: "back" }
+  ];
+}
+
+export const __netEaseQrLoginForTests = {
+  start: startNetEaseQrLogin,
+  poll: pollNetEaseQrLogin
+};
+
+async function applyNetEaseSetupChoice(
+  config: PockedioConfig,
+  answers: Pick<FirstSetupAnswers, "neteaseSetupMethod" | "neteaseCookie">
+): Promise<PockedioConfig> {
+  const neteaseSetupMethod = answers.neteaseSetupMethod ?? inferCurrentNetEaseSetupMethod(config);
+  if (neteaseSetupMethod === "anonymous") {
+    clearNetEaseCookie(config);
+    return config;
+  }
+
+  if (neteaseSetupMethod === "cookie") {
+    saveNetEaseCookie(config, answers.neteaseCookie ?? "");
+    return config;
+  }
+
+  const result = await loginNetEaseWithQr(config);
+  if (!result.ok) {
+    console.log("");
+    console.log("Could not verify NetEase login.");
+    console.log(result.error);
+    console.log("Continuing with anonymous playback for now.");
+    clearNetEaseCookie(config);
+    const fallback = pockedioConfigSchema.parse({
+      ...config,
+      netease: {
+        ...config.netease,
+        authMode: "anonymous",
+        qualityLevel: "standard"
+      }
+    });
+    saveConfig(fallback);
+    return fallback;
+  }
+  return config;
+}
+
+type NetEaseQrLoginResult = { ok: true } | { ok: false; error: string };
+type NetEaseQrLoginStart =
+  | { ok: true; key: string; qrPath?: string; qrUrl?: string }
+  | { ok: false; error: string };
+
+async function loginNetEaseWithQr(config: PockedioConfig, fetchImpl: typeof fetch = fetch): Promise<NetEaseQrLoginResult> {
+  try {
+    const start = await startNetEaseQrLogin(config, fetchImpl);
+    if (!start.ok) {
+      return start;
+    }
+
+    console.log("");
+    if (start.qrPath) {
+      console.log(`Open and scan this QR image with NetEase Cloud Music: ${start.qrPath}`);
+    } else if (start.qrUrl) {
+      console.log(`Open this NetEase login URL: ${start.qrUrl}`);
+    } else {
+      console.log("Scan the NetEase QR code in your browser or app.");
+    }
+    console.log("The QR code is valid for about 90 seconds.");
+
+    const result = await withSetupStatus("Waiting for NetEase QR confirmation...", () => pollNetEaseQrLogin(config, start.key, fetchImpl));
+    if (result.ok) {
+      console.log("");
+      console.log("NetEase connected.");
+      console.log("Pockedio will use your account for playback when available.");
+    }
+    return result;
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function startNetEaseQrLogin(config: PockedioConfig, fetchImpl: typeof fetch = fetch): Promise<NetEaseQrLoginStart> {
+  const timestamp = () => String(Date.now());
+  const keyJson = await fetchJson(`${config.netease.baseUrl}/login/qr/key?timestamp=${timestamp()}`, fetchImpl);
+  const key = valueToString(asRecord(keyJson.data)?.unikey);
+  if (!key) {
+    return { ok: false, error: "NetEase did not return a QR login key." };
+  }
+
+  const qrJson = await fetchJson(`${config.netease.baseUrl}/login/qr/create?key=${encodeURIComponent(key)}&qrimg=true&timestamp=${timestamp()}`, fetchImpl);
+  const qrData = asRecord(qrJson.data);
+  const qrImage = valueToString(qrData?.qrimg);
+  const qrUrl = valueToString(qrData?.qrurl);
+  if (qrImage) {
+    const qrPath = path.join(path.dirname(config.paths.neteaseCookie), "netease-login-qr.png");
+    fs.mkdirSync(path.dirname(qrPath), { recursive: true });
+    fs.writeFileSync(qrPath, Buffer.from(qrImage.replace(/^data:image\/png;base64,/, ""), "base64"));
+    return { ok: true, key, qrPath };
+  } else if (qrUrl) {
+    return { ok: true, key, qrUrl };
+  }
+  return { ok: true, key };
+}
+
+async function pollNetEaseQrLogin(config: PockedioConfig, key: string, fetchImpl: typeof fetch = fetch): Promise<NetEaseQrLoginResult> {
+  const timestamp = () => String(Date.now());
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const status = await fetchJson(`${config.netease.baseUrl}/login/qr/check?key=${encodeURIComponent(key)}&timestamp=${timestamp()}&noCookie=true`, fetchImpl);
+    const code = valueToNumber(status.code);
+    if (code === 803) {
+      const cookie = valueToString(status.cookie);
+      if (!cookie) {
+        return { ok: false, error: "NetEase QR login succeeded without returning a cookie." };
+      }
+      saveNetEaseCookie(config, cookie);
+      return { ok: true };
+    }
+    if (code === 800) {
+      return { ok: false, error: "NetEase QR code expired." };
+    }
+  }
+
+  return { ok: false, error: "NetEase QR login timed out." };
 }
 
 async function setupCalendarContext(config: PockedioConfig): Promise<CalendarContext> {
@@ -787,6 +1192,10 @@ function inferCurrentScheduledDjChoice(current: PockedioConfig): ScheduledDjSetu
   return "not_now";
 }
 
+function inferCurrentNetEaseSetupMethod(current: PockedioConfig): NetEaseSetupMethod {
+  return current.netease.authMode === "account" ? "cookie" : "anonymous";
+}
+
 function validateTimeOfDay(value: string): true | string {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
     ? true
@@ -813,4 +1222,27 @@ async function playDjPreview(choice: DjChoice | undefined): Promise<void> {
   if (!result.ok) {
     console.log(`Preview playback failed: ${result.error}`);
   }
+}
+
+type UnknownJson = Record<string, unknown>;
+
+async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<UnknownJson> {
+  const response = await fetchImpl(url);
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`NetEase request failed with HTTP ${response.status}.`);
+  }
+  return JSON.parse(text) as UnknownJson;
+}
+
+function valueToString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function valueToNumber(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }

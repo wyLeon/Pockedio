@@ -9,6 +9,9 @@ export const mbtiTypes = [
 
 export const djProgramLengths = ["short", "standard", "extended"] as const;
 export const djStyles = ["direct", "warm", "exploratory", "low-talk"] as const;
+export const musicProviders = ["netease"] as const;
+export const neteaseAuthModes = ["anonymous", "account"] as const;
+export const neteaseQualityLevels = ["standard", "higher", "exhigh", "lossless", "hires"] as const;
 const timeOfDaySchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const scheduledDjProgramSchema = z.object({
   enabled: z.boolean().default(true),
@@ -21,7 +24,12 @@ export const fishAudioModelDir =
 
 export const pockedioConfigSchema = z.object({
   netease: z.object({
-    baseUrl: z.string().url().default("http://127.0.0.1:3000")
+    baseUrl: z.string().url().default("http://127.0.0.1:3000"),
+    authMode: z.enum(neteaseAuthModes).default("anonymous"),
+    qualityLevel: z.enum(neteaseQualityLevels).default("standard")
+  }).default({}),
+  music: z.object({
+    provider: z.enum(musicProviders).default("netease")
   }).default({}),
   weather: z.object({
     location: z.string().min(1).default("Shanghai")
@@ -56,13 +64,16 @@ export const pockedioConfigSchema = z.object({
   fishAudio: z.object({
     pythonPath: z.string().min(1).default(".cache/mlx-speech-venv/bin/python"),
     scriptPath: z.string().min(1).default(".cache/mlx-speech/scripts/generate/fish_s2_pro.py"),
-    modelDir: z.string().min(1).default(fishAudioModelDir)
+    modelDir: z.string().min(1).default(fishAudioModelDir),
+    referenceAudioPath: z.string().min(1).optional(),
+    referenceText: z.string().min(1).optional()
   }).default({}),
   paths: z.object({
     database: z.string().min(1),
     taste: z.string().min(1),
     personas: z.string().min(1),
-    djAudioDir: z.string().min(1)
+    djAudioDir: z.string().min(1),
+    neteaseCookie: z.string().min(1)
   })
 });
 
@@ -71,3 +82,6 @@ export type MbtiType = typeof mbtiTypes[number];
 export type DjProgramLength = typeof djProgramLengths[number];
 export type DjStyle = typeof djStyles[number];
 export type ScheduledDjProgramConfig = PockedioConfig["dj"]["schedule"]["morning"];
+export type NetEaseAuthMode = typeof neteaseAuthModes[number];
+export type NetEaseQualityLevel = typeof neteaseQualityLevels[number];
+export type MusicProviderName = typeof musicProviders[number];

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { loadConfig } from "../config/load.js";
+import { readNetEaseCookie } from "../config/neteaseAuth.js";
 import { getConfigPath, type PockedioEnv } from "../config/paths.js";
 import type { PockedioConfig } from "../config/schema.js";
 import { schemaVersion } from "../db/migrations.js";
@@ -24,11 +25,14 @@ export type StatusReport = {
     schemaVersion?: number;
     error?: string;
   };
-  netease: {
-    baseUrl: string;
-    reachable: boolean;
-    error?: string;
-  };
+	  netease: {
+	    baseUrl: string;
+	    reachable: boolean;
+	    authMode: PockedioConfig["netease"]["authMode"];
+	    qualityLevel: PockedioConfig["netease"]["qualityLevel"];
+	    cookiePresent: boolean;
+	    error?: string;
+	  };
   llm: {
     provider: string;
     model: string;
@@ -71,6 +75,12 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
   const { config, env } = resolved;
   const provider = new NetEaseProvider(config, resolved.fetchImpl ?? fetch);
   const fishAudio = getFishAudioStatus(config);
+  const neteaseBase = {
+    baseUrl: config.netease.baseUrl,
+    authMode: config.netease.authMode,
+    qualityLevel: config.netease.qualityLevel,
+    cookiePresent: Boolean(readNetEaseCookie(config))
+  };
   const configStatus = {
     path: getConfigPath(env),
     present: fs.existsSync(getConfigPath(env))
@@ -112,17 +122,17 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
     await provider.search({ keyword: "坂本龙一" }, 1);
     return {
       ...baseReport,
-      netease: {
-        baseUrl: config.netease.baseUrl,
-        reachable: true
+	      netease: {
+	        ...neteaseBase,
+	        reachable: true
       }
     };
   } catch (error) {
     return {
       ...baseReport,
-      netease: {
-        baseUrl: config.netease.baseUrl,
-        reachable: false,
+	      netease: {
+	        ...neteaseBase,
+	        reachable: false,
         error: error instanceof Error ? error.message : String(error)
       }
     };
@@ -264,7 +274,7 @@ export function formatStatusReport(report: StatusReport): string {
     `- Scheduled jobs: ${report.runtime.scheduledJobs}`,
     "",
     "Integrations",
-    `- NetEase music: ${report.netease.reachable ? "reachable" : "unreachable"} (${report.netease.baseUrl})`,
+    `- NetEase music: ${formatNetEaseStatus(report.netease)}`,
     `- LLM: ${report.llm.apiKeyPresent ? "configured" : "missing API key"} (${formatLlmStatus(report.llm)})`,
     `- FishAudio: ${report.fishAudio.pathsPresent ? "paths present" : "missing paths"}`,
     `- Calendar: ${report.calendar.enabled ? "enabled" : "disabled"}`,
@@ -295,6 +305,13 @@ export function formatStatusReport(report: StatusReport): string {
     lines.push(...report.fishAudio.missing.map((item) => `- ${item}`));
   }
   return lines.join("\n");
+}
+
+function formatNetEaseStatus(netease: StatusReport["netease"]): string {
+  const account = netease.authMode === "account" && netease.cookiePresent
+    ? `account-backed, ${netease.qualityLevel}`
+    : "anonymous";
+  return `${netease.reachable ? "reachable" : "unreachable"} (${account}, ${netease.baseUrl})`;
 }
 
 function formatLlmStatus(llm: StatusReport["llm"]): string {

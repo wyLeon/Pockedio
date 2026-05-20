@@ -33,6 +33,7 @@ type TrackPlan = {
 };
 
 const stationSchema = "{ tracks: [{ title: string, artist: string, rationale: string }] }";
+const providerSearchArtist = "__provider_search__";
 
 export async function generateStation(input: GenerateStationInput): Promise<GeneratedStation> {
   const provider = input.provider ?? new NetEaseProvider(input.config);
@@ -68,8 +69,11 @@ async function planTracks(
 function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): string {
   const context = input.context;
   return [
-    "Create exactly five NetEase-searchable track plans for Pockedio.",
+    "Create exactly five track plans for Pockedio.",
     "Default output language is English.",
+    "Choose real, findable songs with real artists.",
+    "Do not mention the music provider, searchability, catalog size, availability, resources, or platform convenience in rationales.",
+    "Rationales should explain musical fit, mood, user taste, context, or station arc only.",
     `User request: ${input.request}`,
     `Taste summary: ${tasteSummary}`,
     `Time context: ${context?.timeOfDay ?? "unknown"} ${context?.now ?? ""}`.trim(),
@@ -97,21 +101,40 @@ function parseStationTracks(value: StationJsonResponse): PlannedStationTrack[] {
     return [{
       title,
       artist,
-      rationale: stringValue(track.rationale) ?? "Fits the requested station."
+      rationale: cleanTrackRationale(stringValue(track.rationale))
     }];
   });
+}
+
+function cleanTrackRationale(rationale: string | null | undefined): string {
+  const cleaned = rationale?.replace(/\s+/g, " ").trim();
+  if (!cleaned || containsProviderPromotion(cleaned) || containsCjkText(cleaned)) {
+    return "Fits the requested station.";
+  }
+  return cleaned;
+}
+
+function containsProviderPromotion(text: string): boolean {
+  return /网易云(资源丰富|可搜到|曲库|平台|音乐库|资源)|NetEase|music provider|provider catalog|searchable|catalog size|availability|available on|can be found/i.test(text);
+}
+
+function containsCjkText(text: string): boolean {
+  return /[\u3400-\u9fff]/.test(text);
 }
 
 function fallbackTracks(request: string, tasteSummary: string): PlannedStationTrack[] {
   const base = fallbackSearchQueries(request, tasteSummary);
   return Array.from({ length: 5 }, (_, index) => ({
     title: base[index % base.length],
-    artist: "NetEase search",
+    artist: providerSearchArtist,
     rationale: fallbackRationale(request, tasteSummary)
   }));
 }
 
 function fallbackRationale(request: string, tasteSummary: string): string {
+  if (containsCjkText(request)) {
+    return `Deterministic fallback using local taste signals${tasteSummary ? "." : " when LLM is unavailable."}`;
+  }
   return `Deterministic fallback for "${request}" using local taste signals${tasteSummary ? "." : " when LLM is unavailable."}`;
 }
 
@@ -121,7 +144,7 @@ async function resolveTrack(
   provider: MusicProvider,
   request: string
 ): Promise<StationTrack> {
-  const keyword = track.artist === "NetEase search" ? track.title : `${track.title} ${track.artist}`.trim();
+  const keyword = track.artist === providerSearchArtist ? track.title : `${track.title} ${track.artist}`.trim();
   try {
     const candidates = await provider.search({ keyword }, shouldUseStrictQuietScoring(request) ? 10 : 1);
     if (candidates.length === 0) {
