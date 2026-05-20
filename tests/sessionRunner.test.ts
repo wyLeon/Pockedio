@@ -526,6 +526,63 @@ describe("runSessionTurn", () => {
     expect(playbackState.activePlayback).toBeUndefined();
   });
 
+  it("pause and resume use a controllable playback handle when available", async () => {
+    const config = makeConfig();
+    let pauseCalls = 0;
+    let resumeCalls = 0;
+    let stopCalls = 0;
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async () => ({
+        target: "https://example.com/song.mp3",
+        done: new Promise(() => undefined),
+        stop: () => {
+          stopCalls += 1;
+        },
+        pause: () => {
+          pauseCalls += 1;
+          return true;
+        },
+        resume: () => {
+          resumeCalls += 1;
+          return true;
+        }
+      })
+    });
+
+    const pauseResult = await runSessionTurn({
+      input: "pause",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+    const resumeResult = await runSessionTurn({
+      input: "resume",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(pauseResult.intent.type).toBe("pause");
+    expect(pauseResult.response).toBe("Paused.");
+    expect(resumeResult.intent.type).toBe("resume");
+    expect(resumeResult.response).toBe("Resumed.");
+    expect(pauseCalls).toBe(1);
+    expect(resumeCalls).toBe(1);
+    expect(stopCalls).toBe(0);
+    expect(playbackState.activePlayback).toBeDefined();
+    expect(playbackState.activePlaybackPaused).toBe(false);
+  });
+
   it("reports current station status with elapsed time", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};

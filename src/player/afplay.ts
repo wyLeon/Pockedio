@@ -18,6 +18,8 @@ export type PlaybackHandle = {
   target: string;
   done: Promise<PlayerResult>;
   stop: () => void;
+  pause?: () => Promise<boolean> | boolean;
+  resume?: () => Promise<boolean> | boolean;
   introResult?: PlayerResult;
 };
 
@@ -76,7 +78,7 @@ export async function playFile(filePath: string, timeoutMs?: number, runner: Pro
   return runner("afplay", [filePath], timeoutMs);
 }
 
-async function downloadRemoteAudio(url: string, fetchImpl: typeof fetch): Promise<string> {
+export async function downloadRemoteAudio(url: string, fetchImpl: typeof fetch): Promise<string> {
   const response = await fetchImpl(url);
   if (!response.ok) {
     throw new Error(`Audio download failed with HTTP ${response.status}.`);

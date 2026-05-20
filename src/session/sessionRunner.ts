@@ -17,13 +17,16 @@ import type { LlmClient } from "../llm/llmClient.js";
 import { MemoryStore, type FeedbackAction } from "../memory/store.js";
 import {
   playFile as playAudioFile,
+  startUrlPlayback as startAfplayUrlPlayback,
+} from "../player/afplay.js";
+import {
   playUrl as playAudioUrl,
   startDuckedUrlWithIntro,
   startUrlPlayback as startAudioUrlPlayback,
   type PlaybackHandle,
   type PlayerResult,
   type ProcessStarter
-} from "../player/afplay.js";
+} from "../player/defaultPlayer.js";
 import type { MusicProvider, MusicTrackCandidate, PlayableTrack } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
 import { generateStation } from "../station/stationGenerator.js";
@@ -81,6 +84,7 @@ export type InteractivePlaybackState = {
   currentTrackId?: string;
   currentStartedAt?: Date;
   activePlayback?: PlaybackHandle;
+  activePlaybackPaused?: boolean;
   lastIntroPlaybackResult?: PlayerResult;
   djProgram?: DjProgramPlaybackState;
   startUrlPlayback?: StartUrlPlayback;
@@ -120,7 +124,10 @@ export function createDefaultInteractiveStartUrlPlayback(
   starter?: ProcessStarter,
   fetchImpl?: typeof fetch
 ): StartUrlPlayback {
-  return (url) => startAudioUrlPlayback(url, undefined, starter, fetchImpl);
+  if (starter || fetchImpl) {
+    return (url) => startAfplayUrlPlayback(url, undefined, starter, fetchImpl);
+  }
+  return (url) => startAudioUrlPlayback(url);
 }
 
 export function formatInteractiveStartupGuide(displayName = "Pockedio"): string {
@@ -233,9 +240,33 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
     if (intent.type === "pause") {
       if (input.playbackState?.activePlayback) {
-        stopActivePlayback(input.playbackState, store);
+        const paused = await input.playbackState.activePlayback.pause?.();
+        if (paused) {
+          input.playbackState.activePlaybackPaused = true;
+        } else {
+          stopActivePlayback(input.playbackState, store);
+        }
       }
-      const response = "Paused. Resume is not available yet; ask for the next track or a new station when you are ready.";
+      const response = input.playbackState?.activePlaybackPaused
+        ? "Paused."
+        : "Paused. Resume is not available with this player yet; ask for the next track or a new station when you are ready.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
+    if (intent.type === "resume") {
+      if (input.playbackState?.activePlaybackPaused && input.playbackState.activePlayback?.resume) {
+        const resumed = await input.playbackState.activePlayback.resume();
+        if (resumed) {
+          input.playbackState.activePlaybackPaused = false;
+          const response = "Resumed.";
+          store.addMessage(sessionId, "pockedio", response);
+          writeOutput(response);
+          return { sessionId, intent, response, shouldExit: false };
+        }
+      }
+      const response = "Nothing resumable is paused right now.";
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -463,6 +494,7 @@ async function resolveIntent(userText: string, llm: LlmClient, writeStatus: Stat
 function isInstantLocalIntent(type: SessionIntent["type"]): boolean {
   return type === "stop"
     || type === "pause"
+    || type === "resume"
     || type === "playback_status"
     || type === "feedback_like"
     || type === "feedback_skip"
@@ -949,6 +981,7 @@ function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: str
   }
   if (intent.type === "stop"
     || intent.type === "pause"
+    || intent.type === "resume"
     || intent.type === "playback_status"
     || intent.type === "identity_capability"
     || intent.type === "explicit_dj_audio_request"
@@ -1428,6 +1461,7 @@ function stopActivePlayback(playbackState: InteractivePlaybackState, store: Memo
     store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
   }
   playbackState.activePlayback = undefined;
+  playbackState.activePlaybackPaused = undefined;
   playbackState.currentIndex = undefined;
   playbackState.currentTrackId = undefined;
   playbackState.currentStartedAt = undefined;
@@ -1440,6 +1474,7 @@ async function advancePlayback(
   startUrlPlayback: StartUrlPlayback
 ): Promise<string> {
   playbackState.activePlayback?.stop();
+  playbackState.activePlaybackPaused = undefined;
   if (playbackState.currentTrackId) {
     store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
   }
@@ -1488,6 +1523,7 @@ async function startTrackAt(
   playbackState.currentTrackId = entry.dbId;
   playbackState.currentStartedAt = now();
   playbackState.activePlayback = handle;
+  playbackState.activePlaybackPaused = false;
   prepareNextDjIntro(playbackState, config, nextIndex + 1);
   handle.done.then((result) => {
     if (playbackState.activePlayback !== handle || !result.ok) {

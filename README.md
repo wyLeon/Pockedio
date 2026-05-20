@@ -106,7 +106,7 @@ npm run dev -- serve
 
 - NetEaseCloudMusicApi local adapter on `http://127.0.0.1:3000` for real music search and playable URL retrieval.
 - FishAudio S2 Pro MLX model and Python entrypoint configured through `pockedio setup`.
-- `afplay` on macOS for local audio playback.
+- `mpv` for controllable pause/resume playback when available; Pockedio falls back to macOS `afplay` for basic playback.
 - Apple Calendar permission when Calendar context is enabled.
 - Open-Meteo network access for weather context.
 - `OPENAI_API_KEY` for full LLM station planning and DJ copy. Without it, Pockedio uses deterministic fallback paths where available.

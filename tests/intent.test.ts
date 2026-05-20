@@ -115,6 +115,17 @@ describe("parseIntent", () => {
     });
   });
 
+  it("classifies pause and resume as separate controls", async () => {
+    await expect(parseIntent("pause")).resolves.toEqual({
+      type: "pause",
+      confidence: "high"
+    });
+    await expect(parseIntent("resume")).resolves.toEqual({
+      type: "resume",
+      confidence: "high"
+    });
+  });
+
   it("classifies identity and capability questions before music routing", async () => {
     for (const input of [
       "Who are you?",

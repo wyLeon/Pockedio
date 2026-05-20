@@ -1340,8 +1340,8 @@ next                               3.10 Playback Controls        built
 skip                               3.10 Playback Controls        built
 next song / next track             3.10 Playback Controls        built
 stop                               3.10 Playback Controls        built
-pause                              3.10 Playback Controls        built as stop-audio, keep session open
-resume                             3.10 Playback Controls        not built
+pause                              3.10 Playback Controls        built with mpv; fallback stops audio, keeps session open
+resume                             3.10 Playback Controls        built with mpv
 previous                           3.10 Playback Controls        not built
 favorite this                      3.12 Feedback Actions         not built
 I like this                        3.12 Feedback Actions         built
@@ -1366,7 +1366,8 @@ Rules:
 - During playback, questions and personal comments should not stop or replace music unless the user clearly asks for playback control.
 - During playback, current-track and artist questions should use the LLM conversation path with current track and queue context.
 - During playback, `next` means skip current track and start the next playable track.
-- During playback, `stop` currently stops playback and ends the interactive session; this should be revisited when pause/resume are designed.
+- During playback, `stop` stops playback and ends the interactive session.
+- During playback, `pause` and `resume` are real controls when mpv is available; with afplay fallback, pause stops audio and resume is unavailable.
 - During playback, `dj` is not a toggle. DJ mode is chosen before playback starts.
 - Replacement requests such as `play something else` may stop current playback and start a new station.
 
@@ -1448,14 +1449,19 @@ next / skip / next song / next track
 
 stop
   -> stop current playback, mark current track skipped, end interactive session
+
+pause
+  -> with mpv: pause current playback and keep the session open
+  -> with afplay fallback: stop current audio and keep the session open
+
+resume
+  -> with mpv: resume paused playback
+  -> with afplay fallback: say nothing resumable is paused
 ```
 
 Planned controls:
 
 ```text
-resume
-  -> resume paused playback
-
 previous
   -> return to previous playable track
 ```
@@ -1465,9 +1471,10 @@ Rules:
 - Controls should be fast and should not use the LLM.
 - `next` should preserve the station and queue context.
 - `next` should show the selected DJ note for the new current track.
-- `pause` currently stops audio and keeps the CLI session open; resumable pause is not built yet.
+- `pause` should not end the CLI session.
+- `resume` should only claim success when a controllable paused player exists.
 - If no next playable track remains, show the station-complete message.
-- `resume` and `previous` need explicit implementation before being shown as reliable controls in startup copy.
+- `previous` needs explicit implementation before being shown as a reliable control in startup copy.
 
 ## 3.11 Queue And Status Questions
 

@@ -19,6 +19,7 @@ export type SessionIntentType =
   | "feedback_change_vibe"
   | "playback_status"
   | "pause"
+  | "resume"
   | "stop"
   | "explicit_dj_audio_request";
 
@@ -51,6 +52,7 @@ const intentTypes = new Set<SessionIntentType>([
   "feedback_change_vibe",
   "playback_status",
   "pause",
+  "resume",
   "stop",
   "explicit_dj_audio_request"
 ]);
@@ -95,6 +97,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
 
   if (/\bpause\b/.test(text)) {
     return { type: "pause", confidence: "high" };
+  }
+  if (/\bresume\b/.test(text)) {
+    return { type: "resume", confidence: "high" };
   }
   if (/\b(stop|quit|exit|shut up)\b/.test(text)) {
     return { type: "stop", confidence: "high" };
