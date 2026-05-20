@@ -1602,42 +1602,51 @@ Built feedback:
 ```text
 I like this / love this / good pick / nice pick
   -> record like on current track
+  -> write positive taste signals for current track and artist
   -> "Noted. I will weigh this direction more strongly."
 
 more like this / similar to this / keep this vibe
   -> record more_like_this on current track
+  -> write stronger positive taste signals for current track, artist, and station direction
   -> "Noted. I will stay near this lane."
+
+less like this / less of this / not so much like this
+  -> record less_like_this on current track
+  -> write soft negative taste signals for current track and artist
+  -> "Noted. I will ease away from this texture without banning it."
 
 change the vibe / different vibe / switch the mood / change mood
   -> record change_vibe on current track
+  -> write a negative taste signal for the current station direction
   -> "Understood. I will shift the mood."
 
 don't play this artist / do not play this artist / never play / ban / block
   -> record ban on current track
+  -> write a hard exclude taste signal for the current artist
   -> "Understood. I will avoid this in future sets."
 
-skip / next
-  -> record skip, then advance to the next playable track
-```
-
-Planned feedback:
-
-```text
 favorite this / save this / add to best list
-  -> add current track to a highly curated local favorites collection
+  -> record favorite on current track
+  -> write a high-confidence local favorite taste signal
+  -> "Saved locally as a high-confidence favorite signal."
 
-less like this
-  -> record a softer negative preference without banning the artist
+save this vibe / remember this vibe
+  -> record save_vibe on current station
+  -> write a reusable vibe preset taste signal
+  -> "Saved this vibe as a direction I can return to later."
 
-save this vibe
-  -> store the current station direction as a reusable mood/style preset
+skip / next
+  -> record skip and a context-bound negative signal for current track, then advance to the next playable track
 ```
 
 Rules:
 
 - Feedback should attach to the current playing track when possible.
-- Feedback should not create a new station by itself.
-- Feedback should be stored as memory signal, not as a full conversation transcript only.
+- Feedback should not create a new station by itself, except `skip / next` advancing within the existing station.
+- Feedback should be stored twice: raw `feedback` event plus derived `taste_signals`.
+- Future stations should read recent taste signals during `Reading your context...` and use them during `Building a station...`.
+- Hard bans should exclude matching artists or tracks from future station plans.
+- Positive seeds and favorites should bias future station planning and fallback search, not interrupt the current queue.
 - `favorite` should not be treated as a normal NetEase favorite until account-backed collection behavior is designed.
 
 ## 3.13 Explicit DJ Audio Request

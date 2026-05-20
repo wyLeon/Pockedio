@@ -17,6 +17,9 @@ export type SessionIntentType =
   | "feedback_ban"
   | "feedback_more_like_this"
   | "feedback_change_vibe"
+  | "feedback_less_like_this"
+  | "feedback_favorite"
+  | "feedback_save_vibe"
   | "playback_status"
   | "pause"
   | "resume"
@@ -50,6 +53,9 @@ const intentTypes = new Set<SessionIntentType>([
   "feedback_ban",
   "feedback_more_like_this",
   "feedback_change_vibe",
+  "feedback_less_like_this",
+  "feedback_favorite",
+  "feedback_save_vibe",
   "playback_status",
   "pause",
   "resume",
@@ -112,16 +118,28 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(never play|ban|block|don't play this artist|do not play this artist)\b/.test(text)) {
     return { type: "feedback_ban", confidence: "high" };
   }
-  if (/\b(skip|next|next song|next track)\b/.test(text)) {
+  if (/\b(what'?s next|what is next|what comes next|up next)\b/.test(text)) {
+    return { type: "playback_status", confidence: "high" };
+  }
+  if (/^(please\s+)?(skip|skip this|next|next song|next track)(\s+please)?[.!?]*$/.test(text)) {
     return { type: "feedback_skip", confidence: "high" };
   }
   if (/\b(more like this|similar to this|keep this vibe)\b/.test(text)) {
     return { type: "feedback_more_like_this", confidence: "high" };
   }
+  if (/\b(less like this|less of this|not so much like this)\b/.test(text)) {
+    return { type: "feedback_less_like_this", confidence: "high" };
+  }
+  if (/\b(save this vibe|remember this vibe|keep this as a vibe)\b/.test(text)) {
+    return { type: "feedback_save_vibe", confidence: "high" };
+  }
+  if (/\b(favorite this|save this|add to best list)\b/.test(text)) {
+    return { type: "feedback_favorite", confidence: "high" };
+  }
   if (/\b(change the vibe|different vibe|switch the mood|change mood)\b/.test(text)) {
     return { type: "feedback_change_vibe", confidence: "high" };
   }
-  if (/\b(what's playing|what is playing|current song|current track|show queue|where are we|what are we listening to)\b/.test(text)) {
+  if (/\b(what's playing|what is playing|current song|current track|show queue|where are we|what are we listening to|what'?s next|what is next|what comes next|up next)\b/.test(text)) {
     return { type: "playback_status", confidence: "high" };
   }
   if (/\b(like this|love this|good pick|nice pick)\b/.test(text)) {

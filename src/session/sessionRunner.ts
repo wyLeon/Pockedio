@@ -15,6 +15,7 @@ import { shouldUseSpokenDjAudio } from "../dj/voiceRules.js";
 import { createLlmClient } from "../llm/openaiClient.js";
 import type { LlmClient } from "../llm/llmClient.js";
 import { MemoryStore, type FeedbackAction } from "../memory/store.js";
+import { buildFeedbackTasteSignals } from "../memory/tasteSignals.js";
 import {
   playFile as playAudioFile,
   startUrlPlayback as startAfplayUrlPlayback,
@@ -388,7 +389,23 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
     if (isFeedbackIntent(intent.type)) {
       const action = feedbackActionForIntent(intent.type);
-      store.addFeedback(sessionId, input.playbackState?.currentTrackId ?? null, action, userText);
+      const currentTrack = getCurrentPlaybackTrack(input.playbackState);
+      const currentTrackId = input.playbackState?.currentTrackId ?? null;
+      store.recordFeedbackWithTasteSignals(
+        sessionId,
+        currentTrackId,
+        action,
+        userText,
+        buildFeedbackTasteSignals({
+          action,
+          trackId: currentTrackId,
+          track: currentTrack,
+          context: {
+            stationRequest: input.playbackState?.station?.request,
+            note: userText
+          }
+        })
+      );
       const response = intent.type === "feedback_skip" && input.playbackState?.station
         ? await advancePlayback(input.playbackState, config, store, input.playbackState.startUrlPlayback ?? startUrlPlayback)
         : formatFeedbackConfirmation(action);
@@ -1737,9 +1754,23 @@ function feedbackActionForIntent(type: SessionIntent["type"]): FeedbackAction {
       return "more_like_this";
     case "feedback_change_vibe":
       return "change_vibe";
+    case "feedback_less_like_this":
+      return "less_like_this";
+    case "feedback_favorite":
+      return "favorite";
+    case "feedback_save_vibe":
+      return "save_vibe";
     default:
       return "stop";
   }
+}
+
+function getCurrentPlaybackTrack(playbackState: InteractivePlaybackState | undefined): StationTrack | undefined {
+  const currentIndex = playbackState?.currentIndex;
+  if (currentIndex === undefined) {
+    return undefined;
+  }
+  return playbackState?.storedTracks?.[currentIndex]?.track;
 }
 
 function formatUnavailableTrackFallbackForResponse(tracks: StationTrack[]): string {

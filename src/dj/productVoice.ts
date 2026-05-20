@@ -47,6 +47,12 @@ export function formatFeedbackConfirmation(action: string): string {
       return "Noted. I will stay near this lane.";
     case "change_vibe":
       return "Understood. I will shift the mood.";
+    case "less_like_this":
+      return "Noted. I will ease away from this texture without banning it.";
+    case "favorite":
+      return "Saved locally as a high-confidence favorite signal.";
+    case "save_vibe":
+      return "Saved this vibe as a direction I can return to later.";
     default:
       return "Noted.";
   }

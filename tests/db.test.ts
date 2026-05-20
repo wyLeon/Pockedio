@@ -45,7 +45,8 @@ describe("database migrations", () => {
       "sessions",
       "settings",
       "station_tracks",
-      "taste_imports"
+      "taste_imports",
+      "taste_signals"
     ]);
   });
 
@@ -113,6 +114,83 @@ describe("database migrations", () => {
         latencyMs: 12,
         fileSizeBytes: 2048
       })).not.toThrow();
+    });
+  });
+
+  it("backfills expanded feedback actions and stores taste signals", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-db-test-"));
+    tempDirs.push(home);
+    const config = loadConfig({ POCKEDIO_HOME: home });
+    fs.mkdirSync(path.dirname(config.paths.database), { recursive: true });
+
+    const legacy = new Database(config.paths.database);
+    try {
+      legacy.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          trigger_type TEXT NOT NULL CHECK (trigger_type IN ('conversation', 'scheduled_morning', 'scheduled_evening', 'mood_check', 'explicit_dj_audio')),
+          trigger_text TEXT NOT NULL
+        );
+
+        CREATE TABLE station_tracks (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL CHECK (position >= 1),
+          title TEXT NOT NULL,
+          artist TEXT NOT NULL,
+          album TEXT,
+          provider TEXT NOT NULL,
+          provider_track_id TEXT,
+          playable_url TEXT,
+          playback_status TEXT NOT NULL CHECK (playback_status IN ('planned', 'playing', 'played', 'skipped', 'unavailable', 'failed')),
+          failure_reason TEXT
+        );
+
+        CREATE TABLE feedback (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+          track_id TEXT REFERENCES station_tracks(id) ON DELETE SET NULL,
+          action TEXT NOT NULL CHECK (action IN ('like', 'skip', 'ban', 'more_like_this', 'change_vibe', 'stop')),
+          note TEXT,
+          created_at TEXT NOT NULL
+        );
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    runMigrations(config);
+
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+      const sessionId = store.createSession("conversation", "play soft jazz");
+      const trackId = store.addStationTrack(sessionId, {
+        position: 1,
+        title: "Blue in Green",
+        artist: "Miles Davis",
+        provider: "netease",
+        providerTrackId: "blue",
+        playbackStatus: "playing"
+      });
+
+      expect(() => store.recordFeedbackWithTasteSignals(sessionId, trackId, "favorite", "favorite this", [{
+        trackId,
+        signalType: "favorite",
+        targetType: "track",
+        targetValue: "Blue in Green - Miles Davis",
+        weight: 5,
+        context: { stationRequest: "play soft jazz" }
+      }])).not.toThrow();
+
+      expect(store.getTasteSignals(5)).toMatchObject([{
+        signalType: "favorite",
+        targetType: "track",
+        targetValue: "Blue in Green - Miles Davis",
+        weight: 5,
+        context: { stationRequest: "play soft jazz" }
+      }]);
     });
   });
 

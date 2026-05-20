@@ -32,8 +32,20 @@ CREATE TABLE IF NOT EXISTS feedback (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   track_id TEXT REFERENCES station_tracks(id) ON DELETE SET NULL,
-  action TEXT NOT NULL CHECK (action IN ('like', 'skip', 'ban', 'more_like_this', 'change_vibe', 'stop')),
+  action TEXT NOT NULL CHECK (action IN ('like', 'skip', 'ban', 'more_like_this', 'change_vibe', 'less_like_this', 'favorite', 'save_vibe', 'stop')),
   note TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS taste_signals (
+  id TEXT PRIMARY KEY,
+  source_feedback_id TEXT REFERENCES feedback(id) ON DELETE SET NULL,
+  track_id TEXT REFERENCES station_tracks(id) ON DELETE SET NULL,
+  signal_type TEXT NOT NULL CHECK (signal_type IN ('positive_seed', 'negative_seed', 'ban', 'favorite', 'vibe_preset')),
+  target_type TEXT NOT NULL CHECK (target_type IN ('track', 'artist', 'station_request', 'vibe')),
+  target_value TEXT NOT NULL,
+  weight REAL NOT NULL,
+  context_json TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -128,6 +140,8 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_station_tracks_session_position ON station_tracks(session_id, position);
+CREATE INDEX IF NOT EXISTS idx_taste_signals_type_created ON taste_signals(signal_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_taste_signals_target ON taste_signals(target_type, target_value);
 CREATE INDEX IF NOT EXISTS idx_memory_items_kind_created ON memory_items(kind, created_at);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_diary_summaries_source ON diary_summaries(source_file, source_mtime);

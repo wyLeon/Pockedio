@@ -105,10 +105,26 @@ describe("parseIntent", () => {
       type: "feedback_ban",
       confidence: "high"
     });
+    await expect(parseIntent("less like this")).resolves.toEqual({
+      type: "feedback_less_like_this",
+      confidence: "high"
+    });
+    await expect(parseIntent("favorite this")).resolves.toEqual({
+      type: "feedback_favorite",
+      confidence: "high"
+    });
+    await expect(parseIntent("save this vibe")).resolves.toEqual({
+      type: "feedback_save_vibe",
+      confidence: "high"
+    });
   });
 
   it("classifies playback status requests", async () => {
     await expect(parseIntent("what's playing?")).resolves.toEqual({
+      type: "playback_status",
+      confidence: "high"
+    });
+    await expect(parseIntent("what's next?")).resolves.toEqual({
       type: "playback_status",
       confidence: "high"
     });

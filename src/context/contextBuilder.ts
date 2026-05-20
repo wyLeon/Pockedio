@@ -3,7 +3,7 @@ import type { PockedioConfig } from "../config/schema.js";
 import { runMigrations } from "../db/migrations.js";
 import type { LlmClient } from "../llm/llmClient.js";
 import { createLlmClient } from "../llm/openaiClient.js";
-import { MemoryStore, type CalendarEventSource, type RecentSessionSummary } from "../memory/store.js";
+import { MemoryStore, type CalendarEventSource, type RecentSessionSummary, type TasteSignalRecord } from "../memory/store.js";
 import { readCalendarContext, type CalendarContext, type CalendarProcessRunner, type CalendarReadWindow } from "./calendar.js";
 import { readDiaryContextWithLlmSummary, type DiaryContext } from "./diary.js";
 import { readWeatherContext, type WeatherContext } from "./weather.js";
@@ -15,6 +15,7 @@ export type PockedioContext = {
   weather: WeatherContext | null;
   diary: DiaryContext | null;
   tastePath: string;
+  tasteSignals: TasteSignalRecord[];
   personality: PockedioConfig["personality"];
   recentSessions: RecentSessionSummary[];
 };
@@ -61,6 +62,7 @@ export async function buildContext(
       weather,
       diary: await readDiaryContextWithLlmSummary(config, options.llm ?? createLlmClient(config)),
       tastePath: config.paths.taste,
+      tasteSignals: store.getTasteSignals(30),
       personality: config.personality,
       recentSessions: store.getRecentSessionSummaries(5)
     };

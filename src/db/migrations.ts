@@ -3,7 +3,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import type { PockedioConfig } from "../config/schema.js";
 
-export const schemaVersion = 6;
+export const schemaVersion = 7;
 
 function schemaPath(): string {
   return path.resolve(path.dirname(new URL(import.meta.url).pathname), "schema.sql");
@@ -33,6 +33,44 @@ function applySchemaBackfills(db: Database.Database): void {
   addColumnIfMissing(db, "dj_audio", "latency_ms", "INTEGER");
   addColumnIfMissing(db, "dj_audio", "file_size_bytes", "INTEGER");
   addColumnIfMissing(db, "scheduled_dj_preparations", "audio_cache_expires_at", "TEXT");
+  rebuildFeedbackTableIfMissingTasteActions(db);
+}
+
+function rebuildFeedbackTableIfMissingTasteActions(db: Database.Database): void {
+  if (!tableExists(db, "feedback")) {
+    return;
+  }
+  const row = db.prepare(`
+    SELECT sql
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'feedback'
+    LIMIT 1
+  `).get() as { sql: string } | undefined;
+  if (row?.sql.includes("less_like_this") && row.sql.includes("favorite") && row.sql.includes("save_vibe")) {
+    return;
+  }
+
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+
+    CREATE TABLE feedback_migrated (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      track_id TEXT REFERENCES station_tracks(id) ON DELETE SET NULL,
+      action TEXT NOT NULL CHECK (action IN ('like', 'skip', 'ban', 'more_like_this', 'change_vibe', 'less_like_this', 'favorite', 'save_vibe', 'stop')),
+      note TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    INSERT INTO feedback_migrated (id, session_id, track_id, action, note, created_at)
+    SELECT id, session_id, track_id, action, note, created_at
+    FROM feedback;
+
+    DROP TABLE feedback;
+    ALTER TABLE feedback_migrated RENAME TO feedback;
+
+    PRAGMA foreign_keys = ON;
+  `);
 }
 
 function addColumnIfMissing(db: Database.Database, table: string, column: string, definition: string): void {

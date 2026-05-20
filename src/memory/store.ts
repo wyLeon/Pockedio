@@ -7,11 +7,13 @@ import type { PockedioConfig } from "../config/schema.js";
 export type SessionTriggerType = "conversation" | "scheduled_morning" | "scheduled_evening" | "mood_check" | "explicit_dj_audio";
 export type MessageRole = "user" | "pockedio" | "system";
 export type PlaybackStatus = "planned" | "playing" | "played" | "skipped" | "unavailable" | "failed";
-export type FeedbackAction = "like" | "skip" | "ban" | "more_like_this" | "change_vibe" | "stop";
+export type FeedbackAction = "like" | "skip" | "ban" | "more_like_this" | "change_vibe" | "less_like_this" | "favorite" | "save_vibe" | "stop";
 export type MemoryKind = "agenda" | "diary" | "taste" | "feedback" | "summary" | "personality";
 export type DjAudioKind = "morning" | "evening" | "explicit";
 export type DjAudioStatus = "generated" | "played" | "failed" | "text_fallback";
 export type CalendarEventSource = "setup" | "interactive" | "scheduled";
+export type TasteSignalType = "positive_seed" | "negative_seed" | "ban" | "favorite" | "vibe_preset";
+export type TasteSignalTargetType = "track" | "artist" | "station_request" | "vibe";
 
 export type DjAudioCacheMetadata = {
   cacheExpiresAt?: string | null;
@@ -63,6 +65,28 @@ export type RecentSessionSummary = {
   startedAt: string;
   triggerType: SessionTriggerType;
   triggerText: string;
+};
+
+export type TasteSignalInput = {
+  sourceFeedbackId?: string | null;
+  trackId?: string | null;
+  signalType: TasteSignalType;
+  targetType: TasteSignalTargetType;
+  targetValue: string;
+  weight: number;
+  context?: unknown;
+};
+
+export type TasteSignalRecord = {
+  id: string;
+  sourceFeedbackId: string | null;
+  trackId: string | null;
+  signalType: TasteSignalType;
+  targetType: TasteSignalTargetType;
+  targetValue: string;
+  weight: number;
+  context: unknown;
+  createdAt: string;
 };
 
 export class MemoryStore {
@@ -146,6 +170,62 @@ export class MemoryStore {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(id, sessionId, trackId, action, note ?? null, nowIso());
     return id;
+  }
+
+  addTasteSignal(signal: TasteSignalInput): string {
+    const id = randomUUID();
+    this.db.prepare(`
+      INSERT INTO taste_signals (
+        id, source_feedback_id, track_id, signal_type, target_type, target_value, weight, context_json, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      signal.sourceFeedbackId ?? null,
+      signal.trackId ?? null,
+      signal.signalType,
+      signal.targetType,
+      signal.targetValue,
+      signal.weight,
+      signal.context === undefined ? null : JSON.stringify(signal.context),
+      nowIso()
+    );
+    return id;
+  }
+
+  addTasteSignals(signals: TasteSignalInput[]): string[] {
+    return signals.map((signal) => this.addTasteSignal(signal));
+  }
+
+  recordFeedbackWithTasteSignals(
+    sessionId: string,
+    trackId: string | null,
+    action: FeedbackAction,
+    note: string | undefined,
+    signals: Omit<TasteSignalInput, "sourceFeedbackId">[]
+  ): string {
+    const feedbackId = this.addFeedback(sessionId, trackId, action, note);
+    this.addTasteSignals(signals.map((signal) => ({
+      ...signal,
+      sourceFeedbackId: feedbackId,
+      trackId: signal.trackId ?? trackId
+    })));
+    return feedbackId;
+  }
+
+  getTasteSignals(limit: number): TasteSignalRecord[] {
+    const rows = this.db.prepare(`
+      SELECT id, source_feedback_id as sourceFeedbackId, track_id as trackId,
+        signal_type as signalType, target_type as targetType, target_value as targetValue,
+        weight, context_json as contextJson, created_at as createdAt
+      FROM taste_signals
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(limit) as Array<Omit<TasteSignalRecord, "context"> & { contextJson: string | null }>;
+    return rows.map(({ contextJson, ...row }) => ({
+      ...row,
+      context: parseJson(contextJson)
+    }));
   }
 
   addMemoryItem(kind: MemoryKind, content: string, metadata?: unknown, sourceSessionId?: string): string {
@@ -314,6 +394,17 @@ export class MemoryStore {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function parseJson(value: string | null): unknown {
+  if (!value) {
+    return null;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function calendarDedupeKey(event: CalendarEventInput): string {

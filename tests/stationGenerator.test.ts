@@ -163,6 +163,107 @@ describe("generateStation", () => {
     ]);
   });
 
+  it("passes feedback-derived taste signals into station planning", async () => {
+    const provider = new FakeProvider();
+    let observedPrompt = "";
+    const llm: StationLlmClient = {
+      generateJson: async (prompt) => {
+        observedPrompt = prompt;
+        return {
+          ok: true,
+          value: {
+            tracks: [
+              { title: "A", artist: "Artist A", rationale: "first" },
+              { title: "B", artist: "Artist B", rationale: "second" },
+              { title: "C", artist: "Artist C", rationale: "third" },
+              { title: "D", artist: "Artist D", rationale: "fourth" },
+              { title: "E", artist: "Artist E", rationale: "fifth" }
+            ]
+          }
+        };
+      },
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    await generateStation({
+      request: "build a calm focus station",
+      config: makeConfig(),
+      provider,
+      llm,
+      context: {
+        tasteSignals: [{
+          id: "signal-1",
+          sourceFeedbackId: "feedback-1",
+          trackId: "track-1",
+          signalType: "positive_seed",
+          targetType: "track",
+          targetValue: "Blue in Green - Miles Davis",
+          weight: 3,
+          context: { stationRequest: "play soft jazz" },
+          createdAt: "2026-05-21T00:00:00.000Z"
+        }]
+      }
+    });
+
+    expect(observedPrompt).toContain("Taste feedback signals:");
+    expect(observedPrompt).toContain("positive_seed: track: Blue in Green - Miles Davis: weight 3");
+  });
+
+  it("uses feedback signals in fallback searches and filters banned artists", async () => {
+    const provider = new FakeProvider();
+    const llm: StationLlmClient = {
+      generateJson: async () => ({
+        ok: true,
+        value: {
+          tracks: [
+            { title: "Blocked A", artist: "Blocked Artist", rationale: "blocked" },
+            { title: "Blocked B", artist: "Blocked Artist", rationale: "blocked" },
+            { title: "Safe C", artist: "Safe Artist", rationale: "safe" },
+            { title: "Safe D", artist: "Safe Artist", rationale: "safe" },
+            { title: "Safe E", artist: "Safe Artist", rationale: "safe" }
+          ]
+        }
+      }),
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    const station = await generateStation({
+      request: "play soft focus",
+      config: makeConfig(),
+      provider,
+      llm,
+      context: {
+        tasteSignals: [
+          {
+            id: "signal-1",
+            sourceFeedbackId: "feedback-1",
+            trackId: "track-1",
+            signalType: "ban",
+            targetType: "artist",
+            targetValue: "Blocked Artist",
+            weight: -999,
+            context: null,
+            createdAt: "2026-05-21T00:00:00.000Z"
+          },
+          {
+            id: "signal-2",
+            sourceFeedbackId: "feedback-2",
+            trackId: "track-2",
+            signalType: "favorite",
+            targetType: "track",
+            targetValue: "Blue in Green - Miles Davis",
+            weight: 5,
+            context: null,
+            createdAt: "2026-05-21T00:00:00.000Z"
+          }
+        ]
+      }
+    });
+
+    expect(station.tracks.map((track) => track.artist).join("\n")).not.toContain("Blocked Artist");
+    expect(provider.searches.map((query) => query.keyword).join("\n")).toContain("Blue in Green - Miles Davis");
+  });
+
   it("keeps provider promotion out of station planning prompts and rationales", async () => {
     const provider = new FakeProvider();
     let observedPrompt = "";

@@ -49,7 +49,8 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
   }
   const tasteSummary = readTasteSummary(input.config.paths.taste);
   const plan = await planTracks(input, llm, tasteSummary);
-  const tracks = await Promise.all(plan.tracks.map((track, index) => resolveTrack(track, index + 1, provider, input.request)));
+  const plannedTracks = applyTasteSignalConstraints(plan.tracks, input, tasteSummary);
+  const tracks = await Promise.all(plannedTracks.map((track, index) => resolveTrack(track, index + 1, provider, input.request)));
 
   return {
     request: input.request,
@@ -146,7 +147,7 @@ async function planTracks(
     }
   }
 
-  return { source: "fallback", tracks: fallbackTracks(input.request, tasteSummary) };
+  return { source: "fallback", tracks: fallbackTracksWithTasteSignals(input.request, tasteSummary, input.context?.tasteSignals ?? []) };
 }
 
 function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): string {
@@ -165,8 +166,21 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     `Diary summary: ${context?.diary?.summary ?? "not available"}`,
     `Personality profile: ${JSON.stringify(context?.personality ?? input.config.personality)}`,
     `Recent feedback/session summary: ${JSON.stringify(context?.recentSessions ?? [])}`,
+    `Taste feedback signals: ${formatTasteSignalsForPrompt(context?.tasteSignals ?? [])}`,
     "Return only JSON."
   ].join("\n");
+}
+
+function formatTasteSignalsForPrompt(signals: PockedioContext["tasteSignals"]): string {
+  if (signals.length === 0) {
+    return "No feedback-derived taste signals yet.";
+  }
+  return signals.slice(0, 12).map((signal) => [
+    signal.signalType,
+    signal.targetType,
+    signal.targetValue,
+    `weight ${signal.weight}`
+  ].join(": ")).join(" | ");
 }
 
 function parseStationTracks(value: StationJsonResponse): PlannedStationTrack[] {
@@ -211,6 +225,70 @@ function fallbackTracks(request: string, tasteSummary: string): PlannedStationTr
     title: base[index % base.length],
     artist: providerSearchArtist,
     rationale: fallbackRationale(request, tasteSummary)
+  }));
+}
+
+function applyTasteSignalConstraints(
+  tracks: PlannedStationTrack[],
+  input: GenerateStationInput,
+  tasteSummary: string
+): PlannedStationTrack[] {
+  const signals = input.context?.tasteSignals ?? [];
+  const bannedArtists = new Set(signals
+    .filter((signal) => signal.signalType === "ban" && signal.targetType === "artist")
+    .map((signal) => normalizeComparableText(signal.targetValue)));
+  const bannedTracks = new Set(signals
+    .filter((signal) => signal.signalType === "ban" && signal.targetType === "track")
+    .map((signal) => normalizeComparableText(signal.targetValue)));
+  const filtered = tracks.filter((track) => {
+    const artist = normalizeComparableText(track.artist);
+    const trackLabel = normalizeComparableText(`${track.title} - ${track.artist}`);
+    return !bannedArtists.has(artist) && !bannedTracks.has(trackLabel);
+  });
+
+  if (filtered.length >= 5) {
+    return filtered.slice(0, 5);
+  }
+
+  const fallback = fallbackTracksWithTasteSignals(input.request, tasteSummary, signals)
+    .filter((track) => !bannedArtists.has(normalizeComparableText(track.artist)))
+    .filter((track) => !bannedTracks.has(normalizeComparableText(`${track.title} - ${track.artist}`)));
+  const seen = new Set(filtered.map((track) => normalizeSongKey(track.title, track.artist)));
+  for (const track of fallback) {
+    const key = normalizeSongKey(track.title, track.artist);
+    if (seen.has(key)) {
+      continue;
+    }
+    filtered.push(track);
+    seen.add(key);
+    if (filtered.length >= 5) {
+      break;
+    }
+  }
+
+  return filtered.slice(0, 5);
+}
+
+function fallbackTracksWithTasteSignals(
+  request: string,
+  tasteSummary: string,
+  signals: NonNullable<PockedioContext["tasteSignals"]>
+): PlannedStationTrack[] {
+  const positiveSeeds = signals
+    .filter((signal) => signal.weight > 0 && (signal.signalType === "positive_seed" || signal.signalType === "favorite" || signal.signalType === "vibe_preset"))
+    .filter((signal) => signal.targetType === "track" || signal.targetType === "artist" || signal.targetType === "vibe")
+    .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight))
+    .map((signal) => signal.targetValue)
+    .slice(0, 3);
+  if (positiveSeeds.length === 0) {
+    return fallbackTracks(request, tasteSummary);
+  }
+  const base = fallbackSearchQueries(request, tasteSummary);
+  const queries = [...positiveSeeds.map((seed) => `${normalizeRequestForSearch(request)} ${seed}`.trim()), ...base];
+  return queries.slice(0, 5).map((query) => ({
+    title: query,
+    artist: providerSearchArtist,
+    rationale: `Uses recent taste feedback while staying with "${request}".`
   }));
 }
 

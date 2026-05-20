@@ -570,6 +570,69 @@ describe("runSessionTurn", () => {
     expect(playbackState.currentIndex).toBe(1);
   });
 
+  it("answers what's next on the final track without skipping or ending playback", async () => {
+    const config = makeConfig();
+    let stopCalls = 0;
+    const started: string[] = [];
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      await runSessionTurn({
+        input: "next",
+        config,
+        playbackState,
+        provider: new FakeProvider(),
+        llm: fakeLlm(),
+        startUrlPlayback: async (url) => {
+          started.push(url);
+          return {
+            target: url,
+            done: new Promise(() => undefined),
+            stop: () => {
+              stopCalls += 1;
+            }
+          };
+        }
+      });
+    }
+
+    expect(playbackState.currentIndex).toBe(4);
+    const result = await runSessionTurn({
+      input: "what's next?",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("playback_status");
+    expect(result.response).toContain("Now playing: 5.");
+    expect(result.response).toContain("Queue:");
+    expect(result.response).not.toContain("No playable tracks remain");
+    expect(playbackState.currentIndex).toBe(4);
+    expect(started).toHaveLength(5);
+    expect(stopCalls).toBe(4);
+  });
+
   it("keeps the session open when next fails to start playback", async () => {
     const config = makeConfig();
     let stopCalls = 0;
@@ -1027,6 +1090,94 @@ describe("runSessionTurn", () => {
       JOIN station_tracks st ON st.id = f.track_id
     `).all());
     expect(rows).toEqual([{ action: "more_like_this", position: 1 }]);
+    const signals = withDatabase(config, (db) => db.prepare(`
+      SELECT signal_type as signalType, target_type as targetType, target_value as targetValue, weight
+      FROM taste_signals
+      ORDER BY weight DESC
+    `).all());
+    expect(signals).toEqual([
+      {
+        signalType: "positive_seed",
+        targetType: "track",
+        targetValue: "something deep work - Test Artist",
+        weight: 3
+      },
+      {
+        signalType: "positive_seed",
+        targetType: "artist",
+        targetValue: "Test Artist",
+        weight: 2
+      },
+      {
+        signalType: "positive_seed",
+        targetType: "station_request",
+        targetValue: "play something for deep work",
+        weight: 2
+      }
+    ]);
+  });
+
+  it("records soft negative, favorite, and saved-vibe feedback as taste signals", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    for (const input of ["less like this", "favorite this", "save this vibe"]) {
+      await runSessionTurn({
+        input,
+        config,
+        playbackState,
+        provider: new FakeProvider(),
+        llm: fakeLlm()
+      });
+    }
+
+    const rows = withDatabase(config, (db) => db.prepare(`
+      SELECT action FROM feedback ORDER BY created_at
+    `).all());
+    expect(rows).toEqual([
+      { action: "less_like_this" },
+      { action: "favorite" },
+      { action: "save_vibe" }
+    ]);
+    const signals = withDatabase(config, (db) => db.prepare(`
+      SELECT signal_type as signalType, target_type as targetType, target_value as targetValue, weight
+      FROM taste_signals
+      ORDER BY created_at
+    `).all());
+    expect(signals).toEqual(expect.arrayContaining([
+      {
+        signalType: "negative_seed",
+        targetType: "track",
+        targetValue: "something deep work - Test Artist",
+        weight: -2
+      },
+      {
+        signalType: "favorite",
+        targetType: "track",
+        targetValue: "something deep work - Test Artist",
+        weight: 5
+      },
+      {
+        signalType: "vibe_preset",
+        targetType: "vibe",
+        targetValue: "play something for deep work",
+        weight: 4
+      }
+    ]));
   });
 
   it("keeps music playing while responding to personal listening memories", async () => {
