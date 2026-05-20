@@ -786,13 +786,14 @@ Try:
   play something for deep work
   what's playing?
 
+When I suggest a station:
+  press Enter to play it
+  type dj for a spoken DJ version
+
 Controls:
   next
   stop
   show queue
-
-Spoken DJ:
-  after a station suggestion, type dj
 
 Setup:
   pockedio setup
@@ -808,6 +809,7 @@ Rules:
 - Do not start playback during startup.
 - Do not repeat the full setup explanation.
 - Show examples as natural inputs, not as a command manual.
+- Explain `Enter` and `dj` only as pending-station choices; they are not global commands.
 
 If setup is incomplete, keep the session open and show a short setup hint:
 
@@ -832,8 +834,8 @@ Routing priority:
 1. Session exit
 2. Playback controls
 3. Queue or status questions
-4. Explicit DJ audio request
-5. Pending station confirmation
+4. Pending station confirmation or refinement
+5. Explicit DJ audio request
 6. Identity or capability question
 7. Explicit playback request
 8. Mood or life-context recommendation
@@ -848,9 +850,10 @@ User input                       Route
 quit / exit / Ctrl+C             3.15 Session Exit
 next                             3.10 Playback Controls
 stop                             3.10 Playback Controls
-what's playing?                  3.11 Queue And Status Questions
+what’s playing?                  3.11 Queue And Status Questions
 show queue                       3.11 Queue And Status Questions
 dj, when a station is pending    3.5 Pending Station Confirmation
+Enter, when a station is pending 3.5 Pending Station Confirmation
 make me a short DJ intro         3.13 Explicit DJ Audio Request
 yes / play it                    3.5 Pending Station Confirmation, if pending
 no / not now                     3.5 Pending Station Confirmation, if pending
@@ -876,7 +879,8 @@ Rules:
 - Use the global status layer while processing LLM-routed messages.
 - Obvious local commands such as `next`, `stop`, `show queue`, and `yes` should respond without a visible spinner unless they trigger a slower action.
 - Do not print routing labels such as `Detected intent: mood`.
-- If a pending station exists, short confirmations like `yes`, `play it`, `no`, or `not now` route to pending station first.
+- If a pending station exists, empty Enter and short confirmations like `yes`, `play it`, `no`, or `not now` route to pending station first.
+- If a pending station exists, `dj` means the 3.6 DJ-program branch, not a generic DJ-audio request.
 - Playback controls override conversation.
 - Explicit DJ audio requires clear spoken/audio wording.
 - Mood and life-context requests should not auto-play.
@@ -995,6 +999,8 @@ Output shape:
 [Acknowledge the user's state in one sentence.]
 [Suggest a listening direction in one or two sentences.]
 [Ask whether to build/play a station.]
+
+Press Enter to play it, type "dj" for a spoken DJ version, or tell me how to adjust it.
 ```
 
 Example:
@@ -1005,6 +1011,8 @@ Example:
 I hear you. Let’s keep it low-pressure: warm, slow, and uncluttered, something that lets your body stand down without demanding attention.
 
 Want me to build a calm five-track station for this?
+
+Press Enter to play it, type "dj" for a spoken DJ version, or tell me how to adjust it.
 ```
 
 Example with light context:
@@ -1015,6 +1023,8 @@ Example with light context:
 That sounds like a long day, and with Guangzhou this humid tonight, I’d keep the music soft and breathable rather than dense. I’d aim for gentle ambient, quiet piano, and warm downtempo.
 
 Want me to build a calm five-track station for this?
+
+Press Enter to play it, type "dj" for a spoken DJ version, or tell me how to adjust it.
 ```
 
 Rules:
@@ -1024,6 +1034,7 @@ Rules:
 - Do not start playback.
 - Do not show the queue yet.
 - Ask a clear confirmation question at the end.
+- Always include the pending-station action line after the confirmation question.
 - Use context lightly; do not announce raw Calendar, weather, or diary reads unless it helps.
 - Do not diagnose, counsel, or over-personalize.
 - Store the user’s mood/life-context message as session memory.
@@ -1032,10 +1043,11 @@ Rules:
 User choices after output:
 
 ```text
-yes / play it / sure -> 3.5 Pending Station Confirmation
-no / not now         -> stay in conversation
-make it softer       -> update pending station direction
-more energetic       -> update pending station direction
+Enter / yes / play it / sure -> 3.5 Pending Station Confirmation, normal 3.6 playback
+dj / dj mode                 -> 3.5 Pending Station Confirmation, 3.6 DJ-program playback
+no / not now                 -> stay in conversation
+make it softer               -> update pending station direction
+more energetic               -> update pending station direction
 ```
 
 Fallback if the LLM is unavailable:
@@ -1081,8 +1093,8 @@ Use no visible spinner for simple confirm/decline. Use `Thinking...` when interp
 Decision map:
 
 ```text
-Enter / yes / sure / play it    -> build and play pending station
-dj / dj mode                    -> play a spoken DJ opening, then start station
+Enter / yes / sure / play it    -> 3.6 normal station building and playback start
+dj / dj mode                    -> 3.6 DJ-program branch with spoken opening
 no / not now                    -> clear pending station, stay in conversation
 make it softer                  -> update pending station, ask again
 more energetic                  -> update pending station, ask again
@@ -1153,12 +1165,16 @@ Rules:
 - Clear the pending station after confirmation, decline, explicit playback replacement, or session exit.
 - A new explicit playback request replaces the pending station and routes to 3.7 or 3.8.
 - `dj` is only a shortcut when a station is pending. It means spoken opening plus normal station playback.
+- Confirmation does not itself print queue details; queue appears only after 3.6 starts playback.
 - DJ mode should be a before-playback fork, not a mid-station toggle. If the user asks for DJ mode while a station is already playing, explain that they can choose DJ mode before the next station.
 
 ## 3.6 Station Building And Playback Start
 
 Flow name:
   Station building and normal playback start.
+
+Built state:
+  Implemented for normal station playback and before-playback DJ program mode.
 
 User entry:
   Command:
@@ -1172,11 +1188,12 @@ Preconditions:
 Processing phases:
 
 ```text
-Thinking...
 Reading your context...
 Building a station...
 Starting playback...
 ```
+
+Use animated status lines in interactive TTY. Do not print repeated spinner frames in non-interactive output.
 
 Main output:
 
@@ -1184,7 +1201,10 @@ Main output:
 [Short station framing.]
 
 Now playing: 1/5  Track - Artist
-[>...................] 00:00 elapsed
+[>...................] 00:00 / 04:13
+
+Mina's note:
+[One concise note about why this track starts here.]
 
 Up next:
   2. Track - Artist
@@ -1196,9 +1216,6 @@ Queue:
   3. Track - Artist
   4. Track - Artist
   5. Track - Artist
-
-Mina's note:
-[One concise note about why this track starts here.]
 ```
 
 Track-start rule:
@@ -1206,11 +1223,14 @@ Track-start rule:
 ```text
 Every time a track starts, show:
   Now playing with position count, for example 3/5
-  elapsed bar
+  elapsed / total bar when track duration is known, for example [===>................] 00:42 / 04:13
+  elapsed-only bar when track duration is unavailable, for example [=>..................] 00:42 elapsed
+  selected DJ name plus note
   Up next, when tracks remain
   full compact queue with current track marked by >
-  selected DJ name plus note
 ```
+
+The progress bar is duration-aware but not continuously ticking in-place yet. It updates whenever Pockedio prints a track-start or playback-status surface, including `what's playing?`.
 
 Station-complete rule:
 
@@ -1237,6 +1257,7 @@ Rules:
 - Use track rationale as the fallback note when richer context is unavailable, but rewrite it as a first-person recommendation.
 - Show DJ notes when the first track starts, on manual `next`, and on auto-advance.
 - Previous, next, pause, resume, and favorite controls belong to 3.10 and 3.12.
+- Put the DJ note before `Up next` and `Queue`; it belongs to the current track, not the playlist block.
 
 DJ program mode:
 
@@ -1253,7 +1274,8 @@ Whenever DJ program voice is played, the terminal should also show the spoken tr
 Mina:
 [spoken DJ copy]
 
-Now playing: 2. Track - Artist
+Now playing: 2/5  Track - Artist
+[>...................] 00:00 / 04:13
 ```
 
 DJ mode is not a mid-station toggle. Once normal playback starts, `dj` / `dj mode` should not retrofit spoken mode into that station. The user can stop and ask for a new DJ version, or choose DJ mode before the next station starts.
@@ -1304,6 +1326,50 @@ play some jazz for deep work
 put on something for a rainy commute
 ```
 
+## Active Playback Interaction Map
+
+Use when music is already playing. These are user-facing interaction options, not hidden implementation labels.
+
+```text
+User input                         Route                         Built state
+what's playing?                    3.11 Queue And Status         built
+what is playing?                   3.11 Queue And Status         built
+show queue                         3.11 Queue And Status         built
+what are we listening to?          3.11 Queue And Status         built
+next                               3.10 Playback Controls        built
+skip                               3.10 Playback Controls        built
+next song / next track             3.10 Playback Controls        built
+stop                               3.10 Playback Controls        built
+pause                              3.10 Playback Controls        built as stop-audio, keep session open
+resume                             3.10 Playback Controls        not built
+previous                           3.10 Playback Controls        not built
+favorite this                      3.12 Feedback Actions         not built
+I like this                        3.12 Feedback Actions         built
+good pick / nice pick              3.12 Feedback Actions         built
+more like this                     3.12 Feedback Actions         built
+keep this vibe                     3.12 Feedback Actions         built
+change the vibe                    3.12 Feedback Actions         built
+don't play this artist             3.12 Feedback Actions         built
+never play this                    3.12 Feedback Actions         built
+Who is the singer?                 3.9 During-Playback Talk      built
+Tell me about this artist          3.9 During-Playback Talk      built
+Tell me about [artist]             3.9 During-Playback Talk      built
+Why did you pick this?             3.9 During-Playback Talk      built
+This reminds me of college         3.9 During-Playback Talk      built
+dj / dj mode                       3.6 DJ Program Boundary       built rejection
+play something else                3.8 Replacement Station       built
+play [specific song]               3.7 Specific Song Playback    built
+```
+
+Rules:
+
+- During playback, questions and personal comments should not stop or replace music unless the user clearly asks for playback control.
+- During playback, current-track and artist questions should use the LLM conversation path with current track and queue context.
+- During playback, `next` means skip current track and start the next playable track.
+- During playback, `stop` currently stops playback and ends the interactive session; this should be revisited when pause/resume are designed.
+- During playback, `dj` is not a toggle. DJ mode is chosen before playback starts.
+- Replacement requests such as `play something else` may stop current playback and start a new station.
+
 ## 3.9 During-Playback Conversation
 
 Examples:
@@ -1312,7 +1378,56 @@ Examples:
 This reminds me of college.
 Why did you pick this?
 I feel calmer now.
+Who is the singer?
+Tell me about Kenny Dorham.
 ```
+
+Flow name:
+  Conversation while music keeps playing.
+
+Preconditions:
+  Music is currently playing.
+
+Processing display:
+
+```text
+Thinking...
+```
+
+Main output:
+  Answer in the selected DJ voice. Use current track and queue context when relevant. Do not start a new station unless the user clearly asks for playback.
+
+Example:
+
+```text
+> Who is the singer?
+
+The current track is Blue Bossa - Kenny Dorham, Joe Henderson. The listed artists are Kenny Dorham and Joe Henderson.
+```
+
+Example:
+
+```text
+> Tell me about Kenny Dorham.
+
+Kenny Dorham was a lyrical hard bop trumpeter with a warm, understated sound. In this set, his playing gives the track a relaxed but focused center.
+```
+
+Example:
+
+```text
+> This reminds me of college.
+
+I hear that. I’ll keep this memory close to the current lane: reflective, patient, and not too crowded.
+```
+
+Rules:
+
+- Keep music playing.
+- Do not show queue unless the user asks for queue/status.
+- Do not turn artist or song-background questions into playback requests.
+- Store useful personal listening comments as conversation memory.
+- Keep answers concise; this is still a listening session, not a long article.
 
 ## 3.10 Playback Controls
 
@@ -1325,6 +1440,35 @@ pause
 resume
 ```
 
+Built controls:
+
+```text
+next / skip / next song / next track
+  -> stop current track, mark it skipped, start next playable track, show 3.6 track-start surface
+
+stop
+  -> stop current playback, mark current track skipped, end interactive session
+```
+
+Planned controls:
+
+```text
+resume
+  -> resume paused playback
+
+previous
+  -> return to previous playable track
+```
+
+Rules:
+
+- Controls should be fast and should not use the LLM.
+- `next` should preserve the station and queue context.
+- `next` should show the selected DJ note for the new current track.
+- `pause` currently stops audio and keeps the CLI session open; resumable pause is not built yet.
+- If no next playable track remains, show the station-complete message.
+- `resume` and `previous` need explicit implementation before being shown as reliable controls in startup copy.
+
 ## 3.11 Queue And Status Questions
 
 Examples:
@@ -1334,6 +1478,37 @@ what's playing?
 show queue
 what's next?
 ```
+
+Built queries:
+
+```text
+what's playing?
+what is playing?
+current song
+current track
+show queue
+where are we?
+what are we listening to?
+```
+
+Main output:
+
+```text
+Now playing: 2. Track - Artist
+[===>................] 00:42 / 04:13
+Queue:
+  1. Previous Track - Artist
+> 2. Track - Artist
+  3. Next Track - Artist
+```
+
+Rules:
+
+- Status should not change playback.
+- Show the current track marker with `>`.
+- Use elapsed / total when duration is known.
+- Use elapsed-only when duration is unavailable.
+- Do not include the DJ note in status unless the user asks why the track was picked.
 
 ## 3.12 Feedback Actions
 
@@ -1346,6 +1521,49 @@ I like this
 don't play this again
 save this vibe
 ```
+
+Built feedback:
+
+```text
+I like this / love this / good pick / nice pick
+  -> record like on current track
+  -> "Noted. I will weigh this direction more strongly."
+
+more like this / similar to this / keep this vibe
+  -> record more_like_this on current track
+  -> "Noted. I will stay near this lane."
+
+change the vibe / different vibe / switch the mood / change mood
+  -> record change_vibe on current track
+  -> "Understood. I will shift the mood."
+
+don't play this artist / do not play this artist / never play / ban / block
+  -> record ban on current track
+  -> "Understood. I will avoid this in future sets."
+
+skip / next
+  -> record skip, then advance to the next playable track
+```
+
+Planned feedback:
+
+```text
+favorite this / save this / add to best list
+  -> add current track to a highly curated local favorites collection
+
+less like this
+  -> record a softer negative preference without banning the artist
+
+save this vibe
+  -> store the current station direction as a reusable mood/style preset
+```
+
+Rules:
+
+- Feedback should attach to the current playing track when possible.
+- Feedback should not create a new station by itself.
+- Feedback should be stored as memory signal, not as a full conversation transcript only.
+- `favorite` should not be treated as a normal NetEase favorite until account-backed collection behavior is designed.
 
 ## 3.13 Explicit DJ Audio Request
 

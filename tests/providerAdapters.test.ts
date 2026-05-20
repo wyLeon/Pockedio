@@ -48,9 +48,9 @@ describe("NetEaseProvider", () => {
     await expect(provider.search({ keyword: "missing" }, 5)).resolves.toEqual([]);
   });
 
-  it("returns a playable URL", async () => {
+  it("returns a playable URL with duration when NetEase provides one", async () => {
     const provider = new NetEaseProvider(makeConfig(), async () => jsonResponse({
-      data: [{ id: 1, url: "https://example.com/song.mp3", type: "mp3", code: 200 }]
+      data: [{ id: 1, url: "https://example.com/song.mp3", type: "mp3", code: 200, time: 253_000 }]
     }));
 
     await expect(provider.getPlayableUrl("1")).resolves.toEqual({
@@ -58,7 +58,8 @@ describe("NetEaseProvider", () => {
       provider: "netease",
       providerTrackId: "1",
       playableUrl: "https://example.com/song.mp3",
-      urlType: "mp3"
+      urlType: "mp3",
+      durationMs: 253_000
     });
   });
 

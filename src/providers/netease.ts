@@ -109,6 +109,7 @@ export class NetEaseProvider implements MusicProvider {
       provider: "netease",
       providerTrackId: trackId,
       playableUrl,
+      durationMs: timeMs,
       urlType: valueToString(item?.type)
     };
   }

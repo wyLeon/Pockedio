@@ -16,6 +16,7 @@ export type PlayableTrack =
       provider: string;
       providerTrackId: string;
       playableUrl: string;
+      durationMs?: number | null;
       urlType?: string | null;
     }
   | {

@@ -161,7 +161,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
   const writeStatus = input.writeStatus ?? (() => () => undefined);
   const now = input.now ?? (() => new Date());
-  const userText = input.input.trim();
+  const userText = normalizeSessionInput(input.input);
   const sessionId = input.sessionId ?? store.createSession("conversation", userText);
   const shouldEndSession = input.endSession ?? !input.sessionId;
   if (input.playbackState) {
@@ -187,6 +187,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         ? { type: "pending_station_decline" as const, confidence: "high" as const }
         : await resolveIntent(userText, llm, writeStatus);
     if (input.playbackState?.currentTrackId && isCurrentTrackQuestion(userText) && isStationStartingIntent(intent.type)) {
+      intent = { type: "conversation", confidence: "high" };
+    }
+    if (isMusicKnowledgeQuestion(userText) && !hasExplicitPlaybackCommand(userText) && (isStationStartingIntent(intent.type) || intent.type === "single_track_playback")) {
       intent = { type: "conversation", confidence: "high" };
     }
 
@@ -223,6 +226,16 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         input.playbackState.pendingStationOriginalRequest = undefined;
       }
       const response = "No problem. We can keep talking, or you can point me toward a different mood.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
+    if (intent.type === "pause") {
+      if (input.playbackState?.activePlayback) {
+        stopActivePlayback(input.playbackState, store);
+      }
+      const response = "Paused. Resume is not available yet; ask for the next track or a new station when you are ready.";
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -435,6 +448,10 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   }
 }
 
+function normalizeSessionInput(input: string): string {
+  return input.trim().replace(/^>\s*/, "").trim();
+}
+
 async function resolveIntent(userText: string, llm: LlmClient, writeStatus: StatusWriter): Promise<SessionIntent> {
   const deterministic = parseDeterministicIntent(userText);
   if (deterministic.confidence === "high" && isInstantLocalIntent(deterministic.type)) {
@@ -445,6 +462,7 @@ async function resolveIntent(userText: string, llm: LlmClient, writeStatus: Stat
 
 function isInstantLocalIntent(type: SessionIntent["type"]): boolean {
   return type === "stop"
+    || type === "pause"
     || type === "playback_status"
     || type === "feedback_like"
     || type === "feedback_skip"
@@ -601,7 +619,9 @@ async function resolveSingleTrackCandidates(input: {
 }
 
 function parseSingleTrackRequest(text: string): { keyword: string; title?: string; artist?: string } | null {
-  const match = text.trim().match(/^(?:please\s+)?(?:play|put on|queue|start)\s+(.+)$/i);
+  const match = text.trim().match(/^(?:please\s+)?(?:play|put on|queue|start)\s+(.+)$/i)
+    ?? text.trim().match(/^(?:please\s+)?(?:i\s+)?(?:want|wanna|would like|need)\s+to\s+(?:listen to|listen|hear|play)\s+(.+)$/i)
+    ?? text.trim().match(/^(?:please\s+)?(?:listen to|hear)\s+(.+)$/i);
   if (!match) {
     return null;
   }
@@ -894,6 +914,12 @@ function isCurrentTrackQuestion(text: string): boolean {
     || /\b(tell me|what do you know)\b.*\b(this song|this track|current song|current track)\b/.test(normalized);
 }
 
+function isMusicKnowledgeQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return /^(tell me about|can you tell me about|what do you know about|give me background on|what'?s the story behind|who is|who was)\b/.test(normalized)
+    || /\b(background|story|history|meaning|origin|influence|influences)\b.*\b(song|track|album|artist|band|composer|singer|musician|producer)\b/.test(normalized);
+}
+
 function formatCurrentTrackQuestionResponse(playbackState: InteractivePlaybackState): string {
   const current = getCurrentPlaybackTrack(playbackState);
   if (!current) {
@@ -922,6 +948,7 @@ function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: str
     return false;
   }
   if (intent.type === "stop"
+    || intent.type === "pause"
     || intent.type === "playback_status"
     || intent.type === "identity_capability"
     || intent.type === "explicit_dj_audio_request"
@@ -1657,17 +1684,17 @@ function formatTrackStartSurface(
 ): string {
   return [
     formatTrackStartNowPlayingLine(track, startedAt, now, queue.length),
-    formatUpNext(queue, currentIndex),
-    formatCurrentQueueSnapshot(queue, currentIndex),
     "",
     `${config.dj.displayName}'s note:`,
-    formatDjTrackNote(track)
+    formatDjTrackNote(track),
+    formatUpNext(queue, currentIndex),
+    formatCurrentQueueSnapshot(queue, currentIndex)
   ].filter(Boolean).join("\n");
 }
 
 function formatTrackStartNowPlayingLine(track: StationTrack, startedAt: Date | undefined, now: Date, totalTracks: number): string {
   const positionPrefix = totalTracks > 1 ? `${track.position}/${totalTracks}  ` : "";
-  return `Now playing: ${positionPrefix}${track.title} - ${track.artist}\n${formatElapsedBar(startedAt, now)}`;
+  return `Now playing: ${positionPrefix}${track.title} - ${track.artist}\n${formatElapsedBar(startedAt, now, getTrackDurationMs(track))}`;
 }
 
 function formatUpNext(queue: StoredPlaybackTrack[], currentIndex: number): string {
@@ -1729,7 +1756,7 @@ function normalizeTrackRationale(rationale: string): string {
 
 function formatNowPlayingLine(track: StationTrack, startedAt: Date | undefined, now: Date, includePosition = false): string {
   const title = includePosition ? `${track.position}. ${track.title}` : track.title;
-  return `Now playing: ${title} - ${track.artist}\n${formatElapsedBar(startedAt, now)}`;
+  return `Now playing: ${title} - ${track.artist}\n${formatElapsedBar(startedAt, now, getTrackDurationMs(track))}`;
 }
 
 function formatElapsed(startedAt: Date | undefined, now: Date): string {
@@ -1737,13 +1764,32 @@ function formatElapsed(startedAt: Date | undefined, now: Date): string {
     return "00:00";
   }
   const seconds = Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / 1_000));
+  return formatClockTime(seconds);
+}
+
+function formatClockTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
-function formatElapsedBar(startedAt: Date | undefined, now: Date): string {
+function formatElapsedBar(startedAt: Date | undefined, now: Date, durationMs: number | null = null): string {
   const seconds = startedAt ? Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / 1_000)) : 0;
+  if (durationMs !== null && Number.isFinite(durationMs) && durationMs > 0) {
+    const totalSeconds = Math.max(1, Math.floor(durationMs / 1_000));
+    const clampedSeconds = Math.min(seconds, totalSeconds);
+    const filled = Math.min(19, Math.floor((clampedSeconds / totalSeconds) * 20));
+    return `[${"=".repeat(filled)}>${".".repeat(19 - filled)}] ${formatClockTime(clampedSeconds)} / ${formatClockTime(totalSeconds)}`;
+  }
+
   const filled = Math.min(19, Math.floor(seconds / 30));
   return `[${"=".repeat(filled)}>${".".repeat(19 - filled)}] ${formatElapsed(startedAt, now)} elapsed`;
+}
+
+function getTrackDurationMs(track: StationTrack): number | null {
+  if (!track.playable.available) {
+    return null;
+  }
+  const durationMs = track.playable.durationMs;
+  return typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0 ? durationMs : null;
 }

@@ -98,6 +98,12 @@ FishAudio now supports configured `referenceAudioPath` and `referenceText`. Firs
 
 Status: done
 
+### Live in-place playback progress renderer
+
+Status: todo
+
+The CLI now renders duration-aware bars such as `[======>............] 00:42 / 04:13` when track duration is known. A continuously ticking in-place terminal renderer still needs a prompt-safe implementation so it does not corrupt user input while the conversation prompt is waiting.
+
 Open-ended requests such as `Want some soft jazz...` now produce a pending station first, letting the user press Enter for normal playback, type `dj` for DJ mode, or refine before playback. `dj mode` during active playback is explicitly rejected as a mid-station toggle.
 
 ### Station completion surface
