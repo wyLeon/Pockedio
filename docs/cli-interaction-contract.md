@@ -1266,7 +1266,15 @@ dj
 play it as a DJ program
 ```
 
-This should be explicit. DJ program mode prepares one spoken opening, starts the first song quietly under that DJ voice, then hands off to normal-volume playback. It should not speak before every song. Pockedio should treat each transition as a possible DJ cue and decide whether to speak based on program pacing, meaningful mood/artist/context shifts, and the selected program length.
+This should be explicit and two-step. DJ program mode first prepares the spoken program, then waits for the user to start it:
+
+```text
+DJ program is ready.
+
+Press Enter to start it, or tell me how to adjust it.
+```
+
+Only after the user presses Enter should Pockedio start the first song quietly under the DJ voice, then hand off to normal-volume playback. This avoids audio appearing from nowhere after a long generation step. It should not speak before every song. Pockedio should treat each transition as a possible DJ cue and decide whether to speak based on program pacing, meaningful mood/artist/context shifts, and the selected program length.
 
 Default DJ program pacing:
 

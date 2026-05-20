@@ -1887,7 +1887,7 @@ describe("runSessionTurn", () => {
     expect(playbackState.currentTrackId).not.toBe(previousTrackId);
   });
 
-  it("lets pending station choose a spoken DJ program intro before playback", async () => {
+  it("prepares a pending station as a spoken DJ program before playback", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
     const started: string[] = [];
@@ -1925,16 +1925,15 @@ describe("runSessionTurn", () => {
     });
 
     expect(result.intent.type).toBe("pending_station_dj_program");
-    expect(result.response).toContain("Pockedio:");
-    expect(result.response).toContain("Pockedio here.");
-    expect(result.response).toContain("Pockedio here. I’ll open this softly, then let the first track carry the room.\n\nNow playing:");
-    expect(result.response).toContain("Queue:");
-    expect(result.response).toContain("Now playing:");
-    expect(started).toHaveLength(1);
+    expect(result.response).toBe("DJ program is ready.\n\nPress Enter to start it, or tell me how to adjust it.");
+    expect(result.response).not.toContain("Pockedio here.");
+    expect(result.response).not.toContain("Now playing:");
+    expect(started).toHaveLength(0);
     expect(playbackState.pendingStationRequest).toBeUndefined();
+    expect(playbackState.pendingDjProgram).toBeDefined();
   });
 
-  it("starts a pending DJ program with ducked music under the spoken intro", async () => {
+  it("starts a prepared pending DJ program with ducked music under the spoken intro", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
     const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
@@ -1950,7 +1949,7 @@ describe("runSessionTurn", () => {
       buildContext: async () => ({ personality: config.personality })
     });
 
-    await runSessionTurn({
+    const prepared = await runSessionTurn({
       input: "dj",
       config,
       playbackState,
@@ -1985,6 +1984,37 @@ describe("runSessionTurn", () => {
       }
     });
 
+    expect(prepared.response).toContain("DJ program is ready.");
+    expect(duckedStarts).toEqual([]);
+
+    const started = await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        directStarts.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(started.intent.type).toBe("pending_station_confirmation");
+    expect(started.response).toContain("Pockedio:");
+    expect(started.response).toContain("Now playing:");
     expect(duckedStarts).toEqual([{ url: expect.stringContaining("https://example.com/"), introFilePath: "/tmp/pockedio-dj-intro.wav" }]);
     expect(directStarts).toEqual([]);
     expect(playedFiles).toEqual([]);
@@ -2042,11 +2072,12 @@ describe("runSessionTurn", () => {
     expect(events[0]).toBe("stop-current");
     expect(events).toContain("read-context");
     expect(events).toContain("synthesize-intro");
-    expect(events.some((event) => event.startsWith("start-ducked:"))).toBe(true);
+    expect(events.some((event) => event.startsWith("start-ducked:"))).toBe(false);
     expect(events.indexOf("stop-current")).toBeLessThan(events.indexOf("read-context"));
+    expect(playbackState.pendingDjProgram).toBeDefined();
   });
 
-  it("starts an explicit DJ program without asking for playback confirmation again", async () => {
+  it("prepares an explicit DJ program and waits for the user to start it", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
     const events: string[] = [];
@@ -2080,10 +2111,10 @@ describe("runSessionTurn", () => {
         audioPath: "/tmp/pockedio-explicit-dj.wav",
         latencyMs: 15
       }),
-      startDuckedIntroPlayback: async (url, introFilePath) => {
+      startDuckedIntroPlayback: async (_url, introFilePath) => {
         events.push(`start-ducked:${introFilePath}`);
         return {
-          target: url,
+          target: "unused",
           introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
           done: new Promise(() => undefined),
           stop: () => undefined
@@ -2093,12 +2124,12 @@ describe("runSessionTurn", () => {
 
     expect(result.intent.type).toBe("playback_request");
     expect(events[0]).toBe("stop-current");
-    expect(result.response).toContain("Mina:");
-    expect(result.response).toContain("Mina here. I’ll turn this into a short radio-style opening.\n\nNow playing:");
-    expect(result.response).toContain("Now playing:");
+    expect(result.response).toBe("DJ program is ready.\n\nPress Enter to start it, or tell me how to adjust it.");
     expect(result.response).not.toContain("Press Enter to play it");
     expect(result.response).not.toContain('type "dj"');
-    expect(playbackState.djProgram).toBeDefined();
+    expect(events.some((event) => event.startsWith("start-ducked:"))).toBe(false);
+    expect(playbackState.pendingDjProgram).toBeDefined();
+    expect(playbackState.djProgram).toBeUndefined();
   });
 
   it("keeps the default ducked intro player on interactive playback state", async () => {
@@ -2153,6 +2184,20 @@ describe("runSessionTurn", () => {
       })
     });
 
+    await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      startDuckedIntroPlayback: async (url, introFilePath) => ({
+        target: url,
+        introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
     await Promise.resolve();
     await Promise.resolve();
 
@@ -2198,6 +2243,35 @@ describe("runSessionTurn", () => {
         audioPath: text.includes("Track 3") ? "/tmp/track-3-intro.wav" : "/tmp/opening-intro.wav",
         latencyMs: 15
       }),
+      startUrlPlayback: async (url) => {
+        directStarts.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            directFinishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: new Promise((resolve) => {
+            finishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
       startUrlPlayback: async (url) => {
         directStarts.push(url);
         return {
@@ -2302,6 +2376,31 @@ describe("runSessionTurn", () => {
       }
     });
 
+    await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        directStarts.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
     const quietResult = await runSessionTurn({
       input: "next",
       config,
@@ -2377,6 +2476,29 @@ describe("runSessionTurn", () => {
         playedFiles.push(filePath);
         return { ok: true, target: filePath, exitCode: 0, signal: null };
       },
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+        stop: () => undefined
+      }),
+      startDuckedIntroPlayback: async (url, introFilePath) => ({
+        target: url,
+        introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+        done: new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+        stop: () => undefined
+      })
+    });
+
+    await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
       startUrlPlayback: async (url) => ({
         target: url,
         done: new Promise((resolve) => {
