@@ -9,7 +9,8 @@ import { shouldUseSpokenDjAudio } from "../dj/voiceRules.js";
 import { createLlmClient } from "../llm/openaiClient.js";
 import type { LlmClient } from "../llm/llmClient.js";
 import { MemoryStore } from "../memory/store.js";
-import { playFile as playAudioFile, playUrl as playAudioUrl, type PlayerResult } from "../player/afplay.js";
+import { playUrl as playAudioUrl, type PlaybackHandle, type PlayerResult } from "../player/afplay.js";
+import { startDuckedUrlWithIntro } from "../player/defaultPlayer.js";
 import { getPersonaForDate } from "../personas/personaStore.js";
 import type { MusicProvider } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
@@ -56,6 +57,7 @@ export type ScheduledDjInput = {
   synthesizeFishAudio?: (config: PockedioConfig, text: string, options?: FishAudioOptions) => Promise<FishAudioResult>;
   playFile?: (filePath: string) => Promise<PlayerResult>;
   playUrl?: (url: string) => Promise<PlayerResult>;
+  startDuckedIntroPlayback?: (url: string, introFilePath: string) => Promise<PlaybackHandle>;
   promptPlayback?: (message: string) => Promise<ScheduledDjPlaybackDecision>;
   writeOutput?: (text: string) => void;
 };
@@ -93,6 +95,21 @@ export type MoodCheckResult = {
 };
 
 const scheduledDjFishAudioTimeoutMs = 10 * 60_000;
+const moodCheckScheduledGuardMinutes = 30;
+
+export type ServeTickInput = {
+  config: PockedioConfig;
+  now: Date;
+  completed: Set<string>;
+  lastMoodPromptAt: Date | null;
+  runScheduledDj?: (kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig) => Promise<void>;
+  prepareScheduledDj?: (kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig) => Promise<void>;
+  runMoodCheck?: () => Promise<MoodCheckResult>;
+};
+
+export type ServeTickResult = {
+  lastMoodPromptAt: Date | null;
+};
 
 export async function runScheduledDjJob(input: ScheduledDjInput): Promise<ScheduledDjResult> {
   const config = input.config ?? loadConfig();
@@ -122,8 +139,8 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
   const llm = input.llm ?? createLlmClient(config);
   const provider = input.provider ?? new NetEaseProvider(config);
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
-  const playFile = input.playFile ?? ((filePath) => playAudioFile(filePath, 60_000));
   const playUrl = input.playUrl ?? ((url) => playAudioUrl(url));
+  const startDuckedPlayback = input.startDuckedIntroPlayback ?? startDuckedUrlWithIntro;
   const promptPlayback = input.promptPlayback ?? promptScheduledDjPlayback;
   const store = new MemoryStore(config);
   const triggerType = input.kind === "morning" ? "scheduled_morning" : "scheduled_evening";
@@ -184,14 +201,7 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
       return { ran: true, sessionId, text, djAudio, decision, playbackStarted: false, expiresAt };
     }
 
-    if (djAudio.ok) {
-      const playback = await playFile(djAudio.audioPath);
-      store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath, playback.ok ? "played" : "failed", {
-        cacheExpiresAt: expiresAt,
-        latencyMs: djAudio.latencyMs
-      });
-      updatePreparedScheduledDjStatus(config, preparationId, playback.ok ? "played" : "failed");
-    } else {
+    if (!djAudio.ok) {
       writeOutput(text);
       store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath ?? null, "text_fallback", {
         cacheExpiresAt: expiresAt,
@@ -213,7 +223,17 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
     if (firstPlayable?.playable.available) {
       writeOutput(formatScheduledDjLineup(station, firstPlayable.position));
       writeOutput(formatScheduledNowPlaying(firstPlayable, station.tracks.length));
-      await playUrl(firstPlayable.playable.playableUrl);
+      if (djAudio.ok) {
+        const handle = await startDuckedPlayback(firstPlayable.playable.playableUrl, djAudio.audioPath);
+        store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath, handle.introResult?.ok ? "played" : "failed", {
+          cacheExpiresAt: expiresAt,
+          latencyMs: djAudio.latencyMs
+        });
+        updatePreparedScheduledDjStatus(config, preparationId, handle.introResult?.ok ? "played" : "failed");
+        handle.done.catch(() => undefined);
+      } else {
+        await playUrl(firstPlayable.playable.playableUrl);
+      }
     }
 
     return { ran: true, sessionId, text, station, djAudio, decision, playbackStarted: Boolean(firstPlayable), expiresAt };
@@ -331,24 +351,36 @@ export async function runServe(options: { runOnce?: string; config?: PockedioCon
   let lastMoodPromptAt: Date | null = null;
   while (true) {
     const now = new Date();
-    if (isMorningDjPrepareTime(now, config)) {
-      await prepareJobOnce("morning", now, completed, config);
-    }
-    if (isEveningDjPrepareTime(now, config)) {
-      await prepareJobOnce("evening", now, completed, config);
-    }
-    if (isMorningDjTime(now, config)) {
-      await runJobOnce("morning", now, completed, config);
-    }
-    if (isEveningDjTime(now, config)) {
-      await runJobOnce("evening", now, completed, config);
-    }
-    if (shouldPromptMoodCheck(lastMoodPromptAt, now)) {
-      await runMoodCheckOnce({ config, writeOutput: (text) => console.log(text) });
-      lastMoodPromptAt = now;
-    }
+    const tick = await runServeTick({ config, now, completed, lastMoodPromptAt });
+    lastMoodPromptAt = tick.lastMoodPromptAt;
     await sleep(30_000);
   }
+}
+
+export async function runServeTick(input: ServeTickInput): Promise<ServeTickResult> {
+  const runScheduled = input.runScheduledDj ?? runJobOnce;
+  const prepareScheduled = input.prepareScheduledDj ?? prepareJobOnce;
+  if (isMorningDjPrepareTime(input.now, input.config)) {
+    await prepareScheduled("morning", input.now, input.completed, input.config);
+  }
+  if (isEveningDjPrepareTime(input.now, input.config)) {
+    await prepareScheduled("evening", input.now, input.completed, input.config);
+  }
+  if (isMorningDjTime(input.now, input.config)) {
+    await runScheduled("morning", input.now, input.completed, input.config);
+  }
+  if (isEveningDjTime(input.now, input.config)) {
+    await runScheduled("evening", input.now, input.completed, input.config);
+  }
+  if (
+    shouldPromptMoodCheck(input.lastMoodPromptAt, input.now)
+    && !hasScheduledDjSoon(input.now, input.config, moodCheckScheduledGuardMinutes)
+  ) {
+    const runMood = input.runMoodCheck ?? (() => runMoodCheckOnce({ config: input.config, writeOutput: (text) => console.log(text) }));
+    await runMood();
+    return { lastMoodPromptAt: input.now };
+  }
+  return { lastMoodPromptAt: input.lastMoodPromptAt };
 }
 
 async function runJobOnce(kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig): Promise<void> {
@@ -670,6 +702,23 @@ async function promptScheduledDjPlayback(message: string): Promise<ScheduledDjPl
 
 function calendarLooksBusy(summary: string): boolean {
   return /\b(active meeting|meeting is active|in a meeting|busy now|currently in)\b/i.test(summary);
+}
+
+function hasScheduledDjSoon(now: Date, config: PockedioConfig, windowMinutes: number): boolean {
+  return (["morning", "evening"] as const).some((kind) => {
+    const schedule = config.dj.schedule[kind];
+    if (!schedule.enabled) {
+      return false;
+    }
+    const target = getScheduledDjTargetPlayTime(kind, now, config);
+    const prepareAt = new Date(target.getTime() - schedule.prepareMinutesBefore * 60_000);
+    return isDateWithinFutureWindow(prepareAt, now, windowMinutes) || isDateWithinFutureWindow(target, now, windowMinutes);
+  });
+}
+
+function isDateWithinFutureWindow(candidate: Date, now: Date, windowMinutes: number): boolean {
+  const diffMs = candidate.getTime() - now.getTime();
+  return diffMs >= 0 && diffMs <= windowMinutes * 60_000;
 }
 
 function sleep(ms: number): Promise<void> {

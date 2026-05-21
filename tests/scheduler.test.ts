@@ -9,7 +9,7 @@ import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
 import { isEveningDjTime, isMorningDjPrepareTime, isMorningDjTime, isWeekday, shouldPromptMoodCheck } from "../src/scheduler/jobs.js";
-import { prepareScheduledDjJob, runMoodCheckOnce, runScheduledDjJob } from "../src/scheduler/serve.js";
+import { prepareScheduledDjJob, runMoodCheckOnce, runScheduledDjJob, runServeTick } from "../src/scheduler/serve.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-scheduler-test-"));
@@ -116,6 +116,7 @@ describe("scheduled DJ jobs", () => {
   it("prepares scheduled DJ audio before play time, announces readiness, and reuses it after confirmation", async () => {
     const config = makeConfig();
     const playedFiles: string[] = [];
+    const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
     const output: string[] = [];
     let synthCalls = 0;
 
@@ -148,6 +149,15 @@ describe("scheduled DJ jobs", () => {
         return { ok: true, target: filePath, exitCode: 0, signal: null };
       },
       playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null }),
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+          stop: () => undefined
+        };
+      },
       promptPlayback: async () => "play",
       writeOutput: (text) => output.push(text)
     });
@@ -156,7 +166,11 @@ describe("scheduled DJ jobs", () => {
     expect(result.playbackStarted).toBe(true);
     expect(result.decision).toBe("play");
     expect(synthCalls).toBe(1);
-    expect(playedFiles).toEqual(["/tmp/prepared-25.wav"]);
+    expect(playedFiles).toEqual([]);
+    expect(duckedStarts).toEqual([{
+      url: expect.stringContaining("https://example.com/"),
+      introFilePath: "/tmp/prepared-25.wav"
+    }]);
     expect(output[0]).toBe("Using prepared DJ program.");
     expect(output[1]).toBe("Morning DJ program is ready.\n\nPress Enter to play now, type \"later\" to keep it, or type \"skip\" to dismiss.\nAvailable for 6 hours, until 14:45 on 2026-05-18.");
     expect(output[2]).toBe("Building scheduled station...");
@@ -181,6 +195,61 @@ describe("scheduled DJ jobs", () => {
       audioPath: "/tmp/prepared-25.wav",
       audioCacheExpiresAt: "2026-05-18T14:45:00.000+08:00",
       status: "played"
+    }]);
+  });
+
+  it("starts scheduled DJ playback with ducked music under the prepared voice", async () => {
+    const config = makeConfig();
+    const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
+    const playedFiles: string[] = [];
+    const playedUrls: string[] = [];
+
+    await prepareScheduledDjJob({
+      kind: "evening",
+      now: new Date("2026-05-18T16:40:00+08:00"),
+      config,
+      context: { ...fakeContext(config, new Date("2026-05-18T16:40:00+08:00")), timeOfDay: "evening" },
+      llm: fakeLlm("Prepared evening voice."),
+      synthesizeFishAudio: async (_config, text) => ({ ok: true, audioPath: `/tmp/prepared-${text.length}.wav`, latencyMs: 5 })
+    });
+
+    const result = await runScheduledDjJob({
+      kind: "evening",
+      now: new Date("2026-05-18T17:00:00+08:00"),
+      config,
+      context: { ...fakeContext(config, new Date("2026-05-18T17:00:00+08:00")), timeOfDay: "evening" },
+      provider: new FakeProvider(),
+      llm: fakeLlm("Should not regenerate."),
+      synthesizeFishAudio: async () => {
+        throw new Error("should not synthesize at play time");
+      },
+      playFile: async (filePath) => {
+        playedFiles.push(filePath);
+        return { ok: true, target: filePath, exitCode: 0, signal: null };
+      },
+      playUrl: async (url) => {
+        playedUrls.push(url);
+        return { ok: true, target: url, exitCode: 0, signal: null };
+      },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+          stop: () => undefined
+        };
+      },
+      promptPlayback: async () => "play"
+    });
+
+    expect(result.ran).toBe(true);
+    expect(result.playbackStarted).toBe(true);
+    expect(playedFiles).toEqual([]);
+    expect(playedUrls).toEqual([]);
+    expect(duckedStarts).toEqual([{
+      url: expect.stringContaining("https://example.com/"),
+      introFilePath: "/tmp/prepared-23.wav"
     }]);
   });
 
@@ -341,6 +410,7 @@ describe("scheduled DJ jobs", () => {
     const config = makeConfig();
     const playedFiles: string[] = [];
     const playedUrls: string[] = [];
+    const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
 
     const result = await runScheduledDjJob({
       kind: "morning",
@@ -362,13 +432,23 @@ describe("scheduled DJ jobs", () => {
         playedUrls.push(url);
         return { ok: true, target: url, exitCode: 0, signal: null };
       },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+          stop: () => undefined
+        };
+      },
       promptPlayback: async () => "play"
     });
 
     expect(result.ran).toBe(true);
     expect(result.playbackStarted).toBe(true);
-    expect(playedFiles).toHaveLength(1);
-    expect(playedUrls).toHaveLength(1);
+    expect(playedFiles).toEqual([]);
+    expect(playedUrls).toEqual([]);
+    expect(duckedStarts).toHaveLength(1);
 
     const rows = withDatabase(config, (db) => ({
       sessions: db.prepare("SELECT trigger_type as triggerType FROM sessions").all(),
@@ -408,6 +488,28 @@ describe("scheduled DJ jobs", () => {
 });
 
 describe("mood checks", () => {
+  it("does not block an upcoming scheduled DJ preparation with a mood prompt", async () => {
+    const config = makeConfig();
+    config.dj.schedule.evening.enabled = true;
+    config.dj.schedule.evening.playTime = "17:00";
+    config.dj.schedule.evening.prepareMinutesBefore = 20;
+    let moodPrompted = false;
+
+    const state = await runServeTick({
+      config,
+      now: new Date("2026-05-18T16:39:00+08:00"),
+      completed: new Set(),
+      lastMoodPromptAt: null,
+      runMoodCheck: async () => {
+        moodPrompted = true;
+        return { ran: true, mood: "focused", playbackStarted: false };
+      }
+    });
+
+    expect(moodPrompted).toBe(false);
+    expect(state.lastMoodPromptAt).toBeNull();
+  });
+
   it("stores selected mood and requires confirmation before playback", async () => {
     const config = makeConfig();
     const playedUrls: string[] = [];

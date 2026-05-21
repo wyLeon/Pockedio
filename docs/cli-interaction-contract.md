@@ -369,6 +369,8 @@ Scheduled DJ playback consent:
 - The spoken DJ script must not tell the user to press play; playback consent lives in the CLI prompt.
 - Write the expiry in user-readable local time, for example `Available for 6 hours, until 23:00 today.`, not as an ISO timestamp.
 - After Enter, show the DJ program lineup and `Now playing` surface before or as music starts.
+- After Enter, scheduled DJ should use the same ducked handoff as DJ-mode station: start the first track quietly under the spoken opening, then restore normal music volume after the voice.
+- Mood check prompts must not block an upcoming scheduled DJ preparation or ready-time prompt. If a scheduled DJ prepare/play window is near, scheduled DJ wins and mood check waits.
 - MVP definition: a scheduled DJ program is a short spoken host opening plus a five-track scheduled station. It is different from normal playback because it arrives at a configured time, uses morning/evening context, and starts with the selected DJ voice when FishAudio succeeds.
 
 ## Section 2: Setup Decision Tree
@@ -1371,6 +1373,7 @@ Scheduled DJ program distinction:
 - Evening scheduled logic prioritizes transition out of the workday: decompression, commute, remaining focus, weather, calendar residue, diary state, and user taste.
 - Scheduled DJ is allowed to be opening-voice only for MVP. DJ-mode `standard` should remain more hosted: opening voice, quiet first transition, one useful middle transition, and closing voice.
 - Scheduled FishAudio preparation may use a longer timeout, currently 10 minutes, because it runs before the ready-time prompt. Interactive DJ mode should stay tighter to avoid blocking the user.
+- Scheduled DJ and DJ-mode station should share the same opening handoff behavior: voice over ducked first-track music, then normal-volume playback.
 
 ## 3.7 Specific Song Playback
 

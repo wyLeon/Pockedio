@@ -147,3 +147,5 @@ This checklist maps the approved v1 design criteria to implementation and verifi
   - Scheduled station generation now sends an explicit scheduled-program brief: morning prioritizes the first useful listening arc of the day, evening prioritizes transition/decompression, and both still request exactly five tracks through the shared station engine.
   - Scheduled preparation now defaults to 20 minutes before the configured ready time, so real scheduled arrivals have enough time to prepare FishAudio before the prompt appears.
   - Scheduled FishAudio preparation now gets a 10-minute timeout because it happens before the ready-time prompt; the prior 120-second timeout produced text fallback during real QA.
+  - Scheduled DJ playback now uses the same ducked first-track handoff as DJ-mode station instead of playing voice and music as separate sequential calls.
+  - `pockedio serve` now guards mood checks around scheduled DJ windows so a mood prompt cannot block scheduled preparation or the ready-time prompt.
