@@ -144,3 +144,4 @@ This checklist maps the approved v1 design criteria to implementation and verifi
   - Expiry is now shown as user-readable local time, for example `Available for 6 hours, until 23:00 today.`
   - Scheduled DJ program copy is constrained as a short spoken opening, not a full transcript, to reduce FishAudio timeout risk.
   - After confirmation, scheduled DJ playback shows the lineup and `Now playing` surface before starting the first track.
+  - Scheduled station generation now sends an explicit scheduled-program brief: morning prioritizes the first useful listening arc of the day, evening prioritizes transition/decompression, and both still request exactly five tracks through the shared station engine.

@@ -412,8 +412,20 @@ async function generateScheduledDjText(input: {
 
 function scheduledStationRequest(kind: ScheduledDjKind, context: PockedioContext): string {
   return kind === "morning"
-    ? `morning focus station for ${context.timeOfDay}`
-    : "evening transition station for decompression or continued focus";
+    ? [
+        "scheduled morning DJ program",
+        "exactly five tracks",
+        "first useful listening arc of the day",
+        "focus, energy, weather, calendar pressure, diary state, and user taste",
+        `time context: ${context.timeOfDay}`
+      ].join("; ")
+    : [
+        "scheduled evening DJ program",
+        "exactly five tracks",
+        "transition out of the workday",
+        "decompression, commute, remaining focus, weather, calendar residue, diary state, and user taste",
+        `time context: ${context.timeOfDay}`
+      ].join("; ");
 }
 
 function formatScheduledDjReadyMessage(kind: ScheduledDjKind, expiresAt: string): string {

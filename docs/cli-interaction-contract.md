@@ -1364,6 +1364,13 @@ That station’s done. Press Enter to continue this vibe, or tell me where to ta
 
 DJ mode is not a mid-station toggle. Once normal playback starts, `dj` / `dj mode` should not retrofit spoken mode into that station. The user can stop and ask for a new DJ version, or choose DJ mode before the next station starts.
 
+Scheduled DJ program distinction:
+
+- Scheduled DJ uses the same five-track station engine, but the request brief is time-triggered rather than user-authored.
+- Morning scheduled logic prioritizes the first useful listening arc of the day: focus, energy, weather, calendar pressure, diary state, and user taste.
+- Evening scheduled logic prioritizes transition out of the workday: decompression, commute, remaining focus, weather, calendar residue, diary state, and user taste.
+- Scheduled DJ is allowed to be opening-voice only for MVP. DJ-mode `standard` should remain more hosted: opening voice, quiet first transition, one useful middle transition, and closing voice.
+
 ## 3.7 Specific Song Playback
 
 Use when the user asks for one song, not a station.

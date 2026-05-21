@@ -40,6 +40,8 @@ Every weekday at the configured Morning DJ ready time, Pockedio should generate 
 
 For MVP, a scheduled DJ program means a context-aware spoken host opening plus a five-track station. It still shows the lineup and normal now-playing surface in the terminal once playback starts. Compared with a normal five-song station, the difference is that the station is scheduled, uses morning/evening context, and starts with the selected DJ voice when FishAudio succeeds.
 
+Scheduled morning suggestion logic should prioritize the first useful listening arc of the day: focus, energy, weather, calendar pressure, diary state, and user taste. It should still resolve exactly five real playable tracks through the shared station engine.
+
 The morning DJ should use:
 
 - weather for the user's living location
@@ -56,6 +58,8 @@ The user is the listener, not the reviewer of the generated file. The prompt is 
 Every weekday at the configured Evening DJ ready time, Pockedio should generate an evening DJ program and announce that it is ready. It should not start audio by itself. The terminal prompt should let the user press Enter to play now, type `later` to keep the program available, or type `skip` to dismiss it. A scheduled evening program expires six hours after the configured ready time.
 
 The evening program has the same MVP shape: a short spoken DJ opening, then a visible five-track station with normal playback controls and queue display.
+
+Scheduled evening suggestion logic should prioritize transition out of the workday: decompression, commute, remaining focus, weather, calendar residue, diary state, and user taste. It should still resolve exactly five real playable tracks through the shared station engine.
 
 The evening DJ should use:
 

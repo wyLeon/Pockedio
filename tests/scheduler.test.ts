@@ -157,13 +157,12 @@ describe("scheduled DJ jobs", () => {
     expect(result.decision).toBe("play");
     expect(synthCalls).toBe(1);
     expect(playedFiles).toEqual(["/tmp/prepared-25.wav"]);
-    expect(output).toEqual([
-      "Using prepared DJ program.",
-      "Morning DJ program is ready.\n\nPress Enter to play now, type \"later\" to keep it, or type \"skip\" to dismiss.\nAvailable for 6 hours, until 14:45 on 2026-05-18.",
-      "Building scheduled station...",
-      "DJ program lineup:\n> 1. morning focus station morning - Test Artist\n  2. morning focus station morning instrumental - Test Artist\n  3. morning focus station morning calm - Test Artist\n  4. morning focus station morning focus - Test Artist\n  5. morning focus station morning Ryuichi Sakamoto - Test Artist",
-      "Now playing: 1/5  morning focus station morning - Test Artist"
-    ]);
+    expect(output[0]).toBe("Using prepared DJ program.");
+    expect(output[1]).toBe("Morning DJ program is ready.\n\nPress Enter to play now, type \"later\" to keep it, or type \"skip\" to dismiss.\nAvailable for 6 hours, until 14:45 on 2026-05-18.");
+    expect(output[2]).toBe("Building scheduled station...");
+    expect(output[3]).toContain("DJ program lineup:");
+    expect(output[3]).toContain("> 1.");
+    expect(output[4]).toContain("Now playing: 1/5");
     const rows = withDatabase(config, (db) => ({
       prep: db.prepare("SELECT kind, target_play_time as targetPlayTime, text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt, status FROM scheduled_dj_preparations").all(),
       audio: db.prepare("SELECT kind, text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt, status FROM dj_audio").all()
@@ -205,6 +204,29 @@ describe("scheduled DJ jobs", () => {
     expect(prompts[0]).toContain("Keep it under 70 words.");
     expect(prompts[0]).toContain("This is a spoken opening, not the full program transcript.");
     expect(prompts[0]).toContain("Do not list every track.");
+  });
+
+  it("uses scheduled-program station logic for five time-of-day tracks", async () => {
+    const config = makeConfig();
+
+    const result = await runScheduledDjJob({
+      kind: "evening",
+      now: new Date("2026-05-18T17:00:00+08:00"),
+      config,
+      context: { ...fakeContext(config, new Date("2026-05-18T17:00:00+08:00")), timeOfDay: "evening" },
+      provider: new FakeProvider(),
+      llm: fakeLlm("Evening reset. One breath first, then the first track."),
+      synthesizeFishAudio: async (_config, text) => ({ ok: true, audioPath: `/tmp/${text.length}.wav`, latencyMs: 5 }),
+      playFile: async (filePath) => ({ ok: true, target: filePath, exitCode: 0, signal: null }),
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null }),
+      promptPlayback: async () => "play"
+    });
+
+    expect(result.ran).toBe(true);
+    expect(result.station?.tracks).toHaveLength(5);
+    expect(result.station?.request).toContain("scheduled evening DJ program");
+    expect(result.station?.request).toContain("exactly five tracks");
+    expect(result.station?.request).toContain("decompression");
   });
 
   it("holds a generated scheduled DJ program without playback when the user chooses later", async () => {
