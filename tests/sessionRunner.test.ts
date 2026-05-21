@@ -1940,6 +1940,22 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("What are we tuning for?");
   });
 
+  it("keeps selected DJ name in generated identity answers", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+
+    const result = await runSessionTurn({
+      input: "Who are you?",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I'm Pockedio, your concise personal DJ.")
+    });
+
+    expect(result.intent.type).toBe("identity_capability");
+    expect(result.response).toContain("Mina");
+    expect(result.response).not.toContain("I'm Pockedio");
+  });
+
   it("recommends music for mood questions without starting playback", async () => {
     const config = makeConfig();
     const playedUrls: string[] = [];

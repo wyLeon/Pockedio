@@ -1597,10 +1597,23 @@ async function generateIdentityCapabilityResponse(input: {
     `User: ${input.userText}`
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
-  if (isUsableGeneratedText(input.config, result)) {
+  if (isUsableGeneratedText(input.config, result) && isValidIdentityCapabilityResponse(result.value, displayName)) {
     return result.value.trim();
   }
 
+  return formatIdentityCapabilityFallback(displayName);
+}
+
+function isValidIdentityCapabilityResponse(response: string, displayName: string): boolean {
+  const normalized = response.toLowerCase();
+  const normalizedName = displayName.toLowerCase();
+  if (!normalized.includes(normalizedName)) {
+    return false;
+  }
+  return !/\b(i am|i'm|im)\s+pockedio\b/.test(normalized);
+}
+
+function formatIdentityCapabilityFallback(displayName: string): string {
   return [
     `${displayName} is here.`,
     "I can still build stations, play music, control playback, show the queue, and make spoken DJ station versions if voice is configured.",
