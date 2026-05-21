@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { loadConfig } from "../config/load.js";
 import type { PockedioConfig } from "../config/schema.js";
 import { buildContext, type PockedioContext } from "../context/contextBuilder.js";
+import { createWikidataMusicFreshnessProvider, type MusicFreshnessProvider, type MusicFreshnessSource } from "../context/musicFreshness.js";
 import { runMigrations } from "../db/migrations.js";
 import {
   formatDirectPlaybackConfirmation,
@@ -133,6 +134,7 @@ export type SessionTurnInput = {
   playFile?: (filePath: string) => Promise<PlayerResult>;
   startDuckedIntroPlayback?: StartDuckedIntroPlayback;
   synthesizeFishAudio?: SynthesizeFishAudio;
+  musicFreshness?: MusicFreshnessProvider;
 };
 
 export type SessionTurnResult = {
@@ -210,6 +212,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
   const provider = input.provider ?? new NetEaseProvider(config);
   const llm = input.llm ?? createLlmClient(config);
+  const musicFreshness = input.musicFreshness ?? (config.freshness.enabled ? createWikidataMusicFreshnessProvider() : undefined);
   const store = new MemoryStore(config);
   const writeOutput = input.writeOutput ?? (() => undefined);
   const playUrl = input.playUrl ?? ((url) => playAudioUrl(url));
@@ -714,6 +717,17 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       }
 
       return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
+    }
+
+    if (isFreshnessSensitiveMusicQuestion(userText)) {
+      const response = await withStatus(writeStatus, "Checking current sources...", () => generateFreshnessSensitiveResponse({
+        userText,
+        freshness: musicFreshness,
+        signal
+      }), signal);
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent: { type: "conversation", confidence: "high" }, response, shouldExit: false };
     }
 
     const conversationContext = isContextualCalendarConversation(userText)
@@ -1598,6 +1612,59 @@ function isMusicKnowledgeQuestion(text: string): boolean {
     || /\b(song|track|album|artist|band|composer|singer|musician|producer)\b.*\b(background|backgroun|story|history|meaning|origin|influence|influences)\b/.test(normalized);
 }
 
+function isFreshnessSensitiveMusicQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  const hasFreshnessCue = /\b(recent|latest|new|news|update|updates|now|currently|still|active|tour|touring|released|release|album|single|what happened|disappear|passed away|died|alive|illness|sick)\b/.test(normalized);
+  const hasMusicEntityCue = /\b(artist|singer|band|musician|producer|songwriter|composer|album|song|track|label|festival|tour)\b/.test(normalized)
+    || /[\u3400-\u9fff]/.test(text);
+  return hasFreshnessCue && hasMusicEntityCue;
+}
+
+async function generateFreshnessSensitiveResponse(input: {
+  userText: string;
+  freshness?: MusicFreshnessProvider;
+  signal?: AbortSignal;
+}): Promise<string> {
+  if (!input.freshness) {
+    return formatFreshnessUnavailableResponse(input.userText);
+  }
+
+  try {
+    const result = await input.freshness.lookup(input.userText, { signal: input.signal });
+    const sources = result.sources
+      .filter((source) => source.snippet.trim() && source.source.trim())
+      .slice(0, 3);
+    if (sources.length === 0) {
+      return formatFreshnessUnavailableResponse(input.userText);
+    }
+    return formatFreshnessGroundedResponse(sources);
+  } catch {
+    return formatFreshnessUnavailableResponse(input.userText);
+  }
+}
+
+function formatFreshnessGroundedResponse(sources: MusicFreshnessSource[]): string {
+  const lead = sources[0];
+  const sourceDate = lead.publishedAt ? `, ${lead.publishedAt}` : "";
+  const sourceList = sources
+    .map((source) => `${source.source}${source.publishedAt ? ` ${source.publishedAt}` : ""}: ${source.url}`)
+    .join("\n");
+  return [
+    lead.snippet.trim(),
+    "",
+    `Source: ${lead.source}${sourceDate}.`,
+    sources.length > 1 ? `Additional sources:\n${sourceList}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+function formatFreshnessUnavailableResponse(userText: string): string {
+  return [
+    "I should not answer that from model memory alone.",
+    "That question needs current sources because artist status, releases, tours, illness, and death notices can change.",
+    `I do not have current sources attached to this turn, so I cannot reliably verify: ${userText.trim()}`
+  ].join(" ");
+}
+
 function isStationStartingIntent(type: SessionIntent["type"]): boolean {
   return type === "playback_request"
     || type === "direct_playback_request"
@@ -2105,7 +2172,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
     if (exiting) {
       defaultOutput.write("\n");
     }
-    playbackState.activePlayback?.stop();
+    stopPlaybackForSessionExit(playbackState);
     const endStore = new MemoryStore(config);
     try {
       summarizeSession(endStore, sessionId);
@@ -2115,6 +2182,13 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
     }
     rl.close();
   }
+}
+
+export function stopPlaybackForSessionExit(playbackState: InteractivePlaybackState): void {
+  const activePlayback = playbackState.activePlayback;
+  playbackState.activePlayback = undefined;
+  playbackState.activePlaybackPaused = undefined;
+  activePlayback?.stop();
 }
 
 function storeStation(

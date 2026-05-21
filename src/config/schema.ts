@@ -45,6 +45,9 @@ export const pockedioConfigSchema = z.object({
   personality: z.object({
     mbti: z.enum(mbtiTypes).optional()
   }).default({}),
+  freshness: z.object({
+    enabled: z.boolean().default(true)
+  }).default({}),
   llm: z.object({
     provider: z.literal("openai").default("openai"),
     model: z.string().min(1).default("gpt-4.1-mini"),

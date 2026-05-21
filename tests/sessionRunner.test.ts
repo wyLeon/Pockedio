@@ -7,7 +7,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { createDefaultInteractiveStartUrlPlayback, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupGuide, formatStartupSetupNote, runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { createDefaultInteractiveStartUrlPlayback, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupGuide, formatStartupSetupNote, runSessionTurn, stopPlaybackForSessionExit, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
@@ -950,7 +950,7 @@ describe("runSessionTurn", () => {
       llm: fakeLlm()
     });
     const resumeResult = await runSessionTurn({
-      input: "resume",
+      input: "keep playing",
       config,
       playbackState,
       provider: new FakeProvider(),
@@ -965,6 +965,60 @@ describe("runSessionTurn", () => {
     expect(resumeCalls).toBe(1);
     expect(stopCalls).toBe(0);
     expect(playbackState.activePlayback).toBeDefined();
+    expect(playbackState.activePlaybackPaused).toBe(false);
+  });
+
+  it("uses semantic LLM control classification for natural resume wording", async () => {
+    const config = makeConfig();
+    let pauseCalls = 0;
+    let resumeCalls = 0;
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async () => ({
+        target: "https://example.com/song.mp3",
+        done: new Promise(() => undefined),
+        stop: () => undefined,
+        pause: () => {
+          pauseCalls += 1;
+          return true;
+        },
+        resume: () => {
+          resumeCalls += 1;
+          return true;
+        }
+      })
+    });
+
+    await runSessionTurn({
+      input: "pause",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    const resumeResult = await runSessionTurn({
+      input: "let it roll again",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: {
+        generateJson: async () => ({ ok: true, value: { type: "resume", confidence: "high" } }),
+        generateText: async () => ({ ok: true, value: "unused" })
+      }
+    });
+
+    expect(resumeResult.intent.type).toBe("resume");
+    expect(resumeResult.response).toBe("Resumed.");
+    expect(pauseCalls).toBe(1);
+    expect(resumeCalls).toBe(1);
     expect(playbackState.activePlaybackPaused).toBe(false);
   });
 
@@ -1116,6 +1170,40 @@ describe("runSessionTurn", () => {
       { position: 1, playbackStatus: "played" },
       { position: 2, playbackStatus: "playing" }
     ]);
+  });
+
+  it("does not auto-advance when session exit stops active playback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    let finishFirst: ((value: { ok: boolean; target: string; exitCode: null; signal: NodeJS.Signals }) => void) | undefined;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            finishFirst = resolve;
+          }),
+          stop: () => {
+            finishFirst?.({ ok: false, target: url, exitCode: null, signal: "SIGTERM" });
+          }
+        };
+      }
+    });
+
+    stopPlaybackForSessionExit(playbackState);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(started).toHaveLength(1);
+    expect(playbackState.activePlayback).toBeUndefined();
   });
 
   it("announces the next track when playback auto-advances", async () => {
@@ -2102,6 +2190,57 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("I do not have verified credits");
     expect(prompts[0]).toContain("Moon River - 小野リサ");
     expect(started).toHaveLength(1);
+  });
+
+  it("does not answer freshness-sensitive artist updates from stale model memory", async () => {
+    const config = makeConfig();
+    config.freshness.enabled = false;
+    const prompts: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "Tell me recent updates from 方大同",
+      config,
+      playbackState: {},
+      provider: new FakeProvider(),
+      llm: conversationalLlm("方大同 is still active behind the scenes and dropping occasional singles.", prompts)
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.station).toBeUndefined();
+    expect(result.response).toContain("current sources");
+    expect(result.response).not.toContain("still active");
+    expect(prompts).toHaveLength(0);
+  });
+
+  it("answers freshness-sensitive artist updates from supplied current sources", async () => {
+    const config = makeConfig();
+    const prompts: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "Tell me recent updates from 方大同",
+      config,
+      playbackState: {},
+      provider: new FakeProvider(),
+      llm: conversationalLlm("unused stale answer", prompts),
+      musicFreshness: {
+        lookup: async () => ({
+          sources: [{
+            title: "Award winner and singer-songwriter Khalil Fong passes away at age 41",
+            url: "https://example.com/khalil-fong",
+            source: "Taipei Times",
+            publishedAt: "2025-03-02",
+            snippet: "Fong's record label confirmed Khalil Fong passed away on the morning of February 21, 2025."
+          }]
+        })
+      }
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.station).toBeUndefined();
+    expect(result.response).toContain("February 21, 2025");
+    expect(result.response).toContain("Taipei Times");
+    expect(result.response).not.toContain("still active");
+    expect(prompts).toHaveLength(0);
   });
 
   it("recognizes song background questions even when background comes after the song reference", async () => {
