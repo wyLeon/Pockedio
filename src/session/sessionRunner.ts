@@ -170,6 +170,7 @@ export function formatInteractiveStartupGuide(displayName = "Pockedio", setupNot
     "",
     "Controls:",
     "  next",
+    "  previous",
     "  stop",
     "  show queue",
     "  Ctrl+C exits, or cancels while processing",
@@ -385,6 +386,13 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response, shouldExit: false };
     }
 
+    if (intent.type === "previous") {
+      const response = await retreatPlayback(input.playbackState, config, store, input.playbackState?.startUrlPlayback ?? startUrlPlayback);
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
     if (intent.type === "session_exit") {
       cancelDjProgramPreparations(input.playbackState);
       if (input.playbackState?.activePlayback) {
@@ -438,17 +446,17 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         })
       );
       const response = isQueueReshapeFeedback(action) && input.playbackState?.station && currentTrack
-        ? await reshapeRemainingQueueForFeedback({
+        ? await withStatus(writeStatus, "Reshaping queue...", () => reshapeRemainingQueueForFeedback({
             config,
             sessionId,
             store,
             provider,
             llm,
             action,
-            playbackState: input.playbackState,
+            playbackState: input.playbackState!,
             currentTrack,
             signal
-          })
+          }), signal)
         : intent.type === "feedback_skip" && input.playbackState?.station
         ? await advancePlayback(input.playbackState, config, store, input.playbackState.startUrlPlayback ?? startUrlPlayback)
         : formatFeedbackConfirmation(action);
@@ -587,7 +595,14 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         personality: context.personality ?? config.personality
       });
       throwIfAborted(signal);
-      const response = await generateMusicRecommendationResponse({ config, llm, userText, playbackState: input.playbackState, context, signal });
+      const response = await withStatus(writeStatus, "Preparing recommendation...", () => generateMusicRecommendationResponse({
+        config,
+        llm,
+        userText,
+        playbackState: input.playbackState,
+        context,
+        signal
+      }), signal);
       if (input.playbackState) {
         input.playbackState.pendingStationRequest = userText;
         input.playbackState.pendingStationOriginalRequest = userText;
@@ -766,6 +781,7 @@ function isInstantLocalIntent(type: SessionIntent["type"]): boolean {
     || type === "session_exit"
     || type === "pause"
     || type === "resume"
+    || type === "previous"
     || type === "playback_status"
     || type === "feedback_like"
     || type === "feedback_skip"
@@ -837,6 +853,66 @@ function createInteractiveStatusWriter(output: typeof defaultOutput): StatusWrit
       output.write(`\r${" ".repeat(displayText.length + 4)}\r`);
     };
   };
+}
+
+function createTurnScopedStatusWriter(baseWriter: StatusWriter, initialText?: string): { writeStatus: StatusWriter; finish: () => void } {
+  let current: { text: string; done: StatusDone } | undefined = initialText
+    ? { text: initialText, done: baseWriter(initialText) }
+    : undefined;
+
+  const finishCurrent = () => {
+    if (!current) {
+      return;
+    }
+    const done = current.done;
+    current = undefined;
+    done();
+  };
+
+  return {
+    writeStatus: (text) => {
+      if (current?.text === text) {
+        return () => undefined;
+      }
+
+      finishCurrent();
+      const entry = { text, done: baseWriter(text) };
+      current = entry;
+      return () => {
+        if (current !== entry) {
+          return;
+        }
+        current = undefined;
+        entry.done();
+      };
+    },
+    finish: finishCurrent
+  };
+}
+
+export function formatInitialInteractiveTurnStatus(input: string, playbackState?: InteractivePlaybackState): string | undefined {
+  const userText = normalizeSessionInput(input);
+  if (!userText) {
+    if (playbackState?.pendingDjProgram) {
+      return "Starting DJ program...";
+    }
+    if (playbackState?.pendingStationRequest) {
+      return "Starting station...";
+    }
+    return undefined;
+  }
+
+  if (playbackState?.pendingDjProgram && isPendingStationConfirmation(input)) {
+    return "Starting DJ program...";
+  }
+  if (playbackState?.pendingStationRequest && isPendingStationConfirmation(input)) {
+    return "Starting station...";
+  }
+  if (playbackState?.pendingStationRequest && isPendingStationDjProgramRequest(userText)) {
+    return "Preparing DJ program...";
+  }
+
+  return "Thinking...";
 }
 
 async function handleSingleTrackRequest(input: {
@@ -1073,7 +1149,14 @@ async function handlePlaybackRequest(input: {
   let djProgramIntroAudio: GeneratedDjProgramIntro | undefined;
   let stationIntro = input.intentType === "direct_playback_request"
     ? formatDirectPlaybackConfirmation(station)
-    : await generateStationIntroResponse({ config: input.config, llm: input.llm, userText: input.requestText, station, context, signal: input.signal });
+    : await withStatus(input.writeStatus, "Preparing station intro...", () => generateStationIntroResponse({
+      config: input.config,
+      llm: input.llm,
+      userText: input.requestText,
+      station,
+      context,
+      signal: input.signal
+    }), input.signal);
   if (input.djProgramIntro) {
     stationIntro = "";
   }
@@ -1361,7 +1444,7 @@ async function generateMusicRecommendationResponse(input: {
   }
 
   return appendPendingStationChoicePrompt([
-    "I can still help with the music, though my deeper conversation layer is offline right now.",
+    "I could not get a polished recommendation reply this turn, but I can still help with the music.",
     "",
     "Want me to search directly from your request and build a five-track station?"
   ].join("\n"));
@@ -1433,6 +1516,7 @@ function isProtectedOperationalIntent(type: SessionIntent["type"]): boolean {
   return type === "stop"
     || type === "pause"
     || type === "resume"
+    || type === "previous"
     || type === "playback_status"
     || type === "feedback_like"
     || type === "feedback_skip"
@@ -1847,6 +1931,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
       }
       const controller = new AbortController();
       activeTurnController = controller;
+      const turnStatus = createTurnScopedStatusWriter(statusWriter, formatInitialInteractiveTurnStatus(line, playbackState));
       let result: SessionTurnResult;
       try {
         result = await runSessionTurn({
@@ -1857,7 +1942,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
           endSession: false,
           playbackState,
           writeOutput: (text) => console.log(text),
-          writeStatus: statusWriter
+          writeStatus: turnStatus.writeStatus
         });
       } catch (error) {
         if (isCancellationError(error)) {
@@ -1867,6 +1952,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
         }
         throw error;
       } finally {
+        turnStatus.finish();
         activeTurnController = undefined;
       }
       if (result.shouldExit) {
@@ -2203,6 +2289,43 @@ async function advancePlayback(
   ].filter(Boolean).join("\n");
 }
 
+async function retreatPlayback(
+  playbackState: InteractivePlaybackState | undefined,
+  config: PockedioConfig,
+  store: MemoryStore,
+  startUrlPlayback: StartUrlPlayback
+): Promise<string> {
+  if (!playbackState?.station || playbackState.currentIndex === undefined) {
+    return "No previous track is available right now.";
+  }
+
+  const previousIndex = findPreviousPlayableIndex(playbackState, playbackState.currentIndex);
+  if (previousIndex === undefined) {
+    return "No previous track is available right now.";
+  }
+
+  playbackState.activePlayback?.stop();
+  playbackState.activePlaybackPaused = undefined;
+  if (playbackState.currentTrackId) {
+    store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
+  }
+  const preparedIntro = getPreparedDjIntro(playbackState, previousIndex);
+  return startTrackAt(playbackState, config, store, previousIndex, startUrlPlayback, () => new Date(), {
+    intro: preparedIntro,
+    startDuckedIntroPlayback: playbackState.startDuckedIntroPlayback
+  });
+}
+
+function findPreviousPlayableIndex(playbackState: InteractivePlaybackState, currentIndex: number): number | undefined {
+  const storedTracks = playbackState.storedTracks ?? [];
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    if (storedTracks[index]?.track.playable.available) {
+      return index;
+    }
+  }
+  return undefined;
+}
+
 async function startTrackAt(
   playbackState: InteractivePlaybackState,
   config: PockedioConfig,
@@ -2259,7 +2382,11 @@ async function startTrackAt(
   }
   prepareNextDjIntro(playbackState, config, nextIndex + 1);
   handle.done.then((result) => {
-    if (playbackState.activePlayback !== handle || !result.ok) {
+    if (playbackState.activePlayback !== handle) {
+      return;
+    }
+    if (!result.ok) {
+      void handleActivePlaybackFailure(playbackState, config, entry, result, nextIndex + 1, startUrlPlayback);
       return;
     }
     void autoAdvancePlayback(playbackState, config, entry.dbId, nextIndex + 1, startUrlPlayback);
@@ -2269,6 +2396,16 @@ async function startTrackAt(
     options.intro?.rawText ? formatDjTranscript(config, options.intro.rawText) : "",
     formatTrackStartSurface(entry.track, config, playbackState.currentStartedAt, now(), storedTracks, nextIndex)
   ].filter(Boolean).join("\n\n");
+}
+
+function formatPlaybackProcessFailure(track: StationTrack, result: PlayerResult): string {
+  const detail = result.error
+    ?? (result.signal ? `Process ended with signal ${result.signal}.` : `Process exited with code ${result.exitCode ?? "null"}.`);
+  return [
+    `Playback stopped unexpectedly for ${track.title} - ${track.artist}.`,
+    `Playback detail: ${detail}`,
+    "Trying the next track."
+  ].join("\n");
 }
 
 function formatTrackStartFailure(track: StationTrack, reason: string): string {
@@ -2288,6 +2425,33 @@ function formatDjTranscript(config: PockedioConfig, text: string): string {
 
 function formatDjTranscriptLabel(config: PockedioConfig): string {
   return `${config.dj.displayName}:`;
+}
+
+async function handleActivePlaybackFailure(
+  playbackState: InteractivePlaybackState,
+  config: PockedioConfig,
+  failedEntry: StoredPlaybackTrack,
+  result: PlayerResult,
+  startIndex: number,
+  startUrlPlayback: StartUrlPlayback
+): Promise<void> {
+  const store = new MemoryStore(config);
+  try {
+    const reason = result.error
+      ?? (result.signal ? `Process ended with signal ${result.signal}.` : `Process exited with code ${result.exitCode ?? "null"}.`);
+    store.updateTrackPlayback(failedEntry.dbId, "failed", reason);
+    const failureNotice = formatPlaybackProcessFailure(failedEntry.track, result);
+    const preparedIntro = getPreparedDjIntro(playbackState, startIndex);
+    const nextResponse = await startTrackAt(playbackState, config, store, startIndex, startUrlPlayback, () => new Date(), {
+      intro: preparedIntro,
+      startDuckedIntroPlayback: playbackState.startDuckedIntroPlayback
+    });
+    const response = [failureNotice, nextResponse].filter(Boolean).join("\n\n");
+    storePlaybackOutputMessage(store, playbackState, response);
+    emitPlaybackOutput(playbackState, response);
+  } finally {
+    store.close();
+  }
 }
 
 async function autoAdvancePlayback(

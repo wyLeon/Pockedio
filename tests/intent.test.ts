@@ -143,6 +143,14 @@ describe("parseIntent", () => {
       type: "resume",
       confidence: "high"
     });
+    await expect(parseIntent("previous")).resolves.toEqual({
+      type: "previous",
+      confidence: "high"
+    });
+    await expect(parseIntent("go back")).resolves.toEqual({
+      type: "previous",
+      confidence: "high"
+    });
   });
 
   it("keeps stop as playback control and quit or exit as session exit", async () => {

@@ -25,6 +25,7 @@ export type SessionIntentType =
   | "playback_status"
   | "pause"
   | "resume"
+  | "previous"
   | "stop"
   | "session_exit"
   | "explicit_dj_audio_request";
@@ -64,6 +65,7 @@ const intentTypes = new Set<SessionIntentType>([
   "playback_status",
   "pause",
   "resume",
+  "previous",
   "stop",
   "session_exit",
   "explicit_dj_audio_request"
@@ -116,6 +118,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   }
   if (/\bresume\b/.test(text)) {
     return { type: "resume", confidence: "high" };
+  }
+  if (/^(please\s+)?(previous|prev|previous song|previous track|go back|back one)(\s+please)?[.!?]*$/.test(text)) {
+    return { type: "previous", confidence: "high" };
   }
   if (/^(quit|exit)$/i.test(text) || /\b(quit|exit)\b/.test(text)) {
     return { type: "session_exit", confidence: "high" };

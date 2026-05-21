@@ -1124,10 +1124,10 @@ make it softer               -> update pending station direction
 more energetic               -> update pending station direction
 ```
 
-Fallback if the LLM is unavailable:
+Fallback if the recommendation reply cannot be used:
 
 ```text
-I can still help with the music, though my deeper conversation layer is offline right now.
+I could not get a polished recommendation reply this turn, but I can still help with the music.
 
 Want me to search directly from your request and build a five-track station?
 ```
@@ -1490,7 +1490,7 @@ next song / next track             3.10 Playback Controls        built
 stop                               3.10 Playback Controls        built
 pause                              3.10 Playback Controls        built with mpv; fallback stops audio, keeps session open
 resume                             3.10 Playback Controls        built with mpv
-previous                           3.10 Playback Controls        not built
+previous                           3.10 Playback Controls        built
 favorite this                      3.12 Feedback Actions         not built
 I like this                        3.12 Feedback Actions         built
 good pick / nice pick              3.12 Feedback Actions         built
@@ -1514,6 +1514,7 @@ Rules:
 - During playback, questions and personal comments should not stop or replace music unless the user clearly asks for playback control.
 - During playback, current-track and artist questions should use the LLM conversation path with current track, rationale, and queue context.
 - During playback, `next` means skip current track and start the next playable track.
+- During playback, `previous` means stop current track and return to the previous playable track.
 - During playback, `stop` stops playback and keeps the interactive session open.
 - During playback, `pause` and `resume` are real controls when mpv is available; with ffplay/afplay fallback, pause stops audio and resume is unavailable.
 - During playback, `dj` is not a toggle. DJ mode is chosen before playback starts.
@@ -1586,6 +1587,7 @@ Examples:
 
 ```text
 next
+previous
 stop
 pause
 resume
@@ -1597,6 +1599,9 @@ Built controls:
 next / skip / next song / next track
   -> stop current track, mark it skipped, start next playable track, show 3.6 track-start surface
   -> if the next track cannot start, show the playback detail, keep the CLI session open, and let the next `next` try the following track
+
+previous
+  -> stop current track, mark it skipped, return to previous playable track, show 3.6 track-start surface
 
 stop
   -> stop current playback, mark current track skipped, keep the CLI session open
@@ -1610,22 +1615,15 @@ resume
   -> with afplay fallback: say nothing resumable is paused
 ```
 
-Planned controls:
-
-```text
-previous
-  -> return to previous playable track
-```
-
 Rules:
 
 - Controls should be fast and should not use the LLM.
-- `next` should preserve the station and queue context.
-- `next` should show the selected DJ note for the new current track.
+- `next` and `previous` should preserve the station and queue context.
+- `next` and `previous` should show the selected DJ note for the new current track.
 - `pause` should not end the CLI session.
 - `resume` should only claim success when a controllable paused player exists.
 - If no next playable track remains, show the station-complete message.
-- `previous` needs explicit implementation before being shown as a reliable control in startup copy.
+- If no previous playable track exists, say so without stopping the current track.
 
 ## 3.11 Queue And Status Questions
 
