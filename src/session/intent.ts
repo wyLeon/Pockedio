@@ -86,6 +86,9 @@ export async function parseIntent(input: string, llm?: LlmClient, options: LlmRe
       "Use identity_capability when the user asks who Pockedio is, who is talking, or what Pockedio can do.",
       "Use conversation for artist/song background questions, current-track questions, daily chat, personal reflections, or listening observations.",
       "Use playback_request only when the user asks to start music with words like play, put on, queue, or start.",
+      "Use pause for natural stop-temporarily wording like pause, hold on, wait a second, or stop for a moment.",
+      "Use resume for natural continuation wording like resume, keep playing, continue the music, carry on, or go on.",
+      "Use previous for natural back-navigation wording like previous, go back, back one, or go to the previous track.",
       "Use single_track_playback when the user asks to play one specific song title, especially 'play [song] by [artist]'.",
       "Use music_recommendation when the user asks what music they should listen to but does not ask to play it.",
       "Use explicit_dj_audio_request only when the user asks for standalone spoken/audio DJ narration; the runner will redirect this toward station DJ mode.",
@@ -115,13 +118,13 @@ export function parseDeterministicIntent(input: string): SessionIntent {
     return { type: "conversation", confidence: "low" };
   }
 
-  if (/\bpause\b/.test(text)) {
+  if (isPauseText(text)) {
     return { type: "pause", confidence: "high" };
   }
-  if (/\bresume\b/.test(text)) {
+  if (isResumeText(text)) {
     return { type: "resume", confidence: "high" };
   }
-  if (/^(please\s+)?(previous|prev|previous song|previous track|go back|back one)(\s+please)?[.!?]*$/.test(text)) {
+  if (isPreviousText(text)) {
     return { type: "previous", confidence: "high" };
   }
   if (/^(quit|exit)$/i.test(text) || /\b(quit|exit)\b/.test(text)) {
@@ -197,6 +200,20 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   }
 
   return { type: "conversation", confidence: "medium" };
+}
+
+function isPauseText(text: string): boolean {
+  return /\bpause\b/.test(text)
+    || /^(please\s+)?(hold on|hold on a second|hold on a minute|hold up|wait|wait a second|wait a minute|stop for a moment|stop for a second|pause for a moment)(\s+please)?[.!?]*$/.test(text);
+}
+
+function isResumeText(text: string): boolean {
+  return /\bresume\b/.test(text)
+    || /^(please\s+)?(keep playing|continue playing|continue the music|carry on|go on|keep going|play on)(\s+please)?[.!?]*$/.test(text);
+}
+
+function isPreviousText(text: string): boolean {
+  return /^(please\s+)?(previous|prev|previous song|previous track|go back|back one|go back one|play previous|play the previous song|play the previous track|go to previous|go to the previous song|go to the previous track)(\s+please)?[.!?]*$/.test(text);
 }
 
 function isIdentityCapabilityText(text: string): boolean {

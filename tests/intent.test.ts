@@ -154,7 +154,19 @@ describe("parseIntent", () => {
       type: "pause",
       confidence: "high"
     });
+    await expect(parseIntent("hold on a second")).resolves.toEqual({
+      type: "pause",
+      confidence: "high"
+    });
     await expect(parseIntent("resume")).resolves.toEqual({
+      type: "resume",
+      confidence: "high"
+    });
+    await expect(parseIntent("keep playing")).resolves.toEqual({
+      type: "resume",
+      confidence: "high"
+    });
+    await expect(parseIntent("continue the music")).resolves.toEqual({
       type: "resume",
       confidence: "high"
     });
@@ -166,6 +178,28 @@ describe("parseIntent", () => {
       type: "previous",
       confidence: "high"
     });
+    await expect(parseIntent("go to the previous track")).resolves.toEqual({
+      type: "previous",
+      confidence: "high"
+    });
+  });
+
+  it("lets the LLM classify semantic playback-control wording beyond deterministic phrases", async () => {
+    const prompts: string[] = [];
+    await expect(parseIntent("let it roll again", {
+      generateJson: async (prompt) => {
+        prompts.push(prompt);
+        return { ok: true, value: { type: "resume", confidence: "high" } };
+      },
+      generateText: async () => ({ ok: true, value: "unused" })
+    })).resolves.toEqual({
+      type: "resume",
+      confidence: "high"
+    });
+
+    expect(prompts[0]).toContain("Use resume for natural continuation wording");
+    expect(prompts[0]).toContain("Use pause for natural stop-temporarily wording");
+    expect(prompts[0]).toContain("Use previous for natural back-navigation wording");
   });
 
   it("keeps stop as playback control and quit or exit as session exit", async () => {
