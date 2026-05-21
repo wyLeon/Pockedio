@@ -160,6 +160,7 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     "Rationales should explain musical fit, mood, user taste, context, or station arc only.",
     `User request: ${input.request}`,
     `Taste summary: ${tasteSummary}`,
+    `Generated taste profile: ${input.context?.tasteProfile?.summary ?? "No generated taste profile yet."}`,
     `Time context: ${context?.timeOfDay ?? "unknown"} ${context?.now ?? ""}`.trim(),
     `Calendar summary: ${context?.calendar?.summary ?? "not available"}`,
     `Weather summary: ${context?.weather?.summary ?? "not available"}`,

@@ -32,6 +32,16 @@ It should include:
 
 The `taste.md` file should not be treated as static truth. It should be a curated memory that can be revised after imports, feedback, and listening sessions.
 
+Generated taste profile updates must preserve user edits. Pockedio should write generated summaries only inside a bounded generated block:
+
+```md
+<!-- POCKEDIO:BEGIN GENERATED TASTE PROFILE -->
+...
+<!-- POCKEDIO:END GENERATED TASTE PROFILE -->
+```
+
+Everything outside that block belongs to the user. Listening feedback should first become structured local `taste_signals`; `taste.md` should be refreshed only when the user explicitly asks or when a future background consolidation policy is accepted.
+
 ## Source 3: Diary Context
 
 The user's diary under `/Users/leonw/openclaw/area/diary` may be an important source for understanding emotional context, recurring life patterns, work intensity, projects, and personal seasons.
@@ -73,8 +83,8 @@ This creates a system that can answer both "what do I like?" and "what would fit
 ## Open Decisions
 
 - Which music apps and export formats should be supported first.
-- Where `taste.md` should live in the project.
+- Whether automatic background profile consolidation should ever run without explicit user action.
 - Whether diary summaries should be generated manually on demand or maintained as an indexed local memory.
 - What database-backed memory schema should store agenda memory, diary memory, taste memory, user personality profile, session memory, and feedback.
 - What privacy guardrails are required before reading diary files.
-- How the CLI should ask for and apply feedback during playback.
+- How much of the generated taste profile should be displayed in normal status output.

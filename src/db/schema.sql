@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS taste_signals (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS taste_profile_snapshots (
+  id TEXT PRIMARY KEY,
+  summary TEXT NOT NULL,
+  metadata_json TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memory_items (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('agenda', 'diary', 'taste', 'feedback', 'summary', 'personality')),
@@ -142,6 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, 
 CREATE INDEX IF NOT EXISTS idx_station_tracks_session_position ON station_tracks(session_id, position);
 CREATE INDEX IF NOT EXISTS idx_taste_signals_type_created ON taste_signals(signal_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_taste_signals_target ON taste_signals(target_type, target_value);
+CREATE INDEX IF NOT EXISTS idx_taste_profile_snapshots_created ON taste_profile_snapshots(created_at);
 CREATE INDEX IF NOT EXISTS idx_memory_items_kind_created ON memory_items(kind, created_at);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_diary_summaries_source ON diary_summaries(source_file, source_mtime);

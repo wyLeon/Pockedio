@@ -7,6 +7,10 @@ import { withDatabase } from "../src/db/database.js";
 import { parseTasteCsv } from "../src/taste/csv.js";
 import { importTaste } from "../src/taste/importTaste.js";
 import { extractNetEasePlaylistId, importTasteFromNetEasePlaylist } from "../src/taste/neteasePlaylist.js";
+import { updateTasteProfile } from "../src/taste/profile.js";
+import { generatedTasteProfileEnd, generatedTasteProfileStart, upsertGeneratedTasteProfileSection } from "../src/taste/tasteMarkdown.js";
+import { runMigrations } from "../src/db/migrations.js";
+import { MemoryStore } from "../src/memory/store.js";
 
 const tempDirs: string[] = [];
 
@@ -111,5 +115,61 @@ describe("taste import", () => {
       sourceFile: "netease:playlist:123456",
       trackCount: 2
     });
+  });
+
+  it("preserves user taste.md notes while replacing the generated profile block", () => {
+    const original = [
+      "# Pockedio Taste",
+      "",
+      "User note: keep this line.",
+      "",
+      generatedTasteProfileStart,
+      "old generated text",
+      generatedTasteProfileEnd
+    ].join("\n");
+
+    const updated = upsertGeneratedTasteProfileSection(original, "## Generated Taste Profile\n\n- new signal");
+
+    expect(updated).toContain("User note: keep this line.");
+    expect(updated).not.toContain("old generated text");
+    expect(updated).toContain("- new signal");
+  });
+
+  it("updates generated taste profile from local feedback signals", () => {
+    const config = makeConfig();
+    runMigrations(config);
+    fs.writeFileSync(config.paths.taste, "# Pockedio Taste\n\nUser note: do not overwrite me.\n");
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+      const sessionId = store.createSession("conversation", "play soft jazz");
+      const trackId = store.addStationTrack(sessionId, {
+        position: 1,
+        title: "Blue in Green",
+        artist: "Miles Davis",
+        provider: "netease",
+        providerTrackId: "blue",
+        playbackStatus: "playing"
+      });
+      const feedbackId = store.addFeedback(sessionId, trackId, "favorite", "favorite this");
+      store.addTasteSignal({
+        sourceFeedbackId: feedbackId,
+        trackId,
+        signalType: "favorite",
+        targetType: "track",
+        targetValue: "Blue in Green - Miles Davis",
+        weight: 5,
+        context: { stationRequest: "play soft jazz" }
+      });
+    });
+
+    const result = updateTasteProfile(config);
+    const markdown = fs.readFileSync(config.paths.taste, "utf8");
+
+    expect(result.signalCount).toBe(1);
+    expect(markdown).toContain("User note: do not overwrite me.");
+    expect(markdown).toContain(generatedTasteProfileStart);
+    expect(markdown).toContain("track: Blue in Green - Miles Davis");
+    const snapshot = withDatabase(config, (db) => new MemoryStore(db).getLatestTasteProfileSnapshot());
+    expect(snapshot?.summary).toContain("Blue in Green");
   });
 });

@@ -191,6 +191,12 @@ describe("generateStation", () => {
       provider,
       llm,
       context: {
+        tasteProfile: {
+          id: "profile-1",
+          summary: "Generated profile says late-night piano is durable.",
+          metadata: { signalCount: 3 },
+          createdAt: "2026-05-21T00:00:00.000Z"
+        },
         tasteSignals: [{
           id: "signal-1",
           sourceFeedbackId: "feedback-1",
@@ -207,6 +213,7 @@ describe("generateStation", () => {
 
     expect(observedPrompt).toContain("Taste feedback signals:");
     expect(observedPrompt).toContain("positive_seed: track: Blue in Green - Miles Davis: weight 3");
+    expect(observedPrompt).toContain("Generated profile says late-night piano is durable.");
   });
 
   it("uses feedback signals in fallback searches and filters banned artists", async () => {

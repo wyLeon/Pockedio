@@ -1180,6 +1180,46 @@ describe("runSessionTurn", () => {
     ]));
   });
 
+  it("updates taste.md from local feedback when the user asks", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+    await runSessionTurn({
+      input: "favorite this",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    const result = await runSessionTurn({
+      input: "update my taste profile",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("taste_profile_update");
+    expect(result.response).toContain("Updated your taste profile.");
+    expect(fs.readFileSync(config.paths.taste, "utf8")).toContain("## Generated Taste Profile");
+    const snapshot = withDatabase(config, (db) => db.prepare("SELECT summary FROM taste_profile_snapshots").get()) as { summary: string };
+    expect(snapshot.summary).toContain("High-Confidence Favorites");
+  });
+
   it("keeps music playing while responding to personal listening memories", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};

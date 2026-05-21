@@ -20,6 +20,7 @@ export type SessionIntentType =
   | "feedback_less_like_this"
   | "feedback_favorite"
   | "feedback_save_vibe"
+  | "taste_profile_update"
   | "playback_status"
   | "pause"
   | "resume"
@@ -56,6 +57,7 @@ const intentTypes = new Set<SessionIntentType>([
   "feedback_less_like_this",
   "feedback_favorite",
   "feedback_save_vibe",
+  "taste_profile_update",
   "playback_status",
   "pause",
   "resume",
@@ -114,6 +116,10 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   }
   if (isIdentityCapabilityText(text)) {
     return { type: "identity_capability", confidence: "high" };
+  }
+  if (/\b(update|refresh|rebuild|summarize)\b.*\b(taste profile|taste\.md|music taste|taste memory)\b/.test(text)
+    || /\b(taste profile|taste\.md|music taste|taste memory)\b.*\b(update|refresh|rebuild|summarize)\b/.test(text)) {
+    return { type: "taste_profile_update", confidence: "high" };
   }
   if (/\b(never play|ban|block|don't play this artist|do not play this artist)\b/.test(text)) {
     return { type: "feedback_ban", confidence: "high" };

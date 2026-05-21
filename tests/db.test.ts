@@ -46,6 +46,7 @@ describe("database migrations", () => {
       "settings",
       "station_tracks",
       "taste_imports",
+      "taste_profile_snapshots",
       "taste_signals"
     ]);
   });
@@ -191,6 +192,21 @@ describe("database migrations", () => {
         weight: 5,
         context: { stationRequest: "play soft jazz" }
       }]);
+    });
+  });
+
+  it("stores latest taste profile snapshots", () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+
+      store.addTasteProfileSnapshot("First profile", { signalCount: 1 });
+      store.addTasteProfileSnapshot("Second profile", { signalCount: 2 });
+
+      expect(store.getLatestTasteProfileSnapshot()).toMatchObject({
+        summary: "Second profile",
+        metadata: { signalCount: 2 }
+      });
     });
   });
 

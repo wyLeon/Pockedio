@@ -89,6 +89,13 @@ export type TasteSignalRecord = {
   createdAt: string;
 };
 
+export type TasteProfileSnapshotRecord = {
+  id: string;
+  summary: string;
+  metadata: unknown;
+  createdAt: string;
+};
+
 export class MemoryStore {
   private readonly db: Database.Database;
   private readonly ownsConnection: boolean;
@@ -226,6 +233,33 @@ export class MemoryStore {
       ...row,
       context: parseJson(contextJson)
     }));
+  }
+
+  addTasteProfileSnapshot(summary: string, metadata?: unknown): string {
+    const id = randomUUID();
+    this.db.prepare(`
+      INSERT INTO taste_profile_snapshots (id, summary, metadata_json, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(id, summary, metadata === undefined ? null : JSON.stringify(metadata), nowIso());
+    return id;
+  }
+
+  getLatestTasteProfileSnapshot(): TasteProfileSnapshotRecord | null {
+    const row = this.db.prepare(`
+      SELECT id, summary, metadata_json as metadataJson, created_at as createdAt
+      FROM taste_profile_snapshots
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get() as { id: string; summary: string; metadataJson: string | null; createdAt: string } | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      id: row.id,
+      summary: row.summary,
+      metadata: parseJson(row.metadataJson),
+      createdAt: row.createdAt
+    };
   }
 
   addMemoryItem(kind: MemoryKind, content: string, metadata?: unknown, sourceSessionId?: string): string {

@@ -158,4 +158,15 @@ describe("parseIntent", () => {
       });
     }
   });
+
+  it("classifies explicit taste profile update requests", async () => {
+    await expect(parseIntent("update my taste profile")).resolves.toEqual({
+      type: "taste_profile_update",
+      confidence: "high"
+    });
+    await expect(parseIntent("refresh taste.md")).resolves.toEqual({
+      type: "taste_profile_update",
+      confidence: "high"
+    });
+  });
 });

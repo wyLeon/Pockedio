@@ -7,6 +7,9 @@ export type TasteMarkdownSummary = {
   sources: string[];
 };
 
+export const generatedTasteProfileStart = "<!-- POCKEDIO:BEGIN GENERATED TASTE PROFILE -->";
+export const generatedTasteProfileEnd = "<!-- POCKEDIO:END GENERATED TASTE PROFILE -->";
+
 export function summarizeTasteRows(rows: TasteImportRow[]): TasteMarkdownSummary {
   return {
     trackCount: rows.length,
@@ -55,4 +58,21 @@ function sortedUnique(values: string[]): string[] {
 
 function listOrEmpty(values: string[]): string[] {
   return values.length > 0 ? values.map((value) => `- ${value}`) : ["- No signals yet."];
+}
+
+export function upsertGeneratedTasteProfileSection(markdown: string, generatedProfile: string): string {
+  const section = [
+    generatedTasteProfileStart,
+    generatedProfile.trim(),
+    generatedTasteProfileEnd
+  ].join("\n");
+  const pattern = new RegExp(`${escapeRegExp(generatedTasteProfileStart)}[\\s\\S]*?${escapeRegExp(generatedTasteProfileEnd)}`);
+  if (pattern.test(markdown)) {
+    return `${markdown.replace(pattern, section).trim()}\n`;
+  }
+  return `${markdown.trim()}\n\n${section}\n`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -1649,6 +1649,34 @@ Rules:
 - Positive seeds and favorites should bias future station planning and fallback search, not interrupt the current queue.
 - `favorite` should not be treated as a normal NetEase favorite until account-backed collection behavior is designed.
 
+### 3.12.1 Taste Profile Growth
+
+`taste_signals` are the fast operational layer. They affect future stations immediately, but they should not rewrite `taste.md` after every single reaction.
+
+`taste.md` is the slower user-readable taste contract. It should grow through explicit consolidation:
+
+```text
+update my taste profile
+refresh taste.md
+summarize my music taste
+```
+
+Output:
+
+```text
+Updated your taste profile.
+Signals reviewed: 12
+taste.md: /Users/leonw/.pockedio/taste.md
+```
+
+Rules:
+
+- Generated content must live inside `<!-- POCKEDIO:BEGIN GENERATED TASTE PROFILE -->` and `<!-- POCKEDIO:END GENERATED TASTE PROFILE -->`.
+- Pockedio must preserve all user-written text outside the generated block.
+- The generated profile should summarize favorites, situational preferences, positive signals, negative signals, hard avoids, and open questions.
+- Future station generation should use both `taste.md` and the latest generated taste profile.
+- A single `skip` or `like` should remain a signal only until enough feedback accumulates or the user explicitly asks for profile consolidation.
+
 ## 3.13 Explicit DJ Audio Request
 
 Examples:

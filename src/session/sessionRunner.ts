@@ -32,6 +32,7 @@ import type { MusicProvider, MusicTrackCandidate, PlayableTrack } from "../provi
 import { NetEaseProvider } from "../providers/netease.js";
 import { generateStation } from "../station/stationGenerator.js";
 import type { GeneratedStation, StationTrack } from "../station/stationTypes.js";
+import { updateTasteProfile } from "../taste/profile.js";
 import { synthesizeFishAudio as synthesizeFishAudioDefault, type FishAudioResult } from "../tts/fishAudio.js";
 import { parseDeterministicIntent, parseIntent, type SessionIntent } from "./intent.js";
 
@@ -440,6 +441,18 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       store.addMessage(sessionId, "pockedio", response.text);
       writeOutput(response.text);
       return { sessionId, intent, response: response.text, shouldExit: false, djAudio: response.djAudio };
+    }
+
+    if (intent.type === "taste_profile_update") {
+      const result = await withStatus(writeStatus, "Updating taste profile...", () => Promise.resolve(updateTasteProfile(config)));
+      const response = [
+        "Updated your taste profile.",
+        `Signals reviewed: ${result.signalCount}`,
+        `taste.md: ${result.tastePath}`
+      ].join("\n");
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
     }
 
     if (intent.type === "pending_station_confirmation" && input.playbackState?.pendingStationRequest) {
