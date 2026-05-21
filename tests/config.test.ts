@@ -77,12 +77,12 @@ describe("config load and save", () => {
     expect(config.dj.schedule.morning).toMatchObject({
       enabled: true,
       playTime: "08:45",
-      prepareMinutesBefore: 10
+      prepareMinutesBefore: 20
     });
     expect(config.dj.schedule.evening).toMatchObject({
       enabled: true,
       playTime: "17:00",
-      prepareMinutesBefore: 10
+      prepareMinutesBefore: 20
     });
   });
 

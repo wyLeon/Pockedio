@@ -15,7 +15,7 @@ import type { MusicProvider } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
 import { generateStation } from "../station/stationGenerator.js";
 import type { GeneratedStation } from "../station/stationTypes.js";
-import { synthesizeFishAudio as synthesizeFishAudioDefault, type FishAudioResult } from "../tts/fishAudio.js";
+import { synthesizeFishAudio as synthesizeFishAudioDefault, type FishAudioOptions, type FishAudioResult } from "../tts/fishAudio.js";
 import {
   formatLocalDateTime,
   getScheduledDjTargetPlayTime,
@@ -53,7 +53,7 @@ export type ScheduledDjInput = {
   context?: PockedioContext;
   provider?: MusicProvider;
   llm?: LlmClient;
-  synthesizeFishAudio?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
+  synthesizeFishAudio?: (config: PockedioConfig, text: string, options?: FishAudioOptions) => Promise<FishAudioResult>;
   playFile?: (filePath: string) => Promise<PlayerResult>;
   playUrl?: (url: string) => Promise<PlayerResult>;
   promptPlayback?: (message: string) => Promise<ScheduledDjPlaybackDecision>;
@@ -66,7 +66,7 @@ export type ScheduledDjPreparationInput = {
   config?: PockedioConfig;
   context?: PockedioContext;
   llm?: LlmClient;
-  synthesizeFishAudio?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
+  synthesizeFishAudio?: (config: PockedioConfig, text: string, options?: FishAudioOptions) => Promise<FishAudioResult>;
   writeOutput?: (text: string) => void;
 };
 
@@ -91,6 +91,8 @@ export type MoodCheckResult = {
   playbackStarted: boolean;
   station?: GeneratedStation;
 };
+
+const scheduledDjFishAudioTimeoutMs = 10 * 60_000;
 
 export async function runScheduledDjJob(input: ScheduledDjInput): Promise<ScheduledDjResult> {
   const config = input.config ?? loadConfig();
@@ -389,6 +391,7 @@ async function generateScheduledDjText(input: {
     `Write concise English copy for ${scene}.`,
     "This is a spoken opening, not the full program transcript.",
     "Keep it under 70 words.",
+    `Local scheduled moment: ${formatScheduledMomentForPrompt(new Date(input.context.now))}. Use this exact weekday/time if you mention it.`,
     `Persona: ${input.personaName}.`,
     `Goal: ${emphasis}.`,
     "Mention the moment and ease into the first track.",
@@ -473,14 +476,19 @@ function formatScheduledNowPlaying(track: GeneratedStation["tracks"][number], to
   return `Now playing: ${track.position}/${totalTracks}  ${track.title} - ${track.artist}`;
 }
 
+function formatScheduledMomentForPrompt(date: Date): string {
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
+  return `${weekday} ${formatLocalDateTime(date)}`;
+}
+
 async function synthesizeScheduledDjAudio(
   config: PockedioConfig,
   text: string,
   writeOutput: (text: string) => void,
-  synthesize: (config: PockedioConfig, text: string) => Promise<FishAudioResult>
+  synthesize: (config: PockedioConfig, text: string, options?: FishAudioOptions) => Promise<FishAudioResult>
 ): Promise<FishAudioResult> {
   writeOutput("Preparing scheduled DJ voice...");
-  const result = await synthesize(config, text);
+  const result = await synthesize(config, text, { timeoutMs: scheduledDjFishAudioTimeoutMs });
   writeOutput(result.ok ? "Scheduled DJ voice ready." : "Scheduled DJ voice unavailable; text fallback is ready.");
   return result;
 }

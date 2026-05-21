@@ -16,7 +16,7 @@ const timeOfDaySchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const scheduledDjProgramSchema = z.object({
   enabled: z.boolean().default(true),
   playTime: timeOfDaySchema,
-  prepareMinutesBefore: z.number().int().min(0).max(120).default(10)
+  prepareMinutesBefore: z.number().int().min(0).max(120).default(20)
 });
 
 export const fishAudioModelDir =

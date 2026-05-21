@@ -203,7 +203,27 @@ describe("scheduled DJ jobs", () => {
 
     expect(prompts[0]).toContain("Keep it under 70 words.");
     expect(prompts[0]).toContain("This is a spoken opening, not the full program transcript.");
+    expect(prompts[0]).toContain("Local scheduled moment: Monday 2026-05-18T17:00:00.000+08:00.");
     expect(prompts[0]).toContain("Do not list every track.");
+  });
+
+  it("allows a longer FishAudio timeout for scheduled preparation", async () => {
+    const config = makeConfig();
+    let observedTimeoutMs = 0;
+
+    await prepareScheduledDjJob({
+      kind: "evening",
+      now: new Date("2026-05-18T16:40:00+08:00"),
+      config,
+      context: { ...fakeContext(config, new Date("2026-05-18T16:40:00+08:00")), timeOfDay: "evening" },
+      llm: fakeLlm("Evening reset. One breath first, then the first track."),
+      synthesizeFishAudio: async (_config, text, options) => {
+        observedTimeoutMs = options?.timeoutMs ?? 0;
+        return { ok: true, audioPath: `/tmp/${text.length}.wav`, latencyMs: 5 };
+      }
+    });
+
+    expect(observedTimeoutMs).toBe(10 * 60_000);
   });
 
   it("uses scheduled-program station logic for five time-of-day tracks", async () => {

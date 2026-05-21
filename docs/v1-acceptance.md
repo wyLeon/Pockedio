@@ -145,3 +145,5 @@ This checklist maps the approved v1 design criteria to implementation and verifi
   - Scheduled DJ program copy is constrained as a short spoken opening, not a full transcript, to reduce FishAudio timeout risk.
   - After confirmation, scheduled DJ playback shows the lineup and `Now playing` surface before starting the first track.
   - Scheduled station generation now sends an explicit scheduled-program brief: morning prioritizes the first useful listening arc of the day, evening prioritizes transition/decompression, and both still request exactly five tracks through the shared station engine.
+  - Scheduled preparation now defaults to 20 minutes before the configured ready time, so real scheduled arrivals have enough time to prepare FishAudio before the prompt appears.
+  - Scheduled FishAudio preparation now gets a 10-minute timeout because it happens before the ready-time prompt; the prior 120-second timeout produced text fallback during real QA.

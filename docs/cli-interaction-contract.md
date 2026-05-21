@@ -641,7 +641,7 @@ Invalid times re-prompt:
 Time must use HH:mm, for example 08:45.
 ```
 
-The preparation offset is not shown in setup. Pockedio stores the ready time as the scheduled play time and prepares audio before that time internally.
+The preparation offset is not shown in first setup. Pockedio stores the ready time as the scheduled play time and prepares audio 20 minutes before that time internally by default.
 
 ### Completion
 
@@ -1370,6 +1370,7 @@ Scheduled DJ program distinction:
 - Morning scheduled logic prioritizes the first useful listening arc of the day: focus, energy, weather, calendar pressure, diary state, and user taste.
 - Evening scheduled logic prioritizes transition out of the workday: decompression, commute, remaining focus, weather, calendar residue, diary state, and user taste.
 - Scheduled DJ is allowed to be opening-voice only for MVP. DJ-mode `standard` should remain more hosted: opening voice, quiet first transition, one useful middle transition, and closing voice.
+- Scheduled FishAudio preparation may use a longer timeout, currently 10 minutes, because it runs before the ready-time prompt. Interactive DJ mode should stay tighter to avoid blocking the user.
 
 ## 3.7 Specific Song Playback
 

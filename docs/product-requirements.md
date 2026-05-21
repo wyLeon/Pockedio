@@ -36,7 +36,7 @@ User-active playback must not trigger DJ voice mode by default. In this mode, Po
 
 ### 3. Pockedio-Active Morning DJ
 
-Every weekday at the configured Morning DJ ready time, Pockedio should generate a morning DJ program and announce that it is ready. It should not start audio by itself. The terminal prompt should let the user press Enter to play now, type `later` to keep the program available, or type `skip` to dismiss it. A scheduled morning program expires six hours after the configured ready time.
+Every weekday at the configured Morning DJ ready time, Pockedio should announce that the morning DJ program is ready. It should prepare the spoken opening before arrival, 20 minutes before the ready time by default, so the ready-time prompt can reuse prepared audio instead of generating on the slow path. Scheduled FishAudio preparation may run for up to 10 minutes because it happens before arrival. It should not start audio by itself. The terminal prompt should let the user press Enter to play now, type `later` to keep the program available, or type `skip` to dismiss it. A scheduled morning program expires six hours after the configured ready time.
 
 For MVP, a scheduled DJ program means a context-aware spoken host opening plus a five-track station. It still shows the lineup and normal now-playing surface in the terminal once playback starts. Compared with a normal five-song station, the difference is that the station is scheduled, uses morning/evening context, and starts with the selected DJ voice when FishAudio succeeds.
 
@@ -55,7 +55,7 @@ The user is the listener, not the reviewer of the generated file. The prompt is 
 
 ### 4. Pockedio-Active Evening DJ
 
-Every weekday at the configured Evening DJ ready time, Pockedio should generate an evening DJ program and announce that it is ready. It should not start audio by itself. The terminal prompt should let the user press Enter to play now, type `later` to keep the program available, or type `skip` to dismiss it. A scheduled evening program expires six hours after the configured ready time.
+Every weekday at the configured Evening DJ ready time, Pockedio should announce that the evening DJ program is ready. It should prepare the spoken opening before arrival, 20 minutes before the ready time by default, so the ready-time prompt can reuse prepared audio instead of generating on the slow path. Scheduled FishAudio preparation may run for up to 10 minutes because it happens before arrival. It should not start audio by itself. The terminal prompt should let the user press Enter to play now, type `later` to keep the program available, or type `skip` to dismiss it. A scheduled evening program expires six hours after the configured ready time.
 
 The evening program has the same MVP shape: a short spoken DJ opening, then a visible five-track station with normal playback controls and queue display.
 

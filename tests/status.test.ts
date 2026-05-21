@@ -80,7 +80,7 @@ describe("status report", () => {
     expect(text).toContain("- External adapters: NetEase music, OpenAI-compatible LLM, Open-Meteo weather");
     expect(text).toContain("- Current playback:");
     expect(text).toContain("- Scheduled jobs: Morning DJ weekdays 08:45");
-    expect(text).toContain("prepare 10 min before");
+    expect(text).toContain("prepare 20 min before");
     expect(text).toContain("- LLM: missing API key");
     expect(text).toContain("- Database: migrated");
     expect(text).toContain("- Last session:");

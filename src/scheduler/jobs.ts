@@ -76,7 +76,7 @@ function getScheduledDjConfig(kind: ScheduledDjKind, config?: PockedioConfig): S
   return config?.dj.schedule[kind] ?? {
     enabled: true,
     playTime: kind === "morning" ? "08:45" : "17:00",
-    prepareMinutesBefore: 10
+    prepareMinutesBefore: 20
   };
 }
 
