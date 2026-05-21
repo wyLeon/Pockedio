@@ -12,6 +12,7 @@ export type SessionIntentType =
   | "direct_playback_request"
   | "single_track_playback"
   | "single_track_selection"
+  | "favorite_playback_request"
   | "feedback_like"
   | "feedback_skip"
   | "feedback_ban"
@@ -52,6 +53,7 @@ const intentTypes = new Set<SessionIntentType>([
   "direct_playback_request",
   "single_track_playback",
   "single_track_selection",
+  "favorite_playback_request",
   "feedback_like",
   "feedback_skip",
   "feedback_ban",
@@ -178,6 +180,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(play it directly|play directly|direct playback|start playback|just play|no discussion)\b/.test(text)) {
     return { type: "direct_playback_request", confidence: "high" };
   }
+  if (isFavoritePlaybackRequestText(text)) {
+    return { type: "favorite_playback_request", confidence: "high" };
+  }
   if (isSingleTrackPlaybackText(text)) {
     return { type: "single_track_playback", confidence: "high" };
   }
@@ -214,6 +219,10 @@ function isPlaybackRequestText(text: string): boolean {
   return hasPlaybackCommand(text)
     || hasMusicSubjectWithAction(text)
     || hasMusicSubjectWithUseCase(text);
+}
+
+function isFavoritePlaybackRequestText(text: string): boolean {
+  return /\b(play|put on|queue|start|listen to|hear)\b.*\b(my favorite song|my favourite song|one of my favorites|one of my favourites|something from my favorites|something from my favourites|my saved favorite|my saved favourite|favorite track|favourite track)\b/.test(text);
 }
 
 function isDjProgramPlaybackText(text: string): boolean {

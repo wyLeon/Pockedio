@@ -1491,7 +1491,9 @@ stop                               3.10 Playback Controls        built
 pause                              3.10 Playback Controls        built with mpv; fallback stops audio, keeps session open
 resume                             3.10 Playback Controls        built with mpv
 previous                           3.10 Playback Controls        built
-favorite this                      3.12 Feedback Actions         not built
+favorite this                      3.12 Feedback Actions         built
+play my favorite song              3.12 Feedback Actions         built
+play one of my favorites           3.12 Feedback Actions         built
 I like this                        3.12 Feedback Actions         built
 good pick / nice pick              3.12 Feedback Actions         built
 more like this                     3.12 Feedback Actions         built
@@ -1579,6 +1581,7 @@ Rules:
 - Resolve phrases like `the singer`, `this artist`, `this song`, and `this track` against the current playback metadata before answering.
 - If Pockedio does not have verified background details, say what is known from metadata instead of inventing a story.
 - Store useful personal listening comments as conversation memory.
+- Positive current-artist preference statements such as `I like her songs` should silently create a positive artist `taste_signals` row for future station planning.
 - Keep answers concise; this is still a listening session, not a long article.
 
 ## 3.10 Playback Controls
@@ -1713,6 +1716,13 @@ favorite this / save this / add to best list
   -> write a high-confidence local favorite taste signal
   -> "Saved locally as a high-confidence favorite signal."
 
+play my favorite song / play one of my favorites / play something from my favorites
+  -> read local high-confidence favorite track signals
+  -> resolve the strongest/recent playable favorite through the music provider
+  -> start it through the normal single-track playback surface
+  -> if no favorites exist, explain that `favorite this` saves the current song locally
+  -> if saved favorites cannot resolve to playable streams, explain the provider limitation and keep the session open
+
 save this vibe / remember this vibe
   -> record save_vibe on current station
   -> write a reusable vibe preset taste signal
@@ -1731,6 +1741,9 @@ Rules:
 - Future stations should read recent taste signals during `Reading your context...` and use them during `Building a station...`.
 - Hard bans should exclude matching artists or tracks from future station plans.
 - Positive seeds and favorites should bias future station planning and fallback search; only explicit queue-shaping feedback should change the current queue.
+- Conversational artist preference statements should create positive artist seeds without reshaping the current queue.
+- `I like this song` should create a weaker positive current-track signal than `favorite this`.
+- `play my favorite song` should use local favorite signals only; it should not claim access to the user's NetEase favorite library.
 - `favorite` should not be treated as a normal NetEase favorite until account-backed collection behavior is designed.
 
 ### 3.12.1 Taste Profile Growth

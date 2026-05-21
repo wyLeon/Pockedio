@@ -119,6 +119,21 @@ describe("parseIntent", () => {
     });
   });
 
+  it("classifies favorite playback requests", async () => {
+    await expect(parseIntent("play my favorite song")).resolves.toEqual({
+      type: "favorite_playback_request",
+      confidence: "high"
+    });
+    await expect(parseIntent("play one of my favorites")).resolves.toEqual({
+      type: "favorite_playback_request",
+      confidence: "high"
+    });
+    await expect(parseIntent("play something from my favorites")).resolves.toEqual({
+      type: "favorite_playback_request",
+      confidence: "high"
+    });
+  });
+
   it("classifies playback status requests", async () => {
     await expect(parseIntent("what's playing?")).resolves.toEqual({
       type: "playback_status",

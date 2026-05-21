@@ -14,7 +14,7 @@ import {
 import { shouldUseSpokenDjAudio } from "../dj/voiceRules.js";
 import { createLlmClient } from "../llm/openaiClient.js";
 import type { LlmClient } from "../llm/llmClient.js";
-import { MemoryStore, type FeedbackAction } from "../memory/store.js";
+import { MemoryStore, type FavoriteTrackCandidate, type FeedbackAction, type TasteSignalInput } from "../memory/store.js";
 import { summarizeSession } from "../memory/sessionSummary.js";
 import { buildFeedbackTasteSignals } from "../memory/tasteSignals.js";
 import {
@@ -625,9 +625,31 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         requestText: userText,
         writeStatus,
         playUrl,
-        startUrlPlayback,
+        startUrlPlayback: input.playbackState?.startUrlPlayback ?? startUrlPlayback,
         playbackState: input.playbackState,
         now
+      });
+      store.addMessage(sessionId, "pockedio", playback.response);
+      writeOutput(playback.response);
+      return { sessionId, intent, response: playback.response, shouldExit: false };
+    }
+
+    if (intent.type === "favorite_playback_request") {
+      if (input.playbackState) {
+        input.playbackState.pendingStationRequest = undefined;
+        input.playbackState.pendingStationOriginalRequest = undefined;
+      }
+      const playback = await handleFavoritePlaybackRequest({
+        config,
+        sessionId,
+        store,
+        provider,
+        writeStatus,
+        playUrl,
+        startUrlPlayback: input.playbackState?.startUrlPlayback ?? startUrlPlayback,
+        playbackState: input.playbackState,
+        now,
+        signal
       });
       store.addMessage(sessionId, "pockedio", playback.response);
       writeOutput(playback.response);
@@ -713,6 +735,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       context: conversationContext,
       signal
     }), signal);
+    recordConversationalTasteSignals(store, input.playbackState, userText);
     store.addMessage(sessionId, "pockedio", response);
     writeOutput(response);
     return { sessionId, intent, response, shouldExit: false };
@@ -890,6 +913,13 @@ function createTurnScopedStatusWriter(baseWriter: StatusWriter, initialText?: st
   };
 }
 
+export function createTurnScopedOutputWriter(writeOutput: OutputWriter, finishStatus: () => void): OutputWriter {
+  return (text) => {
+    finishStatus();
+    writeOutput(text);
+  };
+}
+
 export function formatInitialInteractiveTurnStatus(input: string, playbackState?: InteractivePlaybackState): string | undefined {
   const userText = normalizeSessionInput(input);
   if (!userText) {
@@ -1008,6 +1038,69 @@ async function handleSingleTrackStart(input: {
       playbackFailure ? `Playback detail: ${playbackFailure}` : ""
     ].filter(Boolean).join("\n")
   };
+}
+
+async function handleFavoritePlaybackRequest(input: {
+  config: PockedioConfig;
+  sessionId: string;
+  store: MemoryStore;
+  provider: MusicProvider;
+  writeStatus: StatusWriter;
+  playUrl: (url: string) => Promise<PlayerResult>;
+  startUrlPlayback: StartUrlPlayback;
+  playbackState?: InteractivePlaybackState;
+  now: NowProvider;
+  signal?: AbortSignal;
+}): Promise<{ response: string }> {
+  const favorites = input.store.getFavoriteTrackCandidates(12);
+  if (favorites.length === 0) {
+    return {
+      response: "No favorite songs saved yet. While a song is playing, type \"favorite this\" to save one locally."
+    };
+  }
+
+  const resolved = await withStatus(input.writeStatus, "Finding a favorite...", () => resolveFavoriteTrackCandidate(input.provider, favorites), input.signal);
+  if (!resolved) {
+    return {
+      response: "I found saved favorites, but NetEase did not return a playable stream for them right now. Try a favorites-inspired station, or save another favorite while it is playing."
+    };
+  }
+
+  return handleSingleTrackStart({
+    config: input.config,
+    sessionId: input.sessionId,
+    store: input.store,
+    track: resolved,
+    writeStatus: input.writeStatus,
+    playUrl: input.playUrl,
+    startUrlPlayback: input.startUrlPlayback,
+    playbackState: input.playbackState,
+    now: input.now,
+    signal: input.signal
+  });
+}
+
+async function resolveFavoriteTrackCandidate(
+  provider: MusicProvider,
+  favorites: FavoriteTrackCandidate[]
+): Promise<StationTrack | undefined> {
+  for (const favorite of favorites) {
+    const candidates = await resolveSingleTrackCandidates({
+      provider,
+      keyword: `${favorite.title} ${favorite.artist}`,
+      title: favorite.title,
+      artist: favorite.artist
+    });
+    if (candidates.length > 0) {
+      return {
+        ...candidates[0],
+        title: favorite.title,
+        artist: favorite.artist,
+        rationale: `saved locally as a high-confidence favorite`
+      };
+    }
+  }
+  return undefined;
 }
 
 async function resolveSingleTrackCandidates(input: {
@@ -1509,6 +1602,7 @@ function isStationStartingIntent(type: SessionIntent["type"]): boolean {
   return type === "playback_request"
     || type === "direct_playback_request"
     || type === "single_track_playback"
+    || type === "favorite_playback_request"
     || type === "music_recommendation";
 }
 
@@ -1544,6 +1638,7 @@ function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: str
     || intent.type === "explicit_dj_audio_request"
     || intent.type === "session_memory_update"
     || intent.type === "single_track_playback"
+    || intent.type === "favorite_playback_request"
     || intent.type === "single_track_selection"
     || intent.type === "pending_station_confirmation"
     || intent.type === "pending_station_dj_program"
@@ -1860,6 +1955,51 @@ function formatConversationFallback(userText: string, playbackState: Interactive
   return "I hear you. I can keep talking about the music, help shape a station, or respond to what this listening moment brings up.";
 }
 
+function recordConversationalTasteSignals(
+  store: MemoryStore,
+  playbackState: InteractivePlaybackState | undefined,
+  userText: string
+): void {
+  const signals = buildConversationalTasteSignals(playbackState, userText);
+  if (signals.length === 0) {
+    return;
+  }
+  store.addTasteSignals(signals);
+}
+
+function buildConversationalTasteSignals(
+  playbackState: InteractivePlaybackState | undefined,
+  userText: string
+): TasteSignalInput[] {
+  const current = getCurrentPlaybackTrack(playbackState);
+  const currentTrackId = playbackState?.currentTrackId ?? null;
+  if (!current || !isPositiveCurrentArtistPreference(userText)) {
+    return [];
+  }
+
+  return [{
+    trackId: currentTrackId,
+    signalType: "positive_seed",
+    targetType: "artist",
+    targetValue: current.artist,
+    weight: 2,
+    context: {
+      stationRequest: playbackState?.station?.request,
+      note: userText,
+      inferredFrom: "conversation_current_artist_preference",
+      currentTrack: `${current.title} - ${current.artist}`
+    }
+  }];
+}
+
+function isPositiveCurrentArtistPreference(userText: string): boolean {
+  const text = userText.trim().toLowerCase();
+  if (!/\b(i like|i love|i prefer|i enjoy|i'?m into|i am into)\b/.test(text)) {
+    return false;
+  }
+  return /\b(her|his|their|this artist|that artist|the artist|this singer|that singer|the singer|this vocalist|that vocalist|songs|music|voice|vocals)\b/.test(text);
+}
+
 function isCapabilityQuestion(userText: string): boolean {
   const text = userText.toLowerCase();
   return /\b(who are you|who is talking|who'?s talking|what are you|what can you do|help|how do you work|what do you do|are you a real dj)\b/.test(text);
@@ -1941,12 +2081,13 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
           sessionId,
           endSession: false,
           playbackState,
-          writeOutput: (text) => console.log(text),
+          writeOutput: createTurnScopedOutputWriter((text) => console.log(text), turnStatus.finish),
           writeStatus: turnStatus.writeStatus
         });
       } catch (error) {
         if (isCancellationError(error)) {
           recordCancelledTurn(config, sessionId);
+          turnStatus.finish();
           console.log("Cancelled.");
           continue;
         }

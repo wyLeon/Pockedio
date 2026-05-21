@@ -111,6 +111,15 @@ export type TasteProfileSnapshotRecord = {
   createdAt: string;
 };
 
+export type FavoriteTrackCandidate = {
+  title: string;
+  artist: string;
+  targetValue: string;
+  weight: number;
+  context: unknown;
+  createdAt: string;
+};
+
 export class MemoryStore {
   private readonly db: Database.Database;
   private readonly ownsConnection: boolean;
@@ -257,6 +266,30 @@ export class MemoryStore {
       ...row,
       context: parseJson(contextJson)
     }));
+  }
+
+  getFavoriteTrackCandidates(limit: number): FavoriteTrackCandidate[] {
+    const rows = this.db.prepare(`
+      SELECT target_value as targetValue, weight, context_json as contextJson, created_at as createdAt
+      FROM taste_signals
+      WHERE signal_type = 'favorite' AND target_type = 'track'
+      ORDER BY weight DESC, created_at DESC, rowid DESC
+      LIMIT ?
+    `).all(limit) as Array<{ targetValue: string; weight: number; contextJson: string | null; createdAt: string }>;
+
+    return rows.flatMap((row) => {
+      const parsed = parseFavoriteTrackTarget(row.targetValue);
+      if (!parsed) {
+        return [];
+      }
+      return [{
+        ...parsed,
+        targetValue: row.targetValue,
+        weight: row.weight,
+        context: parseJson(row.contextJson),
+        createdAt: row.createdAt
+      }];
+    });
   }
 
   addTasteProfileSnapshot(summary: string, metadata?: unknown): string {
@@ -496,6 +529,19 @@ export class MemoryStore {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function parseFavoriteTrackTarget(value: string): { title: string; artist: string } | null {
+  const separator = value.lastIndexOf(" - ");
+  if (separator <= 0 || separator >= value.length - 3) {
+    return null;
+  }
+  const title = value.slice(0, separator).trim();
+  const artist = value.slice(separator + 3).trim();
+  if (!title || !artist) {
+    return null;
+  }
+  return { title, artist };
 }
 
 function parseJson(value: string | null): unknown {

@@ -7,7 +7,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { createDefaultInteractiveStartUrlPlayback, formatInitialInteractiveTurnStatus, formatInteractiveStartupGuide, formatStartupSetupNote, runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { createDefaultInteractiveStartUrlPlayback, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupGuide, formatStartupSetupNote, runSessionTurn, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
@@ -310,6 +310,21 @@ describe("runSessionTurn", () => {
         synthesize: async () => ({ ok: true, audioPath: "/tmp/intro.wav", latencyMs: 1 })
       }
     })).toBe("Starting DJ program...");
+  });
+
+  it("clears the interactive status before printing turn output", () => {
+    const events: string[] = [];
+    const writeOutput = createTurnScopedOutputWriter(
+      (text) => events.push(`output:${text}`),
+      () => events.push("status:clear")
+    );
+
+    writeOutput("Bill Evans is a legendary American jazz pianist.");
+
+    expect(events).toEqual([
+      "status:clear",
+      "output:Bill Evans is a legendary American jazz pianist."
+    ]);
   });
 
   it("plays a specific song directly instead of building a station", async () => {
@@ -1502,6 +1517,118 @@ describe("runSessionTurn", () => {
     expect(snapshot.summary).toContain("High-Confidence Favorites");
   });
 
+  it("plays a locally saved favorite song", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+    await runSessionTurn({
+      input: "favorite this",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    const result = await runSessionTurn({
+      input: "play my favorite song",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("favorite_playback_request");
+    expect(result.response).toContain("Now playing: something deep work - Test Artist");
+    expect(result.response).toContain("Pockedio's note:");
+    expect(result.response).toContain("high-confidence favorite");
+    expect(started).toHaveLength(2);
+    expect(stopCalls).toBe(1);
+    expect(playbackState.storedTracks).toHaveLength(1);
+  });
+
+  it("explains when no favorite song has been saved yet", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "play one of my favorites",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("favorite_playback_request");
+    expect(result.response).toContain("No favorite songs saved yet");
+    expect(started).toEqual([]);
+  });
+
+  it("explains when saved favorites cannot be resolved to playable streams", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    withDatabase(config, (db) => {
+      db.prepare(`
+        INSERT INTO taste_signals (id, source_feedback_id, track_id, signal_type, target_type, target_value, weight, context_json, created_at)
+        VALUES (lower(hex(randomblob(16))), NULL, NULL, 'favorite', 'track', 'Blue in Green - Miles Davis', 5, NULL, ?)
+      `).run(new Date().toISOString());
+    });
+
+    const result = await runSessionTurn({
+      input: "play my favorite song",
+      config,
+      playbackState,
+      provider: {
+        search: async () => [{
+          provider: "netease",
+          providerTrackId: "blue",
+          title: "Blue in Green",
+          artists: ["Miles Davis"],
+          album: "Kind of Blue"
+        }],
+        getPlayableUrl: async () => ({
+          available: false,
+          provider: "netease",
+          providerTrackId: "blue",
+          reason: "No playable URL."
+        })
+      },
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("favorite_playback_request");
+    expect(result.response).toContain("saved favorites");
+    expect(result.response).toContain("playable stream");
+  });
+
   it("updates durable session memory when the user asks", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -1639,6 +1766,61 @@ describe("runSessionTurn", () => {
       { role: "pockedio", content: result.response },
       { role: "user", content: "This kind of piano reminds me of winter evenings in university." }
     ]);
+  });
+
+  it("records conversational current-artist preferences as taste signals", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => {
+          stopCalls += 1;
+        }
+      })
+    });
+
+    const currentIndex = playbackState.currentIndex;
+    const currentTrackId = playbackState.currentTrackId;
+    const result = await runSessionTurn({
+      input: "I like her songs.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Glad to hear that. This artist fits your quieter listening lane.")
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(stopCalls).toBe(0);
+    expect(playbackState.currentIndex).toBe(currentIndex);
+    expect(playbackState.currentTrackId).toBe(currentTrackId);
+
+    const signals = withDatabase(config, (db) => db.prepare(`
+      SELECT signal_type as signalType, target_type as targetType, target_value as targetValue, weight, context_json as contextJson
+      FROM taste_signals
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `).get()) as { signalType: string; targetType: string; targetValue: string; weight: number; contextJson: string };
+    expect(signals).toMatchObject({
+      signalType: "positive_seed",
+      targetType: "artist",
+      targetValue: "Test Artist",
+      weight: 2
+    });
+    expect(JSON.parse(signals.contextJson)).toMatchObject({
+      note: "I like her songs.",
+      inferredFrom: "conversation_current_artist_preference",
+      currentTrack: "something deep work - Test Artist"
+    });
   });
 
   it("uses calendar context for contextual conversation without starting playback", async () => {
