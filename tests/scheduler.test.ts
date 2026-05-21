@@ -47,14 +47,32 @@ function fakeLlm(text: string): LlmClient {
   };
 }
 
+function capturingLlm(text: string, prompts: string[]): LlmClient {
+  return {
+    generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
+    generateText: async (prompt) => {
+      prompts.push(prompt);
+      return { ok: true, value: text };
+    }
+  };
+}
+
 function fakeContext(config = makeConfig(), now = new Date("2026-05-18T08:45:00+08:00")): PockedioContext {
   return {
     now: now.toISOString(),
     timeOfDay: "morning",
-    calendar: { available: true, events: [], summary: "No calendar events found for today." },
+    calendar: {
+      available: true,
+      events: [],
+      summary: "No calendar events found for today.",
+      listeningHint: "Calendar listening hint for today: no events found, so do not overfit music to calendar pressure."
+    },
     weather: null,
     diary: null,
     tastePath: config.paths.taste,
+    tasteSignals: [],
+    tasteProfile: null,
+    memorySummaries: [],
     personality: config.personality,
     recentSessions: []
   };
@@ -95,9 +113,10 @@ describe("scheduled job decisions", () => {
 });
 
 describe("scheduled DJ jobs", () => {
-  it("prepares scheduled DJ audio before play time and reuses it at play time", async () => {
+  it("prepares scheduled DJ audio before play time, announces readiness, and reuses it after confirmation", async () => {
     const config = makeConfig();
     const playedFiles: string[] = [];
+    const output: string[] = [];
     let synthCalls = 0;
 
     const preparation = await prepareScheduledDjJob({
@@ -128,12 +147,23 @@ describe("scheduled DJ jobs", () => {
         playedFiles.push(filePath);
         return { ok: true, target: filePath, exitCode: 0, signal: null };
       },
-      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null })
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null }),
+      promptPlayback: async () => "play",
+      writeOutput: (text) => output.push(text)
     });
 
     expect(result.ran).toBe(true);
+    expect(result.playbackStarted).toBe(true);
+    expect(result.decision).toBe("play");
     expect(synthCalls).toBe(1);
     expect(playedFiles).toEqual(["/tmp/prepared-25.wav"]);
+    expect(output).toEqual([
+      "Using prepared DJ program.",
+      "Morning DJ program is ready.\n\nPress Enter to play now, type \"later\" to keep it, or type \"skip\" to dismiss.\nAvailable for 6 hours, until 14:45 on 2026-05-18.",
+      "Building scheduled station...",
+      "DJ program lineup:\n> 1. morning focus station morning - Test Artist\n  2. morning focus station morning instrumental - Test Artist\n  3. morning focus station morning calm - Test Artist\n  4. morning focus station morning focus - Test Artist\n  5. morning focus station morning Ryuichi Sakamoto - Test Artist",
+      "Now playing: 1/5  morning focus station morning - Test Artist"
+    ]);
     const rows = withDatabase(config, (db) => ({
       prep: db.prepare("SELECT kind, target_play_time as targetPlayTime, text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt, status FROM scheduled_dj_preparations").all(),
       audio: db.prepare("SELECT kind, text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt, status FROM dj_audio").all()
@@ -143,19 +173,41 @@ describe("scheduled DJ jobs", () => {
       targetPlayTime: "2026-05-18T08:45:00.000+08:00",
       text: "Prepared morning program.",
       audioPath: "/tmp/prepared-25.wav",
-      audioCacheExpiresAt: "2026-05-19T08:45:00.000+08:00",
+      audioCacheExpiresAt: "2026-05-18T14:45:00.000+08:00",
       status: "played"
     }]);
     expect(rows.audio).toEqual([{
       kind: "morning",
       text: "Prepared morning program.",
       audioPath: "/tmp/prepared-25.wav",
-      audioCacheExpiresAt: "2026-05-19T08:45:00.000+08:00",
+      audioCacheExpiresAt: "2026-05-18T14:45:00.000+08:00",
       status: "played"
     }]);
   });
 
-  it("generates spoken morning DJ audio, plays it directly, starts music, and stores metadata", async () => {
+  it("prompts the LLM for a short FishAudio-safe scheduled DJ opening", async () => {
+    const config = makeConfig();
+    const prompts: string[] = [];
+
+    await runScheduledDjJob({
+      kind: "evening",
+      now: new Date("2026-05-18T17:00:00+08:00"),
+      config,
+      context: { ...fakeContext(config, new Date("2026-05-18T17:00:00+08:00")), timeOfDay: "evening" },
+      provider: new FakeProvider(),
+      llm: capturingLlm("Evening reset. One breath first, then the first track.", prompts),
+      synthesizeFishAudio: async (_config, text) => ({ ok: true, audioPath: `/tmp/${text.length}.wav`, latencyMs: 5 }),
+      playFile: async (filePath) => ({ ok: true, target: filePath, exitCode: 0, signal: null }),
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null }),
+      promptPlayback: async () => "play"
+    });
+
+    expect(prompts[0]).toContain("Keep it under 70 words.");
+    expect(prompts[0]).toContain("This is a spoken opening, not the full program transcript.");
+    expect(prompts[0]).toContain("Do not list every track.");
+  });
+
+  it("holds a generated scheduled DJ program without playback when the user chooses later", async () => {
     const config = makeConfig();
     const playedFiles: string[] = [];
     const playedUrls: string[] = [];
@@ -179,10 +231,100 @@ describe("scheduled DJ jobs", () => {
       playUrl: async (url) => {
         playedUrls.push(url);
         return { ok: true, target: url, exitCode: 0, signal: null };
-      }
+      },
+      promptPlayback: async () => "later"
+    });
+
+    expect(result).toMatchObject({
+      ran: true,
+      decision: "later",
+      playbackStarted: false,
+      text: "Good morning. Here is a focused first hour."
+    });
+    expect(playedFiles).toEqual([]);
+    expect(playedUrls).toEqual([]);
+
+    const rows = withDatabase(config, (db) => ({
+      sessions: db.prepare("SELECT trigger_type as triggerType FROM sessions").all(),
+      prep: db.prepare("SELECT kind, text, status, audio_cache_expires_at as audioCacheExpiresAt FROM scheduled_dj_preparations").all(),
+      audio: db.prepare("SELECT kind, text, status FROM dj_audio").all(),
+      tracks: db.prepare("SELECT COUNT(*) as count FROM station_tracks").get() as { count: number }
+    }));
+    expect(rows.sessions).toEqual([{ triggerType: "scheduled_morning" }]);
+    expect(rows.prep).toEqual([{
+      kind: "morning",
+      text: "Good morning. Here is a focused first hour.",
+      status: "generated",
+      audioCacheExpiresAt: "2026-05-18T14:45:00.000+08:00"
+    }]);
+    expect(rows.audio).toEqual([]);
+    expect(rows.tracks.count).toBe(0);
+  });
+
+  it("does not replay a prepared scheduled DJ program after the six-hour window", async () => {
+    const config = makeConfig();
+
+    await prepareScheduledDjJob({
+      kind: "morning",
+      now: new Date("2026-05-18T08:35:00+08:00"),
+      config,
+      context: fakeContext(config),
+      llm: fakeLlm("Prepared morning program."),
+      synthesizeFishAudio: async () => ({ ok: true, audioPath: "/tmp/prepared.wav", latencyMs: 4 })
+    });
+
+    const result = await runScheduledDjJob({
+      kind: "morning",
+      now: new Date("2026-05-18T14:45:01+08:00"),
+      config,
+      context: fakeContext(config, new Date("2026-05-18T14:45:01+08:00")),
+      provider: new FakeProvider(),
+      llm: fakeLlm("Should not generate."),
+      synthesizeFishAudio: async () => {
+        throw new Error("should not synthesize after expiry");
+      },
+      playFile: async () => {
+        throw new Error("should not play after expiry");
+      },
+      playUrl: async () => {
+        throw new Error("should not start music after expiry");
+      },
+      promptPlayback: async () => "play"
+    });
+
+    expect(result).toEqual({ ran: false, reason: "Scheduled morning DJ program expired at 2026-05-18T14:45:00.000+08:00." });
+  });
+
+  it("generates spoken morning DJ audio, waits for confirmation, starts music, and stores metadata", async () => {
+    const config = makeConfig();
+    const playedFiles: string[] = [];
+    const playedUrls: string[] = [];
+
+    const result = await runScheduledDjJob({
+      kind: "morning",
+      now: new Date("2026-05-18T08:45:00+08:00"),
+      config,
+      context: fakeContext(config),
+      provider: new FakeProvider(),
+      llm: fakeLlm("Good morning. Here is a focused first hour."),
+      synthesizeFishAudio: async (_config, text) => ({
+        ok: true,
+        audioPath: `/tmp/${text.length}.wav`,
+        latencyMs: 5
+      }),
+      playFile: async (filePath) => {
+        playedFiles.push(filePath);
+        return { ok: true, target: filePath, exitCode: 0, signal: null };
+      },
+      playUrl: async (url) => {
+        playedUrls.push(url);
+        return { ok: true, target: url, exitCode: 0, signal: null };
+      },
+      promptPlayback: async () => "play"
     });
 
     expect(result.ran).toBe(true);
+    expect(result.playbackStarted).toBe(true);
     expect(playedFiles).toHaveLength(1);
     expect(playedUrls).toHaveLength(1);
 
@@ -204,7 +346,12 @@ describe("scheduled DJ jobs", () => {
       config,
       context: {
         ...fakeContext(config, new Date("2026-05-18T17:00:00+08:00")),
-        calendar: { available: true, events: [], summary: "A meeting is active now." },
+        calendar: {
+          available: true,
+          events: [],
+          summary: "A meeting is active now.",
+          listeningHint: "Calendar listening hint for today: meeting-heavy context suggests focus before events and decompression after them."
+        },
         timeOfDay: "evening"
       },
       provider: new FakeProvider(),

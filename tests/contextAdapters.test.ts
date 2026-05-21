@@ -19,6 +19,7 @@ function makeConfig(overrides: Partial<PockedioConfig> = {}): PockedioConfig {
     ...base,
     ...overrides,
     calendar: { ...base.calendar, ...overrides.calendar },
+    weather: { ...base.weather, ...overrides.weather },
     diary: { ...base.diary, ...overrides.diary },
     personality: { ...base.personality, ...overrides.personality },
     paths: { ...base.paths, ...overrides.paths }
@@ -44,6 +45,7 @@ describe("calendar adapter", () => {
 
     expect(context.available).toBe(false);
     expect(context.summary).toBe("Calendar context unavailable.");
+    expect(context.listeningHint).toBe("Calendar listening hint unavailable.");
     expect(context.warning).toBe("Calendar read timed out.");
   });
 
@@ -66,6 +68,7 @@ describe("calendar adapter", () => {
       }
     ]);
     expect(context.summary).toContain("Planning Review");
+    expect(context.listeningHint).toContain("meeting-heavy context");
   });
 
   it("builds distinct Apple Calendar windows for today, setup, and scheduled DJ reads", async () => {
@@ -157,7 +160,8 @@ describe("weather adapter", () => {
       relativeHumidity: 86,
       precipitation: 0,
       weatherCode: 0,
-      windSpeed: 10.8
+      windSpeed: 10.8,
+      listeningHint: expect.stringContaining("high humidity")
     });
   });
 });
@@ -187,7 +191,8 @@ describe("diary adapter", () => {
 
     expect(readDiaryContext(config)).toEqual({
       filePath: newer,
-      summary: "Latest diary file: newer.md, modified 2026-05-17T00:00:00.000Z."
+      summary: "Latest diary file: newer.md, modified 2026-05-17T00:00:00.000Z.",
+      listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
     });
   });
 
@@ -204,7 +209,13 @@ describe("diary adapter", () => {
       generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "unused" }),
       generateText: async (prompt: string) => {
         prompts.push(prompt);
-        return { ok: true as const, value: "Recent diary summary: tired after work, better suited to warm recovery music." };
+        return {
+          ok: true as const,
+          value: [
+            "Summary: Recent diary summary: tired after work, better suited to warm recovery music.",
+            "Listening hint: Choose low-pressure, warm, emotionally steady music."
+          ].join("\n")
+        };
       }
     };
 
@@ -218,11 +229,30 @@ describe("diary adapter", () => {
 
     expect(first).toEqual({
       filePath: entry,
-      summary: "Recent diary summary: tired after work, better suited to warm recovery music."
+      summary: "Recent diary summary: tired after work, better suited to warm recovery music.",
+      listeningHint: "Choose low-pressure, warm, emotionally steady music."
     });
     expect(second).toEqual(first);
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain("Do not quote raw diary text");
+    expect(prompts[0]).toContain("Listening hint:");
+  });
+
+  it("derives a diary listening hint for legacy cached summaries", async () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const entry = path.join(diaryDir, "entry.md");
+    fs.writeFileSync(entry, "I felt exhausted after a heavy workday.");
+    const entryDate = new Date("2026-05-18T10:00:00.000Z");
+    fs.utimesSync(entry, entryDate, entryDate);
+    const config = makeConfig({ diary: { enabled: true, path: diaryDir } });
+
+    const first = await readDiaryContextWithLlmSummary(config, {
+      generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "unused" }),
+      generateText: async () => ({ ok: true as const, value: "Recent diary summary: exhausted after work." })
+    });
+
+    expect(first?.listeningHint).toContain("low-pressure");
   });
 
   it("falls back to metadata diary summary when LLM summary is unavailable", async () => {
@@ -241,7 +271,8 @@ describe("diary adapter", () => {
 
     expect(context).toEqual({
       filePath: entry,
-      summary: "Latest diary file: entry.md, modified 2026-05-18T10:00:00.000Z."
+      summary: "Latest diary file: entry.md, modified 2026-05-18T10:00:00.000Z.",
+      listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
     });
   });
 });
@@ -266,6 +297,28 @@ describe("context builder", () => {
     expect(context.weather).toBeNull();
     expect(context.calendar.available).toBe(true);
     expect(context.tastePath).toBe(config.paths.taste);
+  });
+
+  it("does not fetch weather when weather context is disabled", async () => {
+    const config = makeConfig({ weather: { enabled: false, location: "Shanghai" } });
+    let fetchCalls = 0;
+
+    const context = await buildContext(config, {
+      now: new Date("2026-05-17T09:00:00+08:00"),
+      calendarRunner: async () => ({
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        code: 0
+      }),
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error("weather should not be fetched");
+      }
+    });
+
+    expect(context.weather).toBeNull();
+    expect(fetchCalls).toBe(0);
   });
 
   it("stores today's calendar events during normal context building", async () => {

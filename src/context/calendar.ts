@@ -15,11 +15,13 @@ export type CalendarContext =
       available: true;
       events: CalendarEvent[];
       summary: string;
+      listeningHint: string;
     }
   | {
       available: false;
       events: [];
       summary: string;
+      listeningHint: string;
       warning: string;
     };
 
@@ -79,7 +81,8 @@ export async function readCalendarContext(
     return {
       available: true,
       events,
-      summary: summarizeCalendarEvents(events, window)
+      summary: summarizeCalendarEvents(events, window),
+      listeningHint: buildCalendarListeningHint(events, window)
     };
   } catch (error) {
     return unavailableCalendar(normalizeCalendarWarning(error instanceof Error ? error.message : String(error)));
@@ -142,6 +145,34 @@ export function summarizeCalendarEvents(events: CalendarEvent[], window: Calenda
     .join("; ")}.`;
 }
 
+export function buildCalendarListeningHint(events: CalendarEvent[], window: CalendarReadWindow = "today"): string {
+  const label = calendarWindowSummaryLabel(window);
+  if (events.length === 0) {
+    return `Calendar listening hint for ${label}: no events found, so do not overfit music to calendar pressure.`;
+  }
+
+  const eventCount = events.length;
+  const titles = events.map((event) => event.title.toLowerCase()).join(" ");
+  const hints: string[] = [];
+  if (eventCount >= 4) {
+    hints.push("busy schedule favors low-friction music, short DJ talk, and steady pacing");
+  } else if (eventCount >= 2) {
+    hints.push("some scheduled context favors clear transitions and music that does not demand too much attention");
+  } else {
+    hints.push("light schedule pressure leaves room for a more open listening arc");
+  }
+  if (/\b(meeting|sync|review|standup|call|interview|planning|1:1|one on one)\b/.test(titles)) {
+    hints.push("meeting-heavy context suggests focus before events and decompression after them");
+  }
+  if (/\b(gym|workout|run|training|yoga|walk)\b/.test(titles)) {
+    hints.push("physical-activity context can support momentum, recovery, or warm-up music");
+  }
+  if (/\b(dinner|date|party|family|friend|social)\b/.test(titles)) {
+    hints.push("social context can support warmer, more human selections");
+  }
+  return `Calendar listening hint for ${label}: ${hints.join("; ")}.`;
+}
+
 export function runOsaScript(script: string, timeoutMs: number): Promise<{ stdout: string; stderr: string; timedOut: boolean; code: number | null }> {
   return new Promise((resolve) => {
     const child: ChildProcess = spawn("osascript", ["-e", script], { stdio: ["ignore", "pipe", "pipe"] });
@@ -177,6 +208,7 @@ function unavailableCalendar(warning: string): CalendarContext {
     available: false,
     events: [],
     summary: "Calendar context unavailable.",
+    listeningHint: "Calendar listening hint unavailable.",
     warning
   };
 }

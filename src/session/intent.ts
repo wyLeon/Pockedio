@@ -1,4 +1,4 @@
-import type { LlmClient } from "../llm/llmClient.js";
+import type { LlmClient, LlmRequestOptions } from "../llm/llmClient.js";
 
 export type SessionIntentType =
   | "conversation"
@@ -21,10 +21,12 @@ export type SessionIntentType =
   | "feedback_favorite"
   | "feedback_save_vibe"
   | "taste_profile_update"
+  | "session_memory_update"
   | "playback_status"
   | "pause"
   | "resume"
   | "stop"
+  | "session_exit"
   | "explicit_dj_audio_request";
 
 export type SessionIntent = {
@@ -58,14 +60,16 @@ const intentTypes = new Set<SessionIntentType>([
   "feedback_favorite",
   "feedback_save_vibe",
   "taste_profile_update",
+  "session_memory_update",
   "playback_status",
   "pause",
   "resume",
   "stop",
+  "session_exit",
   "explicit_dj_audio_request"
 ]);
 
-export async function parseIntent(input: string, llm?: LlmClient): Promise<SessionIntent> {
+export async function parseIntent(input: string, llm?: LlmClient, options: LlmRequestOptions = {}): Promise<SessionIntent> {
   const deterministic = parseDeterministicIntent(input);
   if (deterministic.confidence === "high" || !llm) {
     return deterministic;
@@ -80,10 +84,12 @@ export async function parseIntent(input: string, llm?: LlmClient): Promise<Sessi
       "Use playback_request only when the user asks to start music with words like play, put on, queue, or start.",
       "Use single_track_playback when the user asks to play one specific song title, especially 'play [song] by [artist]'.",
       "Use music_recommendation when the user asks what music they should listen to but does not ask to play it.",
-      "Use explicit_dj_audio_request only when the user asks for spoken/audio DJ narration.",
+      "Use explicit_dj_audio_request only when the user asks for standalone spoken/audio DJ narration; the runner will redirect this toward station DJ mode.",
+      "Use session_exit only when the user explicitly says quit or exit.",
       `Message: ${input}`
     ].join("\n"),
-    "{ type: one supported intent string, confidence: high | medium | low }"
+    "{ type: one supported intent string, confidence: high | medium | low }",
+    options
   );
   if (!result.ok) {
     return deterministic;
@@ -111,7 +117,10 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\bresume\b/.test(text)) {
     return { type: "resume", confidence: "high" };
   }
-  if (/\b(stop|quit|exit|shut up)\b/.test(text)) {
+  if (/^(quit|exit)$/i.test(text) || /\b(quit|exit)\b/.test(text)) {
+    return { type: "session_exit", confidence: "high" };
+  }
+  if (/\b(stop|shut up)\b/.test(text)) {
     return { type: "stop", confidence: "high" };
   }
   if (isIdentityCapabilityText(text)) {
@@ -120,6 +129,10 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(update|refresh|rebuild|summarize)\b.*\b(taste profile|taste\.md|music taste|taste memory)\b/.test(text)
     || /\b(taste profile|taste\.md|music taste|taste memory)\b.*\b(update|refresh|rebuild|summarize)\b/.test(text)) {
     return { type: "taste_profile_update", confidence: "high" };
+  }
+  if (/\b(summarize|update|refresh|save)\b.*\b(session memory|this session|memory)\b/.test(text)
+    || /\b(session memory|this session|memory)\b.*\b(summarize|update|refresh|save)\b/.test(text)) {
+    return { type: "session_memory_update", confidence: "high" };
   }
   if (/\b(never play|ban|block|don't play this artist|do not play this artist)\b/.test(text)) {
     return { type: "feedback_ban", confidence: "high" };

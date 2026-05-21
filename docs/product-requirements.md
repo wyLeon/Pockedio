@@ -36,7 +36,9 @@ User-active playback must not trigger DJ voice mode by default. In this mode, Po
 
 ### 3. Pockedio-Active Morning DJ
 
-Every weekday at the configured Morning DJ ready time, Pockedio should generate a morning DJ audio segment, play the generated audio file directly, and start the day with music.
+Every weekday at the configured Morning DJ ready time, Pockedio should generate a morning DJ program and announce that it is ready. It should not start audio by itself. The terminal prompt should let the user press Enter to play now, type `later` to keep the program available, or type `skip` to dismiss it. A scheduled morning program expires six hours after the configured ready time.
+
+For MVP, a scheduled DJ program means a context-aware spoken host opening plus a five-track station. It still shows the lineup and normal now-playing surface in the terminal once playback starts. Compared with a normal five-song station, the difference is that the station is scheduled, uses morning/evening context, and starts with the selected DJ voice when FishAudio succeeds.
 
 The morning DJ should use:
 
@@ -47,11 +49,13 @@ The morning DJ should use:
 
 The morning segment should feel like a personal radio host: concise, contextual, and musically useful. It should not over-explain private source material.
 
-The user is the listener, not the reviewer of the generated file. The audio should be treated as the final output and played directly rather than presented for approval.
+The user is the listener, not the reviewer of the generated file. The prompt is playback consent, not content approval. Only after the user confirms should Pockedio play the DJ audio and start the music station.
 
 ### 4. Pockedio-Active Evening DJ
 
-Every weekday at the configured Evening DJ ready time, Pockedio should generate an evening DJ audio segment, play the generated audio file directly, and start a station for transition, decompression, commute, or continued focus.
+Every weekday at the configured Evening DJ ready time, Pockedio should generate an evening DJ program and announce that it is ready. It should not start audio by itself. The terminal prompt should let the user press Enter to play now, type `later` to keep the program available, or type `skip` to dismiss it. A scheduled evening program expires six hours after the configured ready time.
+
+The evening program has the same MVP shape: a short spoken DJ opening, then a visible five-track station with normal playback controls and queue display.
 
 The evening DJ should use:
 
@@ -60,15 +64,15 @@ The evening DJ should use:
 - recent mood check-ins and playback feedback
 - diary summaries only when explicitly allowed
 
-The evening segment is the second scheduled DJ voice moment. Outside enabled scheduled DJ windows, Pockedio should avoid spoken DJ audio unless the user explicitly asks Pockedio to create a DJ-like audio segment.
+The evening segment is the second scheduled DJ voice moment. Outside enabled scheduled DJ windows, Pockedio should avoid spoken DJ audio unless the user chooses a spoken DJ station/program before playback starts.
 
-### 5. User-Requested DJ Audio
+### 5. User-Requested DJ Program Audio
 
-The user can explicitly ask Pockedio to create a DJ-like audio segment. This is separate from normal user-active playback.
+The user can choose a spoken DJ version after Pockedio shapes a station. This is a before-playback fork, not a standalone voice-clip command.
 
-When this happens, Pockedio should generate concise DJ copy, synthesize it through the local Fish TTS model, and play the resulting audio. The audio may introduce a station, summarize a vibe, or create a personal radio-style moment. This mode is opt-in and should not be inferred from a normal "play music" request.
+When this happens, Pockedio should generate station/program DJ copy, synthesize it through the local Fish TTS model, and start only after the user confirms playback. This mode is opt-in and should not be inferred from a normal "play music" request.
 
-The generated DJ audio is not an artifact for review. It should be played directly for the user as the only intended audience.
+Standalone 10-15 second DJ voice clips should not be generated; they add latency and routing complexity without a meaningful listening payoff.
 
 ### 6. Automatic Mood Check-In Suggestions
 

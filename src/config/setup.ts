@@ -39,7 +39,8 @@ type NetEaseQualityMenuValue = NetEaseQualityLevel | "back";
 
 type SetupAnswers = {
   neteaseBaseUrl: string;
-  weatherLocation: string;
+  weatherEnabled: boolean;
+  weatherLocation?: string;
   calendarEnabled: boolean;
   diaryEnabled: boolean;
   diaryPath?: string;
@@ -281,12 +282,14 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
     }
   ]);
 
+  console.log("");
+  console.log("Context");
   const weatherGate = await inquirer.prompt<Pick<FirstSetupAnswers, "useWeather">>([
     {
       type: "confirm",
       name: "useWeather",
       message: "Use local weather for better DJ context?",
-      default: true
+      default: current.weather.enabled
     }
   ]);
 
@@ -545,10 +548,17 @@ export async function promptForAdvancedSetup(current: PockedioConfig): Promise<S
       default: current.netease.baseUrl
     },
     {
+      type: "confirm",
+      name: "weatherEnabled",
+      message: "Context permissions - enable weather context",
+      default: current.weather.enabled
+    },
+    {
       type: "input",
       name: "weatherLocation",
       message: "Context permissions - weather city",
-      default: current.weather.location
+      default: current.weather.location,
+      when: (answers) => answers.weatherEnabled
     },
     {
       type: "confirm",
@@ -701,6 +711,7 @@ export function buildConfigFromFirstSetupAnswers(current: PockedioConfig, answer
         : answers.neteaseQualityLevel ?? current.netease.qualityLevel
     },
     weather: {
+      enabled: answers.useWeather,
       location: answers.useWeather
         ? answers.weatherLocation || current.weather.location
         : current.weather.location
@@ -767,7 +778,10 @@ export function buildConfigFromAnswers(current: PockedioConfig, answers: SetupAn
       baseUrl: answers.neteaseBaseUrl
     },
     weather: {
-      location: answers.weatherLocation
+      enabled: answers.weatherEnabled,
+      location: answers.weatherEnabled
+        ? answers.weatherLocation || current.weather.location
+        : current.weather.location
     },
     calendar: {
       enabled: answers.calendarEnabled
@@ -1079,6 +1093,7 @@ async function setupCalendarContext(config: PockedioConfig): Promise<CalendarCon
       available: false,
       events: [],
       summary: "Calendar context unavailable.",
+      listeningHint: "Calendar listening hint unavailable.",
       warning: permission.warning
     };
   }

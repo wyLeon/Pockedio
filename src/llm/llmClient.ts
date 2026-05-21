@@ -11,9 +11,13 @@ export type LlmResult<T> =
       error: string;
     };
 
+export type LlmRequestOptions = {
+  signal?: AbortSignal;
+};
+
 export type LlmClient = {
-  generateJson<T = unknown>(prompt: string, schemaDescription: string): Promise<LlmResult<T>>;
-  generateText(prompt: string): Promise<LlmResult<string>>;
+  generateJson<T = unknown>(prompt: string, schemaDescription: string, options?: LlmRequestOptions): Promise<LlmResult<T>>;
+  generateText(prompt: string, options?: LlmRequestOptions): Promise<LlmResult<string>>;
 };
 
 export class UnavailableLlmClient implements LlmClient {

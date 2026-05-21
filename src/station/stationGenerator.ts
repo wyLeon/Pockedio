@@ -15,6 +15,7 @@ export type GenerateStationInput = {
   context?: Partial<PockedioContext>;
   provider?: MusicProvider;
   llm?: StationLlmClient;
+  signal?: AbortSignal;
 };
 
 type StationJsonResponse = {
@@ -38,9 +39,10 @@ const providerSearchArtist = "__provider_search__";
 export async function generateStation(input: GenerateStationInput): Promise<GeneratedStation> {
   const provider = input.provider ?? new NetEaseProvider(input.config);
   const llm = input.llm ?? createLlmClient(input.config);
+  throwIfAborted(input.signal);
   const artistRequest = parseArtistStationRequest(input.request);
   if (artistRequest) {
-    const artistTracks = await resolveArtistStation(artistRequest.artist, provider);
+    const artistTracks = await resolveArtistStation(artistRequest.artist, provider, input.signal);
     return {
       request: input.request,
       source: "fallback",
@@ -49,8 +51,9 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
   }
   const tasteSummary = readTasteSummary(input.config.paths.taste);
   const plan = await planTracks(input, llm, tasteSummary);
+  throwIfAborted(input.signal);
   const plannedTracks = applyTasteSignalConstraints(plan.tracks, input, tasteSummary);
-  const tracks = await Promise.all(plannedTracks.map((track, index) => resolveTrack(track, index + 1, provider, input.request)));
+  const tracks = await Promise.all(plannedTracks.map((track, index) => resolveTrack(track, index + 1, provider, input.request, input.signal)));
 
   return {
     request: input.request,
@@ -59,9 +62,11 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
   };
 }
 
-async function resolveArtistStation(artist: string, provider: MusicProvider): Promise<StationTrack[]> {
+async function resolveArtistStation(artist: string, provider: MusicProvider, signal?: AbortSignal): Promise<StationTrack[]> {
   try {
+    throwIfAborted(signal);
     const candidates = await provider.search({ keyword: artist }, 25);
+    throwIfAborted(signal);
     const tracks: StationTrack[] = [];
     const seen = new Set<string>();
 
@@ -77,6 +82,7 @@ async function resolveArtistStation(artist: string, provider: MusicProvider): Pr
       seen.add(key);
 
       const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+      throwIfAborted(signal);
       if (!playable.available) {
         continue;
       }
@@ -139,7 +145,7 @@ async function planTracks(
   tasteSummary: string
 ): Promise<TrackPlan> {
   const prompt = buildStationPrompt(input, tasteSummary);
-  const llmResult = await llm.generateJson<StationJsonResponse>(prompt, stationSchema);
+  const llmResult = await llm.generateJson<StationJsonResponse>(prompt, stationSchema, { signal: input.signal });
   if (llmResult.ok) {
     const parsed = parseStationTracks(llmResult.value);
     if (parsed.length >= 5) {
@@ -161,10 +167,14 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     `User request: ${input.request}`,
     `Taste summary: ${tasteSummary}`,
     `Generated taste profile: ${input.context?.tasteProfile?.summary ?? "No generated taste profile yet."}`,
+    `Session memory summaries: ${formatMemorySummariesForPrompt(context?.memorySummaries ?? [])}`,
     `Time context: ${context?.timeOfDay ?? "unknown"} ${context?.now ?? ""}`.trim(),
     `Calendar summary: ${context?.calendar?.summary ?? "not available"}`,
+    `Calendar listening hint: ${context?.calendar?.listeningHint ?? "not available"}`,
     `Weather summary: ${context?.weather?.summary ?? "not available"}`,
+    `Weather listening hint: ${context?.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${context?.diary?.summary ?? "not available"}`,
+    `Diary listening hint: ${context?.diary?.listeningHint ?? "not available"}`,
     `Personality profile: ${JSON.stringify(context?.personality ?? input.config.personality)}`,
     `Recent feedback/session summary: ${JSON.stringify(context?.recentSessions ?? [])}`,
     `Taste feedback signals: ${formatTasteSignalsForPrompt(context?.tasteSignals ?? [])}`,
@@ -182,6 +192,13 @@ function formatTasteSignalsForPrompt(signals: PockedioContext["tasteSignals"]): 
     signal.targetValue,
     `weight ${signal.weight}`
   ].join(": ")).join(" | ");
+}
+
+function formatMemorySummariesForPrompt(summaries: PockedioContext["memorySummaries"]): string {
+  if (summaries.length === 0) {
+    return "No session memory summaries yet.";
+  }
+  return summaries.slice(0, 5).map((summary) => summary.content.replace(/\s+/g, " ").trim()).join(" | ");
 }
 
 function parseStationTracks(value: StationJsonResponse): PlannedStationTrack[] {
@@ -304,20 +321,24 @@ async function resolveTrack(
   track: PlannedStationTrack,
   position: number,
   provider: MusicProvider,
-  request: string
+  request: string,
+  signal?: AbortSignal
 ): Promise<StationTrack> {
   const keyword = track.artist === providerSearchArtist ? track.title : `${track.title} ${track.artist}`.trim();
   try {
+    throwIfAborted(signal);
     const candidates = await provider.search({ keyword }, shouldUseStrictQuietScoring(request) ? 10 : 1);
+    throwIfAborted(signal);
     if (candidates.length === 0) {
       return unavailableStationTrack(track, position, "No provider search result.");
     }
-    const resolved = await resolveBestPlayableCandidate(track, position, candidates, provider, request);
+    const resolved = await resolveBestPlayableCandidate(track, position, candidates, provider, request, signal);
     if (resolved) {
       return resolved;
     }
     const firstCandidate = candidates[0];
     const playable = await provider.getPlayableUrl(firstCandidate.providerTrackId);
+    throwIfAborted(signal);
     return stationTrackFromCandidate(track, position, firstCandidate, playable);
   } catch (error) {
     return unavailableStationTrack(track, position, error instanceof Error ? error.message : String(error));
@@ -329,16 +350,19 @@ async function resolveBestPlayableCandidate(
   position: number,
   candidates: MusicTrackCandidate[],
   provider: MusicProvider,
-  request: string
+  request: string,
+  signal?: AbortSignal
 ): Promise<StationTrack | null> {
   if (!shouldUseStrictQuietScoring(request)) {
     const candidate = candidates[0];
     const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+    throwIfAborted(signal);
     return stationTrackFromCandidate(planned, position, candidate, playable);
   }
 
   let best: { candidate: MusicTrackCandidate; playable: PlayableTrack; score: number } | null = null;
   for (const candidate of candidates) {
+    throwIfAborted(signal);
     const playable = await provider.getPlayableUrl(candidate.providerTrackId);
     if (!playable.available) {
       continue;
@@ -396,6 +420,14 @@ function stationTrackFromCandidate(
     providerTrackId: candidate.providerTrackId,
     playable
   };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    const error = new Error("Station generation was cancelled.");
+    error.name = "AbortError";
+    throw error;
+  }
 }
 
 function unavailableStationTrack(planned: PlannedStationTrack, position: number, reason: string): StationTrack {

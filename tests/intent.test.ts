@@ -10,7 +10,7 @@ describe("parseIntent", () => {
     });
   });
 
-  it("maps explicit DJ audio requests to explicit DJ audio", async () => {
+  it("routes standalone DJ audio requests to the deprecated standalone DJ audio path", async () => {
     await expect(parseIntent("make me a spoken DJ intro for tonight")).resolves.toEqual({
       type: "explicit_dj_audio_request",
       confidence: "high"
@@ -145,6 +145,21 @@ describe("parseIntent", () => {
     });
   });
 
+  it("keeps stop as playback control and quit or exit as session exit", async () => {
+    await expect(parseIntent("stop")).resolves.toEqual({
+      type: "stop",
+      confidence: "high"
+    });
+    await expect(parseIntent("quit")).resolves.toEqual({
+      type: "session_exit",
+      confidence: "high"
+    });
+    await expect(parseIntent("exit")).resolves.toEqual({
+      type: "session_exit",
+      confidence: "high"
+    });
+  });
+
   it("classifies identity and capability questions before music routing", async () => {
     for (const input of [
       "Who are you?",
@@ -166,6 +181,17 @@ describe("parseIntent", () => {
     });
     await expect(parseIntent("refresh taste.md")).resolves.toEqual({
       type: "taste_profile_update",
+      confidence: "high"
+    });
+  });
+
+  it("classifies explicit session memory update requests", async () => {
+    await expect(parseIntent("summarize this session")).resolves.toEqual({
+      type: "session_memory_update",
+      confidence: "high"
+    });
+    await expect(parseIntent("update memory")).resolves.toEqual({
+      type: "session_memory_update",
       confidence: "high"
     });
   });

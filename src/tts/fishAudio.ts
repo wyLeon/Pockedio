@@ -16,7 +16,8 @@ export type FishAudioProcessResult = {
 export type FishAudioProcessRunner = (
   command: string,
   args: string[],
-  timeoutMs?: number
+  timeoutMs?: number,
+  signal?: AbortSignal
 ) => Promise<FishAudioProcessResult>;
 
 export type FishAudioResult =
@@ -35,6 +36,7 @@ export type FishAudioResult =
 export type FishAudioOptions = {
   timeoutMs?: number;
   runner?: FishAudioProcessRunner;
+  signal?: AbortSignal;
 };
 
 export async function synthesizeFishAudio(
@@ -70,7 +72,7 @@ export async function synthesizeFishAudio(
     "--output",
     audioPath,
     ...referenceArgs
-  ], options.timeoutMs);
+  ], options.timeoutMs, options.signal);
 
   const latencyMs = Date.now() - startedAt;
   if (!result.ok) {
@@ -121,19 +123,45 @@ export function resolveRuntimePath(value: string): string {
 export function runFishAudioProcess(
   command: string,
   args: string[],
-  timeoutMs = 120_000
+  timeoutMs = 120_000,
+  signal?: AbortSignal
 ): Promise<FishAudioProcessResult> {
   return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve({
+        ok: false,
+        exitCode: null,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        error: "FishAudio synthesis was cancelled."
+      });
+      return;
+    }
+
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+
+    const abort = () => {
+      if (settled) {
+        return;
+      }
+      child.kill("SIGTERM");
+      forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+      forceKillTimer.unref();
+    };
+
+    signal?.addEventListener("abort", abort, { once: true });
 
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
         child.kill("SIGTERM");
-        setTimeout(() => child.kill("SIGKILL"), 1_000).unref();
+        forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+        forceKillTimer.unref();
       }, timeoutMs);
     }
 
@@ -152,6 +180,10 @@ export function runFishAudioProcess(
       if (timer) {
         clearTimeout(timer);
       }
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
+      signal?.removeEventListener("abort", abort);
       resolve({
         ok: false,
         exitCode: null,
@@ -162,7 +194,7 @@ export function runFishAudioProcess(
       });
     });
 
-    child.on("close", (exitCode, signal) => {
+    child.on("close", (exitCode, processSignal) => {
       if (settled) {
         return;
       }
@@ -170,10 +202,14 @@ export function runFishAudioProcess(
       if (timer) {
         clearTimeout(timer);
       }
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
+      signal?.removeEventListener("abort", abort);
       resolve({
         ok: exitCode === 0,
         exitCode,
-        signal,
+        signal: processSignal,
         stdout,
         stderr,
         error: exitCode === 0 ? undefined : stderr.trim() || `Process exited with code ${exitCode ?? "null"}`

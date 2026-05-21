@@ -67,6 +67,20 @@ export type RecentSessionSummary = {
   triggerText: string;
 };
 
+export type MessageRecord = {
+  role: MessageRole;
+  content: string;
+  createdAt: string;
+};
+
+export type MemorySummaryRecord = {
+  id: string;
+  sourceSessionId: string | null;
+  content: string;
+  metadata: unknown;
+  createdAt: string;
+};
+
 export type TasteSignalInput = {
   sourceFeedbackId?: string | null;
   trackId?: string | null;
@@ -136,6 +150,15 @@ export class MemoryStore {
       VALUES (?, ?, ?, ?, ?)
     `).run(id, sessionId, role, content, nowIso());
     return id;
+  }
+
+  getSessionMessages(sessionId: string): MessageRecord[] {
+    return this.db.prepare(`
+      SELECT role, content, created_at as createdAt
+      FROM messages
+      WHERE session_id = ?
+      ORDER BY created_at ASC, rowid ASC
+    `).all(sessionId) as MessageRecord[];
   }
 
   addStationTrack(sessionId: string, track: StationTrackInput): string {
@@ -269,6 +292,24 @@ export class MemoryStore {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(id, kind, sourceSessionId ?? null, content, metadata === undefined ? null : JSON.stringify(metadata), nowIso());
     return id;
+  }
+
+  addSessionSummary(sessionId: string, content: string, metadata?: unknown): string {
+    return this.addMemoryItem("summary", content, metadata, sessionId);
+  }
+
+  getRecentMemorySummaries(limit: number): MemorySummaryRecord[] {
+    const rows = this.db.prepare(`
+      SELECT id, source_session_id as sourceSessionId, content, metadata_json as metadataJson, created_at as createdAt
+      FROM memory_items
+      WHERE kind = 'summary'
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT ?
+    `).all(limit) as Array<Omit<MemorySummaryRecord, "metadata"> & { metadataJson: string | null }>;
+    return rows.map(({ metadataJson, ...row }) => ({
+      ...row,
+      metadata: parseJson(metadataJson)
+    }));
   }
 
   addContextSnapshot(sessionId: string, context: ContextSnapshotInput): string {

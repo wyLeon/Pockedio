@@ -8,6 +8,7 @@ import { MemoryStore } from "../memory/store.js";
 export type DiaryContext = {
   filePath: string;
   summary: string;
+  listeningHint: string;
 };
 
 export function readDiaryContext(config: PockedioConfig): DiaryContext | null {
@@ -27,7 +28,7 @@ export function readDiaryContext(config: PockedioConfig): DiaryContext | null {
   const stat = fs.statSync(latest);
   return {
     filePath: latest,
-    summary: `Latest diary file: ${path.basename(latest)}, modified ${stat.mtime.toISOString()}.`
+    ...metadataDiarySummary(latest, stat.mtime.toISOString())
   };
 }
 
@@ -45,9 +46,11 @@ export async function readDiaryContextWithLlmSummary(
   try {
     const cached = store.getDiarySummary(latest.filePath, latest.sourceMtime);
     if (cached) {
+      const parsed = parseDiarySummaryPayload(cached.summary);
       return {
         filePath: latest.filePath,
-        summary: cached.summary
+        summary: parsed.summary,
+        listeningHint: parsed.listeningHint
       };
     }
 
@@ -56,20 +59,20 @@ export async function readDiaryContextWithLlmSummary(
       return metadataDiaryContext(latest.filePath);
     }
 
-    const summary = result.value.trim();
-    if (!summary) {
+    const parsed = parseDiarySummaryPayload(result.value.trim());
+    if (!parsed.summary) {
       return metadataDiaryContext(latest.filePath);
     }
 
     store.upsertDiarySummary({
       sourceFile: latest.filePath,
       sourceMtime: latest.sourceMtime,
-      summary
+      summary: formatDiarySummaryPayload(parsed)
     });
 
     return {
       filePath: latest.filePath,
-      summary
+      ...parsed
     };
   } finally {
     store.close();
@@ -96,7 +99,7 @@ function metadataDiaryContext(filePath: string): DiaryContext {
   const stat = fs.statSync(filePath);
   return {
     filePath,
-    summary: `Latest diary file: ${path.basename(filePath)}, modified ${stat.mtime.toISOString()}.`
+    ...metadataDiarySummary(filePath, stat.mtime.toISOString())
   };
 }
 
@@ -104,14 +107,58 @@ function buildDiarySummaryPrompt(filePath: string): string {
   const content = fs.readFileSync(filePath, "utf8").slice(0, 8_000);
   return [
     "Summarize this diary entry for Pockedio, a local personal DJ.",
-    "Use 3-5 concise sentences.",
-    "Focus on recent emotional context, energy level, work/life pressure, and what music setting may fit.",
+    "Return exactly two labeled lines:",
+    "Summary: 2-3 concise sentences about recent emotional context, energy level, and work/life pressure.",
+    "Listening hint: one concise sentence about what music setting may fit.",
     "Do not diagnose the user. Do not infer personality type. Do not quote raw diary text.",
     "Avoid names or sensitive details unless essential.",
     "",
     "Diary entry:",
     content
   ].join("\n");
+}
+
+function metadataDiarySummary(filePath: string, sourceMtime: string): Omit<DiaryContext, "filePath"> {
+  const summary = `Latest diary file: ${path.basename(filePath)}, modified ${sourceMtime}.`;
+  return {
+    summary,
+    listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
+  };
+}
+
+function parseDiarySummaryPayload(value: string): Omit<DiaryContext, "filePath"> {
+  const summaryMatch = value.match(/^Summary:\s*(.+?)(?:\nListening hint:|\n*$)/is);
+  const hintMatch = value.match(/^Listening hint:\s*(.+)$/im);
+  const summary = summaryMatch?.[1]?.trim() || value.trim();
+  const listeningHint = hintMatch?.[1]?.trim() || deriveDiaryListeningHint(summary);
+  return {
+    summary,
+    listeningHint
+  };
+}
+
+function formatDiarySummaryPayload(input: Omit<DiaryContext, "filePath">): string {
+  return [
+    `Summary: ${input.summary}`,
+    `Listening hint: ${input.listeningHint}`
+  ].join("\n");
+}
+
+function deriveDiaryListeningHint(summary: string): string {
+  const text = summary.toLowerCase();
+  if (/\b(exhausted|tired|drained|overloaded|burned out|heavy work|pressure|stress|stressed)\b/.test(text)) {
+    return "Choose low-pressure, warm, emotionally steady music; avoid harsh textures, hype language, or dense vocals.";
+  }
+  if (/\b(peaceful|calm|quiet|relieved|gentle)\b/.test(text)) {
+    return "Support the calm with gentle pacing and uncluttered textures.";
+  }
+  if (/\b(excited|celebrat|energized|momentum|breakthrough)\b/.test(text)) {
+    return "Allow brighter momentum while keeping the set personal rather than generic hype.";
+  }
+  if (/\b(reflective|nostalg|transition|closure|miss|memory)\b/.test(text)) {
+    return "Favor reflective, warm, and spacious music that can hold memory without becoming too heavy.";
+  }
+  return "Use diary context lightly; choose music that fits the user's recent emotional energy without over-explaining it.";
 }
 
 function findLatestDiaryFile(root: string): string | null {

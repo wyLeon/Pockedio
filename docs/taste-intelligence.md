@@ -42,6 +42,8 @@ Generated taste profile updates must preserve user edits. Pockedio should write 
 
 Everything outside that block belongs to the user. Listening feedback should first become structured local `taste_signals`; `taste.md` should be refreshed only when the user explicitly asks or when a future background consolidation policy is accepted.
 
+Session memory summaries should feed recommendation context, but they should not rewrite `taste.md` directly. They can provide supporting evidence when the user explicitly asks Pockedio to refresh the taste profile.
+
 ## Source 3: Diary Context
 
 The user's diary under `/Users/leonw/openclaw/area/diary` may be an important source for understanding emotional context, recurring life patterns, work intensity, projects, and personal seasons.
@@ -54,6 +56,8 @@ Diary data should be used carefully. It is not music taste by itself, but it can
 - nostalgia, transition, closure, or momentum
 
 The product should not read diary files by default. Diary access should be explicit, local-first, and explainable. When access is granted, Morning DJ should read the latest diary entry and combine it with durable diary memory. The system should summarize relevant patterns into taste and context memory rather than repeatedly exposing raw diary entries to every station-generation step.
+
+Diary context should expose two layers: a private local summary for richer DJ reasoning, and a shorter listening hint for music prompts. The listening hint should describe fit, pacing, energy, and sensitivity without carrying unnecessary personal detail.
 
 ## Source 4: User Personality Profile
 

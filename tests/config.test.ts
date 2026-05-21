@@ -147,6 +147,7 @@ describe("config load and save", () => {
     const current = loadConfig(env);
     const config = buildConfigFromAnswers(current, {
       neteaseBaseUrl: current.netease.baseUrl,
+      weatherEnabled: current.weather.enabled,
       weatherLocation: current.weather.location,
       calendarEnabled: current.calendar.enabled,
       diaryEnabled: false,
@@ -201,6 +202,7 @@ describe("config load and save", () => {
     const current = loadConfig(env);
     const config = buildConfigFromAnswers(current, {
       neteaseBaseUrl: current.netease.baseUrl,
+      weatherEnabled: current.weather.enabled,
       weatherLocation: current.weather.location,
       calendarEnabled: current.calendar.enabled,
       diaryEnabled: false,
@@ -262,9 +264,30 @@ describe("config load and save", () => {
     });
     expect(config.fishAudio.referenceAudioPath).toBe(path.join(os.homedir(), ".pockedio", "audio", "previews", "nova.wav"));
     expect(config.fishAudio.referenceText).toBe("Nova here. Bright rhythm, clean motion, and just enough spark to move.");
+    expect(config.weather.enabled).toBe(true);
     expect(config.weather.location).toBe("Guangzhou");
     expect(config.calendar.enabled).toBe(false);
     expect(config.diary).toEqual({ enabled: true, path: "/Users/leonw/Diary" });
+  });
+
+  it("disables weather from first setup when user skips weather context", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+    current.weather.location = "Guangzhou";
+
+    const config = buildConfigFromFirstSetupAnswers(current, {
+      djChoice: "Mina",
+      listenToDjTrial: false,
+      importTasteNow: false,
+      useWeather: false,
+      useCalendar: false,
+      useDiary: false
+    });
+
+    expect(config.weather).toEqual({
+      enabled: false,
+      location: "Guangzhou"
+    });
   });
 
   it("builds first setup music provider account settings", () => {
@@ -452,7 +475,8 @@ describe("config load and save", () => {
       precipitation: 0,
       weatherCode: 0,
       windSpeed: 8,
-      summary: "Weather in Guangzhou, China: 28C, humidity 95%, precipitation 0, wind 8 km/h."
+      summary: "Weather in Guangzhou, China: 28C, humidity 95%, precipitation 0, wind 8 km/h.",
+      listeningHint: "Weather listening hint for Guangzhou, China: high humidity suggests slower, airier, less heavy selections."
     })).toBe([
       "Weather ready",
       "  Location          Guangzhou, China",
@@ -498,6 +522,7 @@ describe("config load and save", () => {
       available: false,
       events: [],
       summary: "Calendar context unavailable.",
+      listeningHint: "Calendar listening hint unavailable.",
       warning: "Not authorized to send Apple events to Calendar."
     })).toBe([
       "Calendar unavailable.",
@@ -509,7 +534,8 @@ describe("config load and save", () => {
   it("formats diary setup checks", () => {
     expect(formatDiarySetupSummary({
       filePath: "/Users/leonw/Diary/2026-05-18.md",
-      summary: "Latest diary file: 2026-05-18.md, modified 2026-05-18T10:00:00.000Z."
+      summary: "Latest diary file: 2026-05-18.md, modified 2026-05-18T10:00:00.000Z.",
+      listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
     })).toBe([
       "Diary ready",
       "  Path              /Users/leonw/Diary",

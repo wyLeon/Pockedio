@@ -224,6 +224,30 @@ describe("database migrations", () => {
         { role: "user", content: "play something for focus" },
         { role: "pockedio", content: "I will keep it clean and direct." }
       ]);
+      expect(store.getSessionMessages(sessionId)).toMatchObject([
+        { role: "user", content: "play something for focus" },
+        { role: "pockedio", content: "I will keep it clean and direct." }
+      ]);
+    });
+  });
+
+  it("stores and queries session memory summaries", () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+      const sessionId = store.createSession("conversation", "interactive session");
+
+      const summaryId = store.addSessionSummary(sessionId, "Session memory summary:\n- Listening/taste signals: I like quiet piano.", {
+        messageCount: 4
+      });
+
+      expect(store.getRecentMemorySummaries(5)).toEqual([{
+        id: summaryId,
+        sourceSessionId: sessionId,
+        content: "Session memory summary:\n- Listening/taste signals: I like quiet piano.",
+        metadata: { messageCount: 4 },
+        createdAt: expect.any(String)
+      }]);
     });
   });
 

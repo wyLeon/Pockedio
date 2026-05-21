@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { PockedioConfig } from "../config/schema.js";
-import type { LlmClient, LlmResult } from "./llmClient.js";
+import type { LlmClient, LlmRequestOptions, LlmResult } from "./llmClient.js";
 import { UnavailableLlmClient } from "./llmClient.js";
 
 export function createLlmClient(config: PockedioConfig, env: NodeJS.ProcessEnv = process.env): LlmClient {
@@ -21,7 +21,7 @@ export class OpenAiLlmClient implements LlmClient {
     this.model = config.llm.model;
   }
 
-  async generateJson<T = unknown>(prompt: string, schemaDescription: string): Promise<LlmResult<T>> {
+  async generateJson<T = unknown>(prompt: string, schemaDescription: string, options: LlmRequestOptions = {}): Promise<LlmResult<T>> {
     try {
       const completion = await this.client.chat.completions.create({
         model: this.model,
@@ -38,7 +38,7 @@ export class OpenAiLlmClient implements LlmClient {
           },
           { role: "user", content: prompt }
         ]
-      });
+      }, { signal: options.signal });
       const content = completion.choices[0]?.message.content;
       if (!content) {
         return { ok: false, errorCode: "llm_error", error: "OpenAI returned empty content." };
@@ -56,7 +56,7 @@ export class OpenAiLlmClient implements LlmClient {
     }
   }
 
-  async generateText(prompt: string): Promise<LlmResult<string>> {
+  async generateText(prompt: string, options: LlmRequestOptions = {}): Promise<LlmResult<string>> {
     try {
       const completion = await this.client.chat.completions.create({
         model: this.model,
@@ -67,7 +67,7 @@ export class OpenAiLlmClient implements LlmClient {
           },
           { role: "user", content: prompt }
         ]
-      });
+      }, { signal: options.signal });
       const content = completion.choices[0]?.message.content;
       if (!content) {
         return { ok: false, errorCode: "llm_error", error: "OpenAI returned empty content." };

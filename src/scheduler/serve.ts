@@ -29,8 +29,18 @@ import {
 } from "./jobs.js";
 
 export type ScheduledDjKind = "morning" | "evening";
+export type ScheduledDjPlaybackDecision = "play" | "later" | "skip";
 export type ScheduledDjResult =
-  | { ran: true; sessionId: string; text: string; station: GeneratedStation; djAudio: FishAudioResult }
+  | {
+      ran: true;
+      sessionId: string;
+      text: string;
+      djAudio: FishAudioResult;
+      decision: ScheduledDjPlaybackDecision;
+      playbackStarted: boolean;
+      expiresAt: string;
+      station?: GeneratedStation;
+    }
   | { ran: false; reason: string };
 export type ScheduledDjPreparationResult =
   | { ran: true; text: string; audioPath: string | null; targetPlayTime: string }
@@ -46,6 +56,7 @@ export type ScheduledDjInput = {
   synthesizeFishAudio?: (config: PockedioConfig, text: string) => Promise<FishAudioResult>;
   playFile?: (filePath: string) => Promise<PlayerResult>;
   playUrl?: (url: string) => Promise<PlayerResult>;
+  promptPlayback?: (message: string) => Promise<ScheduledDjPlaybackDecision>;
   writeOutput?: (text: string) => void;
 };
 
@@ -84,12 +95,19 @@ export type MoodCheckResult = {
 export async function runScheduledDjJob(input: ScheduledDjInput): Promise<ScheduledDjResult> {
   const config = input.config ?? loadConfig();
   const now = input.now ?? new Date();
+  const writeOutput = input.writeOutput ?? (() => undefined);
   runMigrations(config);
+  if (!input.context) {
+    writeOutput(`Reading ${input.kind} DJ context...`);
+  }
   const context = input.context ?? await buildContext(config, {
-    now,
-    calendarWindow: "last7DaysAndToday",
-    calendarSource: "scheduled"
-  });
+      now,
+      calendarWindow: "last7DaysAndToday",
+      calendarSource: "scheduled"
+    });
+  if (!input.context) {
+    writeOutput("Context ready.");
+  }
   if (calendarLooksBusy(context.calendar.summary)) {
     return { ran: false, reason: "Calendar indicates an active meeting." };
   }
@@ -104,7 +122,7 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
   const playFile = input.playFile ?? ((filePath) => playAudioFile(filePath, 60_000));
   const playUrl = input.playUrl ?? ((url) => playAudioUrl(url));
-  const writeOutput = input.writeOutput ?? (() => undefined);
+  const promptPlayback = input.promptPlayback ?? promptScheduledDjPlayback;
   const store = new MemoryStore(config);
   const triggerType = input.kind === "morning" ? "scheduled_morning" : "scheduled_evening";
   const sessionId = store.createSession(triggerType, `${input.kind} scheduled DJ`);
@@ -117,10 +135,19 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
       personality: context.personality
     });
     const targetPlayTime = formatLocalDateTime(getScheduledDjTargetPlayTime(input.kind, now, config));
+    const defaultExpiresAt = getScheduledAudioCacheExpiresAt(input.kind, now, config);
+    if (formatLocalDateTime(now) > defaultExpiresAt) {
+      return { ran: false, reason: `Scheduled ${input.kind} DJ program expired at ${defaultExpiresAt}.` };
+    }
     const prepared = getPreparedScheduledDj(config, input.kind, targetPlayTime, now);
+    const expiresAt = prepared?.audioCacheExpiresAt ?? defaultExpiresAt;
+    if (prepared) {
+      writeOutput("Using prepared DJ program.");
+    } else {
+      writeOutput("Writing scheduled DJ program...");
+    }
     const text = prepared?.text ?? await generateScheduledDjText({ kind: input.kind, llm, context, personaName: persona.persona.name });
     store.addMessage(sessionId, "pockedio", text);
-    writeOutput(text);
 
     const djAudio = prepared?.audioPath
       ? { ok: true as const, audioPath: prepared.audioPath, latencyMs: 0 }
@@ -129,28 +156,49 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
           userExplicitlyRequestedDjAudio: false,
           now
         })
-        ? await synthesize(config, text)
+        ? await synthesizeScheduledDjAudio(config, text, writeOutput, synthesize)
         : { ok: false as const, latencyMs: 0, error: "Voice rules disabled scheduled audio." };
+
+    const preparationId = prepared?.id ?? savePreparedScheduledDj(config, {
+      kind: input.kind,
+      targetPlayTime,
+      audioCacheExpiresAt: expiresAt,
+      personaId: persona.id,
+      text,
+      audioPath: djAudio.ok ? djAudio.audioPath : null,
+      status: djAudio.ok ? "generated" : "text_fallback",
+      contextSummary: context.calendar.summary
+    });
+    const readyMessage = formatScheduledDjReadyMessage(input.kind, expiresAt);
+    writeOutput(readyMessage);
+    const decision = await promptPlayback(readyMessage);
+
+    if (decision === "skip") {
+      deletePreparedScheduledDj(config, preparationId);
+      return { ran: true, sessionId, text, djAudio, decision, playbackStarted: false, expiresAt };
+    }
+
+    if (decision === "later") {
+      return { ran: true, sessionId, text, djAudio, decision, playbackStarted: false, expiresAt };
+    }
 
     if (djAudio.ok) {
       const playback = await playFile(djAudio.audioPath);
       store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath, playback.ok ? "played" : "failed", {
-        cacheExpiresAt: prepared?.audioCacheExpiresAt ?? getScheduledAudioCacheExpiresAt(input.kind, now, config),
+        cacheExpiresAt: expiresAt,
         latencyMs: djAudio.latencyMs
       });
-      if (prepared) {
-        updatePreparedScheduledDjStatus(config, prepared.id, playback.ok ? "played" : "failed");
-      }
+      updatePreparedScheduledDjStatus(config, preparationId, playback.ok ? "played" : "failed");
     } else {
+      writeOutput(text);
       store.recordDjAudio(sessionId, input.kind, persona.id, text, djAudio.audioPath ?? null, "text_fallback", {
-        cacheExpiresAt: prepared?.audioCacheExpiresAt ?? getScheduledAudioCacheExpiresAt(input.kind, now, config),
+        cacheExpiresAt: expiresAt,
         latencyMs: djAudio.latencyMs
       });
-      if (prepared) {
-        updatePreparedScheduledDjStatus(config, prepared.id, "text_fallback");
-      }
+      updatePreparedScheduledDjStatus(config, preparationId, "text_fallback");
     }
 
+    writeOutput("Building scheduled station...");
     const station = await generateStation({
       request: scheduledStationRequest(input.kind, context),
       config,
@@ -161,10 +209,12 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
     storeStation(sessionId, store, station);
     const firstPlayable = station.tracks.find((track) => track.playable.available);
     if (firstPlayable?.playable.available) {
+      writeOutput(formatScheduledDjLineup(station, firstPlayable.position));
+      writeOutput(formatScheduledNowPlaying(firstPlayable, station.tracks.length));
       await playUrl(firstPlayable.playable.playableUrl);
     }
 
-    return { ran: true, sessionId, text, station, djAudio };
+    return { ran: true, sessionId, text, station, djAudio, decision, playbackStarted: Boolean(firstPlayable), expiresAt };
   } finally {
     store.endSession(sessionId);
     store.close();
@@ -174,12 +224,19 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
 export async function prepareScheduledDjJob(input: ScheduledDjPreparationInput): Promise<ScheduledDjPreparationResult> {
   const config = input.config ?? loadConfig();
   const now = input.now ?? new Date();
+  const writeOutput = input.writeOutput ?? (() => undefined);
   runMigrations(config);
+  if (!input.context) {
+    writeOutput(`Reading ${input.kind} DJ context...`);
+  }
   const context = input.context ?? await buildContext(config, {
     now,
     calendarWindow: "last7DaysAndToday",
     calendarSource: "scheduled"
   });
+  if (!input.context) {
+    writeOutput("Context ready.");
+  }
   if (calendarLooksBusy(context.calendar.summary)) {
     return { ran: false, reason: "Calendar indicates an active meeting." };
   }
@@ -191,29 +248,30 @@ export async function prepareScheduledDjJob(input: ScheduledDjPreparationInput):
 
   const llm = input.llm ?? createLlmClient(config);
   const synthesize = input.synthesizeFishAudio ?? synthesizeFishAudioDefault;
-  const writeOutput = input.writeOutput ?? (() => undefined);
   const targetPlayTime = formatLocalDateTime(getScheduledDjTargetPlayTime(input.kind, now, config));
 
+  writeOutput("Writing scheduled DJ program...");
   const text = await generateScheduledDjText({ kind: input.kind, llm, context, personaName: persona.persona.name });
-  writeOutput(text);
   const djAudio = shouldUseSpokenDjAudio({
     triggerType: input.kind === "morning" ? "scheduled_morning" : "scheduled_evening",
     userExplicitlyRequestedDjAudio: false,
     now: getScheduledDjTargetPlayTime(input.kind, now, config)
   })
-    ? await synthesize(config, text)
+    ? await synthesizeScheduledDjAudio(config, text, writeOutput, synthesize)
     : { ok: false as const, latencyMs: 0, error: "Voice rules disabled scheduled audio." };
 
+  const audioCacheExpiresAt = getScheduledAudioCacheExpiresAt(input.kind, now, config);
   savePreparedScheduledDj(config, {
     kind: input.kind,
     targetPlayTime,
-    audioCacheExpiresAt: getScheduledAudioCacheExpiresAt(input.kind, now, config),
+    audioCacheExpiresAt,
     personaId: persona.id,
     text,
     audioPath: djAudio.ok ? djAudio.audioPath : null,
     status: djAudio.ok ? "generated" : "text_fallback",
     contextSummary: context.calendar.summary
   });
+  writeOutput(formatScheduledDjPreparedMessage(input.kind, targetPlayTime, audioCacheExpiresAt));
 
   return {
     ran: true,
@@ -329,11 +387,19 @@ async function generateScheduledDjText(input: {
     : "frame remaining agenda, decompression, commute, continued focus, or transition";
   const result = await input.llm.generateText([
     `Write concise English copy for ${scene}.`,
+    "This is a spoken opening, not the full program transcript.",
+    "Keep it under 70 words.",
     `Persona: ${input.personaName}.`,
     `Goal: ${emphasis}.`,
+    "Mention the moment and ease into the first track.",
+    "Do not list every track.",
+    "Do not tell the user to press play, click play, or start playback; the CLI controls playback outside this spoken script.",
     `Calendar: ${input.context.calendar.summary}`,
+    `Calendar listening hint: ${input.context.calendar.listeningHint}`,
     `Weather: ${input.context.weather?.summary ?? "not available"}`,
+    `Weather listening hint: ${input.context.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${input.context.diary?.summary ?? "not available"}`,
+    `Diary listening hint: ${input.context.diary?.listeningHint ?? "not available"}`,
     `Personality: ${JSON.stringify(input.context.personality)}`
   ].join("\n"));
   if (result.ok) {
@@ -348,6 +414,63 @@ function scheduledStationRequest(kind: ScheduledDjKind, context: PockedioContext
   return kind === "morning"
     ? `morning focus station for ${context.timeOfDay}`
     : "evening transition station for decompression or continued focus";
+}
+
+function formatScheduledDjReadyMessage(kind: ScheduledDjKind, expiresAt: string): string {
+  const label = kind === "morning" ? "Morning" : "Evening";
+  return [
+    `${label} DJ program is ready.`,
+    "",
+    "Press Enter to play now, type \"later\" to keep it, or type \"skip\" to dismiss.",
+    `Available for 6 hours, until ${formatScheduledExpiryForUser(expiresAt)}.`
+  ].join("\n");
+}
+
+function formatScheduledDjPreparedMessage(kind: ScheduledDjKind, targetPlayTime: string, expiresAt: string): string {
+  const label = kind === "morning" ? "Morning" : "Evening";
+  return `${label} DJ program prepared for ${targetPlayTime}. Available for 6 hours, until ${formatScheduledExpiryForUser(expiresAt)}.`;
+}
+
+function formatScheduledExpiryForUser(expiresAt: string): string {
+  const expiry = new Date(expiresAt);
+  const now = new Date();
+  const time = `${pad(expiry.getHours())}:${pad(expiry.getMinutes())}`;
+  if (expiry.toDateString() === now.toDateString()) {
+    return `${time} today`;
+  }
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (expiry.toDateString() === tomorrow.toDateString()) {
+    return `${time} tomorrow`;
+  }
+  return `${time} on ${expiry.getFullYear()}-${pad(expiry.getMonth() + 1)}-${pad(expiry.getDate())}`;
+}
+
+function formatScheduledDjLineup(station: GeneratedStation, currentPosition: number): string {
+  return [
+    "DJ program lineup:",
+    ...station.tracks.map((track) => {
+      const marker = track.position === currentPosition ? ">" : " ";
+      const suffix = track.playable.available ? "" : " (unavailable)";
+      return `${marker} ${track.position}. ${track.title} - ${track.artist}${suffix}`;
+    })
+  ].join("\n");
+}
+
+function formatScheduledNowPlaying(track: GeneratedStation["tracks"][number], totalTracks: number): string {
+  return `Now playing: ${track.position}/${totalTracks}  ${track.title} - ${track.artist}`;
+}
+
+async function synthesizeScheduledDjAudio(
+  config: PockedioConfig,
+  text: string,
+  writeOutput: (text: string) => void,
+  synthesize: (config: PockedioConfig, text: string) => Promise<FishAudioResult>
+): Promise<FishAudioResult> {
+  writeOutput("Preparing scheduled DJ voice...");
+  const result = await synthesize(config, text);
+  writeOutput(result.ok ? "Scheduled DJ voice ready." : "Scheduled DJ voice unavailable; text fallback is ready.");
+  return result;
 }
 
 function storeStation(sessionId: string, store: MemoryStore, station: GeneratedStation): void {
@@ -396,8 +519,9 @@ type PreparedScheduledDjInput = {
   contextSummary: string;
 };
 
-function savePreparedScheduledDj(config: PockedioConfig, input: PreparedScheduledDjInput): void {
+function savePreparedScheduledDj(config: PockedioConfig, input: PreparedScheduledDjInput): string {
   const database = new Database(config.paths.database);
+  const id = randomUUID();
   try {
     database.prepare(`
       INSERT INTO scheduled_dj_preparations (
@@ -405,7 +529,7 @@ function savePreparedScheduledDj(config: PockedioConfig, input: PreparedSchedule
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      randomUUID(),
+      id,
       input.kind,
       input.targetPlayTime,
       new Date().toISOString(),
@@ -416,6 +540,7 @@ function savePreparedScheduledDj(config: PockedioConfig, input: PreparedSchedule
       input.status,
       input.contextSummary
     );
+    return id;
   } finally {
     database.close();
   }
@@ -432,7 +557,7 @@ function getPreparedScheduledDj(
     const row = database.prepare(`
       SELECT id, text, audio_path as audioPath, audio_cache_expires_at as audioCacheExpiresAt
       FROM scheduled_dj_preparations
-      WHERE kind = ? AND target_play_time = ? AND status = 'generated' AND audio_path IS NOT NULL
+      WHERE kind = ? AND target_play_time = ? AND status IN ('generated', 'text_fallback')
         AND (audio_cache_expires_at IS NULL OR audio_cache_expires_at > ?)
       ORDER BY prepared_at DESC
       LIMIT 1
@@ -445,7 +570,7 @@ function getPreparedScheduledDj(
 
 function getScheduledAudioCacheExpiresAt(kind: ScheduledDjKind, date: Date, config: PockedioConfig): string {
   const target = getScheduledDjTargetPlayTime(kind, date, config);
-  return formatLocalDateTime(new Date(target.getTime() + 24 * 60 * 60 * 1000));
+  return formatLocalDateTime(new Date(target.getTime() + 6 * 60 * 60 * 1000));
 }
 
 function updatePreparedScheduledDjStatus(
@@ -456,6 +581,15 @@ function updatePreparedScheduledDjStatus(
   const database = new Database(config.paths.database);
   try {
     database.prepare("UPDATE scheduled_dj_preparations SET status = ? WHERE id = ?").run(status, id);
+  } finally {
+    database.close();
+  }
+}
+
+function deletePreparedScheduledDj(config: PockedioConfig, id: string): void {
+  const database = new Database(config.paths.database);
+  try {
+    database.prepare("DELETE FROM scheduled_dj_preparations WHERE id = ?").run(id);
   } finally {
     database.close();
   }
@@ -493,10 +627,35 @@ async function promptMoodCheck(): Promise<MoodCheckPromptResult> {
   };
 }
 
+async function promptScheduledDjPlayback(message: string): Promise<ScheduledDjPlaybackDecision> {
+  void message;
+  if (!process.stdin.isTTY) {
+    return "later";
+  }
+  const answer = await inquirer.prompt<{ decision: string }>([{
+    type: "input",
+    name: "decision",
+    message: "Scheduled DJ",
+    default: ""
+  }]);
+  const normalized = answer.decision.trim().toLowerCase();
+  if (normalized === "" || normalized === "play" || normalized === "yes" || normalized === "y") {
+    return "play";
+  }
+  if (normalized === "skip" || normalized === "dismiss") {
+    return "skip";
+  }
+  return "later";
+}
+
 function calendarLooksBusy(summary: string): boolean {
   return /\b(active meeting|meeting is active|in a meeting|busy now|currently in)\b/i.test(summary);
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pad(value: number): string {
+  return value.toString().padStart(2, "0");
 }

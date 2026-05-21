@@ -207,6 +207,13 @@ describe("generateStation", () => {
           weight: 3,
           context: { stationRequest: "play soft jazz" },
           createdAt: "2026-05-21T00:00:00.000Z"
+        }],
+        memorySummaries: [{
+          id: "summary-1",
+          sourceSessionId: "session-1",
+          content: "Session memory summary:\n- Listening/taste signals: User likes patient winter piano.",
+          metadata: { messageCount: 6 },
+          createdAt: "2026-05-21T00:00:00.000Z"
         }]
       }
     });
@@ -214,6 +221,10 @@ describe("generateStation", () => {
     expect(observedPrompt).toContain("Taste feedback signals:");
     expect(observedPrompt).toContain("positive_seed: track: Blue in Green - Miles Davis: weight 3");
     expect(observedPrompt).toContain("Generated profile says late-night piano is durable.");
+    expect(observedPrompt).toContain("Session memory summaries:");
+    expect(observedPrompt).toContain("User likes patient winter piano.");
+    expect(observedPrompt).toContain("Calendar listening hint:");
+    expect(observedPrompt).toContain("Diary listening hint:");
   });
 
   it("uses feedback signals in fallback searches and filters banned artists", async () => {

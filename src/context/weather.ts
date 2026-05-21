@@ -7,6 +7,7 @@ export type WeatherContext = {
   weatherCode: number | null;
   windSpeed: number | null;
   summary: string;
+  listeningHint: string;
 };
 
 export async function readWeatherContext(location: string, fetchImpl: typeof fetch = fetch): Promise<WeatherContext | null> {
@@ -42,11 +43,40 @@ export async function readWeatherContext(location: string, fetchImpl: typeof fet
 
     return {
       ...context,
-      summary: `Weather in ${context.matchedLocation}: ${context.temperatureC ?? "unknown"}C, humidity ${context.relativeHumidity ?? "unknown"}%, precipitation ${context.precipitation ?? "unknown"}, wind ${context.windSpeed ?? "unknown"} km/h.`
+      summary: `Weather in ${context.matchedLocation}: ${context.temperatureC ?? "unknown"}C, humidity ${context.relativeHumidity ?? "unknown"}%, precipitation ${context.precipitation ?? "unknown"}, wind ${context.windSpeed ?? "unknown"} km/h.`,
+      listeningHint: buildListeningHint(context)
     };
   } catch {
     return null;
   }
+}
+
+function buildListeningHint(context: {
+  matchedLocation: string;
+  temperatureC: number | null;
+  relativeHumidity: number | null;
+  precipitation: number | null;
+  windSpeed: number | null;
+}): string {
+  const hints: string[] = [];
+  if (context.temperatureC !== null && context.temperatureC >= 30) {
+    hints.push("hot weather favors lighter textures and less crowded openings");
+  } else if (context.temperatureC !== null && context.temperatureC <= 8) {
+    hints.push("cold weather can support warmer tones and steadier pacing");
+  }
+  if (context.relativeHumidity !== null && context.relativeHumidity >= 80) {
+    hints.push("high humidity suggests slower, airier, less heavy selections");
+  }
+  if (context.precipitation !== null && context.precipitation > 0) {
+    hints.push("rain can support reflective, intimate, or steady music");
+  }
+  if (context.windSpeed !== null && context.windSpeed >= 25) {
+    hints.push("windy conditions can support cleaner momentum and less fragile textures");
+  }
+  if (hints.length === 0) {
+    hints.push("weather is mild, so do not overfit the music to it");
+  }
+  return `Weather listening hint for ${context.matchedLocation}: ${hints.join("; ")}.`;
 }
 
 async function getJson<T>(url: string, fetchImpl: typeof fetch): Promise<T> {

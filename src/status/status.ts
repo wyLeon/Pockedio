@@ -51,6 +51,7 @@ export type StatusReport = {
     enabled: boolean;
   };
   weather: {
+    enabled: boolean;
     location: string;
   };
   taste: {
@@ -105,6 +106,7 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
       enabled: config.calendar.enabled
     },
     weather: {
+      enabled: config.weather.enabled,
       location: config.weather.location
     },
     taste: {
@@ -278,7 +280,7 @@ export function formatStatusReport(report: StatusReport): string {
     `- LLM: ${report.llm.apiKeyPresent ? "configured" : "missing API key"} (${formatLlmStatus(report.llm)})`,
     `- FishAudio: ${report.fishAudio.pathsPresent ? "paths present" : "missing paths"}`,
     `- Calendar: ${report.calendar.enabled ? "enabled" : "disabled"}`,
-    `- Weather: ${report.weather.location}`,
+    `- Weather: ${report.weather.enabled ? report.weather.location : "disabled"}`,
     "",
     "Memory",
     `- Config: ${report.config.present ? "present" : "missing"} (${report.config.path})`,

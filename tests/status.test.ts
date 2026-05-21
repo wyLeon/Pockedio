@@ -59,6 +59,7 @@ describe("status report", () => {
     expect(report.database).toMatchObject({ present: true, migrated: true });
     expect(report.netease.reachable).toBe(true);
     expect(report.calendar.enabled).toBe(true);
+    expect(report.weather.enabled).toBe(true);
     expect(report.weather.location).toBe("Shanghai");
     expect(report.llm).toMatchObject({
       provider: "OpenAI-compatible",
@@ -115,7 +116,7 @@ describe("status report", () => {
         missing: []
       },
       calendar: { enabled: true },
-      weather: { location: "Shanghai" },
+      weather: { enabled: true, location: "Shanghai" },
       taste: { path: "/tmp/taste.md", present: true },
       personas: { path: "/tmp/personas.json", present: true },
       latestSessionTimestamp: "2026-05-19T02:00:00.000Z"
@@ -127,6 +128,7 @@ describe("status report", () => {
     expect(text).toContain("Integrations");
     expect(text).toContain("- NetEase music: reachable (account-backed, exhigh, http://127.0.0.1:3000)");
     expect(text).toContain("- LLM: configured (OpenAI-compatible, deepseek-chat, https://api.deepseek.com, key env DEEPSEEK_API_KEY)");
+    expect(text).toContain("- Weather: Shanghai");
     expect(text).toContain("Memory");
     expect(text).toContain("- Last session: 2026-05-19T02:00:00.000Z");
     expect(text).toContain("Data boundary");

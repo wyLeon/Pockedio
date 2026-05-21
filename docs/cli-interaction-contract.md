@@ -19,7 +19,7 @@ Pockedio has several interaction branches:
 - conversation during playback
 - queue and playback status
 - feedback controls
-- explicit DJ audio
+- spoken DJ station/program mode
 - scheduled DJ jobs
 - error and fallback states
 
@@ -227,13 +227,19 @@ Rules:
 In an interactive terminal, Pockedio may animate processing lines:
 
 ```text
-| Thinking...
-/ Thinking...
-- Thinking...
-\ Thinking...
+| Thinking...  Ctrl+C to cancel
+/ Thinking...  Ctrl+C to cancel
+- Thinking...  Ctrl+C to cancel
+\ Thinking...  Ctrl+C to cancel
 ```
 
 When the step finishes, the spinner should clear or resolve before the main output appears.
+
+Interrupt rule:
+
+- At the idle prompt, Ctrl+C exits the CLI session.
+- During processing, Ctrl+C cancels the in-flight turn, prints `Cancelled.`, and returns to the prompt.
+- If playback already started, cancellation is too late; use `stop`, `pause`, or `next`.
 
 ### Non-TTY Or Test Output
 
@@ -351,6 +357,19 @@ Planned sections:
 11. `pockedio status` flow.
 12. `pockedio serve` scheduled DJ flow.
 13. Error and fallback flow catalog.
+
+Scheduled DJ playback consent:
+
+- At the configured Morning or Evening DJ ready time, `pockedio serve` should deliver a ready program, not auto-play audio.
+- The readiness surface is: `Morning DJ program is ready.` or `Evening DJ program is ready.`
+- Follow with: `Press Enter to play now, type "later" to keep it, or type "skip" to dismiss.`
+- Show the expiration timestamp. MVP scheduled programs expire six hours after their configured ready time.
+- Enter starts the spoken DJ intro and then the station. `later` keeps the program available. `skip` dismisses it.
+- If the terminal is non-interactive, keep the program for later and do not start audio.
+- The spoken DJ script must not tell the user to press play; playback consent lives in the CLI prompt.
+- Write the expiry in user-readable local time, for example `Available for 6 hours, until 23:00 today.`, not as an ISO timestamp.
+- After Enter, show the DJ program lineup and `Now playing` surface before or as music starts.
+- MVP definition: a scheduled DJ program is a short spoken host opening plus a five-track scheduled station. It is different from normal playback because it arrives at a configured time, uses morning/evening context, and starts with the selected DJ voice when FishAudio succeeds.
 
 ## Section 2: Setup Decision Tree
 
@@ -496,6 +515,8 @@ If no, setup continues without extra text.
 ### Weather
 
 ```text
+Context
+
 Use local weather for better DJ context? [Y/n]
 ```
 
@@ -571,6 +592,14 @@ Diary ready
 
 Pockedio will use diary context lightly and locally.
 ```
+
+Diary usage rules:
+
+- Diary is emotional/situational context, not direct taste memory.
+- Raw diary text is never stored in SQLite.
+- The latest entry is summarized once per file version and cached locally.
+- Music prompts should prefer the diary listening hint over full personal detail.
+- If the configured LLM is remote, summary generation may send the latest diary excerpt to that LLM.
 
 If diary lookup fails:
 
@@ -659,8 +688,8 @@ preview missing/fails     -> show preview fallback, continue setup
 DJ choice                 -> set display name and persona preference
 taste yes                 -> ask playlist link -> import taste -> continue setup
 taste no                  -> continue setup
-weather yes               -> ask city -> check weather -> save city
-weather no                -> keep current/default city
+weather yes               -> ask city -> check weather -> save enabled=true + city
+weather no                -> save enabled=false and do not fetch weather during context reads
 calendar yes              -> request/check permission -> read last 7 days -> store title/time only
 calendar unavailable      -> disable calendar and continue setup
 diary yes                 -> ask path -> check latest diary file -> save path
@@ -753,6 +782,15 @@ normal conversation          -> read today, store as interactive context
 scheduled DJ                 -> read last 7 days + today, store as scheduled context
 ```
 
+Calendar usage rules:
+
+- Calendar is situational context, not taste memory.
+- Store title, calendar name, start time, end time, and all-day flag only.
+- Derive a short calendar listening hint from event count and event titles.
+- Use the hint in station generation, recommendation replies, station intros, scheduled DJ copy, and context-like conversation.
+- Do not read event notes, attendees, URLs, or locations.
+- Do not mention calendar in every response; use it when it improves the moment.
+
 ## 2.5 `pockedio import-taste <file>`
 
 This is not a setup subsection, but it is the current standalone import command.
@@ -794,6 +832,7 @@ Controls:
   next
   stop
   show queue
+  Ctrl+C exits, or cancels while processing
 
 Setup:
   pockedio setup
@@ -854,7 +893,7 @@ what’s playing?                  3.11 Queue And Status Questions
 show queue                       3.11 Queue And Status Questions
 dj, when a station is pending    3.5 Pending Station Confirmation
 Enter, when a station is pending 3.5 Pending Station Confirmation
-make me a short DJ intro         3.13 Explicit DJ Audio Request
+make me a short DJ intro         3.13 Standalone DJ Audio Deprecated
 yes / play it                    3.5 Pending Station Confirmation, if pending
 no / not now                     3.5 Pending Station Confirmation, if pending
 Who are you?                     3.3 Identity And Capability Questions
@@ -923,7 +962,7 @@ Example:
 ```text
 > Who are you?
 
-Mina is here. I’m your personal DJ for this terminal. I can talk with you, read the moment, shape a station, play music, remember useful taste signals, and make spoken DJ audio when you ask for it.
+Mina is here. I’m your personal DJ for this terminal. I can talk with you, read the moment, shape a station, play music, remember useful taste signals, and make a spoken DJ version when you choose it before playback.
 ```
 
 Example:
@@ -931,14 +970,14 @@ Example:
 ```text
 > What can you do?
 
-I can listen to what kind of moment you’re in, suggest a direction, build a station, control playback, show the queue, remember what works for you, and make a short spoken DJ intro when you ask.
+I can listen to what kind of moment you’re in, suggest a direction, build a station, control playback, show the queue, remember what works for you, and make a spoken DJ version when you choose it before playback.
 ```
 
 Rules:
 
 - Use the selected DJ name when answering identity questions: `Mina is here.` or `Nova is here.`
 - Do not repeat the startup greet `What are we tuning for?` in every answer.
-- Mention core capabilities: conversation, recommendations/stations, playback controls, queue/status, useful memory, explicit spoken DJ audio.
+- Mention core capabilities: conversation, recommendations/stations, playback controls, queue/status, useful memory, and before-playback spoken DJ station/program mode.
 - Mention memory carefully: `remember useful taste signals`, not `remember everything`.
 - Do not say `I am an AI language model`.
 - Do not mention therapy disclaimers unless the user asks for emotional or mental-health support.
@@ -948,7 +987,7 @@ Rules:
 Fallback if the LLM is unavailable:
 
 ```text
-Mina is here. I can still build stations, play music, control playback, show the queue, and make spoken DJ audio if voice is configured. Deeper conversation and personal context may be limited until the LLM is available.
+Mina is here. I can still build stations, play music, control playback, show the queue, and make spoken DJ station versions if voice is configured. Deeper conversation and personal context may be limited until the LLM is available.
 ```
 
 ## 3.4 Mood / Life Context Conversation
@@ -1431,7 +1470,7 @@ Rules:
 - During playback, questions and personal comments should not stop or replace music unless the user clearly asks for playback control.
 - During playback, current-track and artist questions should use the LLM conversation path with current track, rationale, and queue context.
 - During playback, `next` means skip current track and start the next playable track.
-- During playback, `stop` stops playback and ends the interactive session.
+- During playback, `stop` stops playback and keeps the interactive session open.
 - During playback, `pause` and `resume` are real controls when mpv is available; with ffplay/afplay fallback, pause stops audio and resume is unavailable.
 - During playback, `dj` is not a toggle. DJ mode is chosen before playback starts.
 - Replacement requests such as `play something else` may stop current playback and start a new station.
@@ -1516,7 +1555,7 @@ next / skip / next song / next track
   -> if the next track cannot start, show the playback detail, keep the CLI session open, and let the next `next` try the following track
 
 stop
-  -> stop current playback, mark current track skipped, end interactive session
+  -> stop current playback, mark current track skipped, keep the CLI session open
 
 pause
   -> with mpv: pause current playback and keep the session open
@@ -1677,7 +1716,31 @@ Rules:
 - Future station generation should use both `taste.md` and the latest generated taste profile.
 - A single `skip` or `like` should remain a signal only until enough feedback accumulates or the user explicitly asks for profile consolidation.
 
-## 3.13 Explicit DJ Audio Request
+### 3.12.2 Session Memory Growth
+
+Session memory is local-first and silent by default.
+
+Stored transcript:
+
+```text
+user input
+Pockedio text response
+auto-advance now-playing surfaces
+station-complete message
+```
+
+Rules:
+
+- Raw transcript rows remain in SQLite `messages`.
+- Session memory is generated automatically and silently when a session ends.
+- Durable summaries are stored as local `memory_items` with kind `summary`.
+- Summaries should capture useful requests, listening memories, preference language, and feedback/control signals.
+- Routine chatter without durable preference value should not create a summary.
+- Station generation reads recent session summaries during `Reading your context...` and uses them during `Building a station...`.
+- Manual session-memory commands may exist as internal/debug tools, but they should not be taught as normal listening-session behavior.
+- QMD or another memory index can be evaluated later, but SQLite remains the canonical source for now.
+
+## 3.13 Standalone DJ Audio Deprecated
 
 Examples:
 
@@ -1686,9 +1749,173 @@ make me a short DJ intro
 say something before the next track
 ```
 
+Output:
+
+```text
+DJ voice belongs to a station, not a loose clip. Tell Mina what kind of set you want; when I suggest it, type "dj" for a spoken DJ version.
+```
+
+Rules:
+
+- Do not generate or play a standalone 10-15 second DJ voice clip.
+- DJ voice is a before-playback fork for a pending station/program.
+- If a station is pending, `dj` prepares the spoken DJ version and asks the user to press Enter before playback starts.
+- If no station is pending, guide the user to describe the set first.
+- Scheduled DJ jobs may still generate spoken DJ programs.
+
 ## 3.14 Unknown / Fallback Conversation
 
 Use when the request is unclear, unsupported, or not actionable as music control.
+
+Fallback principle:
+
+- Normal conversation is the default.
+- Do not start playback, build a station, skip, pause, or change queue unless the user clearly asks for a playback action.
+- When unsure whether the user wants conversation or playback, ask one short clarifying question.
+- Keep the DJ voice human: answer the user first, then lightly connect to music only when useful.
+
+### 3.14.1 Plain Conversation
+
+Use when the user shares a thought, mood, memory, or question that does not request music.
+
+Input:
+
+```text
+> I'm tired today.
+```
+
+Processing:
+
+```text
+Thinking...
+```
+
+Output shape:
+
+```text
+That sounds heavy. Keep the evening low-pressure; if you want music for it, I can shape something gentle.
+```
+
+Rules:
+
+- Do not build a station automatically.
+- Do not say the sentence will be treated as taste unless the user clearly gives a lasting preference.
+- Store the transcript locally; durable memory is summarized silently at session end only when useful signals exist.
+
+### 3.14.2 Music Knowledge Question
+
+Use when the user asks about the current artist, singer, song, version, album, credits, or song background.
+
+Input:
+
+```text
+> Who is the singer?
+> Tell me about the singer.
+> What is the story behind this song?
+```
+
+Processing:
+
+```text
+Thinking...
+```
+
+Output shape:
+
+```text
+The listed artist here is Kenny Dorham, with Joe Henderson also credited on this track. Dorham was a lyrical hard-bop trumpeter, so this pick sits in a warm, late-night jazz lane.
+```
+
+Rules:
+
+- Use current playback facts first: title, artist, album/version if available.
+- Use LLM knowledge to explain background, but acknowledge uncertainty when facts are not available.
+- Never answer a music-background question by starting a new station.
+- Future enrichment may use Wikidata/Spotify only for factual grounding, not every turn.
+
+### 3.14.3 Ambiguous Playback Request
+
+Use when the wording might imply music, but the action is not clear enough.
+
+Input:
+
+```text
+> Something softer maybe?
+```
+
+Processing:
+
+```text
+Thinking...
+```
+
+Output shape:
+
+```text
+Do you want me to reshape the pending station softer, or just talk through the mood first?
+```
+
+Rules:
+
+- If a station suggestion is pending, treat natural adjustments as station refinement.
+- If no station is pending and no explicit playback command exists, ask a short clarifying question.
+- Do not surprise-start playback from ambiguous language.
+
+### 3.14.4 Unsupported Action
+
+Use when the user asks for something Pockedio cannot do yet.
+
+Input:
+
+```text
+> Crossfade this into Spotify.
+```
+
+Processing:
+
+```text
+Thinking...
+```
+
+Output shape:
+
+```text
+I can't hand this off to Spotify yet. I can keep playing here, skip, pause, show the queue, or build a new station.
+```
+
+Rules:
+
+- Say what is unavailable in one sentence.
+- Offer the nearest available action.
+- Do not over-apologize or expose internal implementation details.
+
+### 3.14.5 LLM Unavailable
+
+Use when the LLM cannot produce a usable answer.
+
+Input:
+
+```text
+> Tell me about this song.
+```
+
+Processing:
+
+```text
+Thinking...
+```
+
+Output shape:
+
+```text
+I can see the current track is Blue Bossa - Kenny Dorham, Joe Henderson. I do not have enough detail right now to give reliable background, but I can keep the queue moving or show what is next.
+```
+
+Rules:
+
+- Prefer current playback facts over generic command help.
+- Do not invent credits, history, or meaning.
+- If no track is playing, ask the user what they want to hear or talk about.
 
 ## 3.15 Session Exit
 
@@ -1699,6 +1926,32 @@ quit
 exit
 Ctrl+C
 ```
+
+Decision tree:
+
+```text
+quit / exit
+  -> stop active playback if needed
+  -> save useful session memory silently
+  -> end the CLI session
+  -> print: Session closed.
+
+Ctrl+C
+  -> stop active playback if needed
+  -> save useful session memory silently
+  -> close the CLI session
+
+stop
+  -> not a session-exit command
+  -> use 3.10 Playback Controls
+```
+
+Rules:
+
+- `quit` and `exit` are explicit session-exit words.
+- `stop` is a playback control, not an app exit.
+- `pause` and `resume` remain playback controls and must keep the session open.
+- Session exit should not run setup, build stations, or ask follow-up questions.
 
 ## Future Note: Music Knowledge Enrichment
 

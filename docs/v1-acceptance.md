@@ -4,9 +4,9 @@ This checklist maps the approved v1 design criteria to implementation and verifi
 
 ## Automated Verification
 
-- [ ] `npm run typecheck`
-- [ ] `npm test`
-- [ ] `npm run build`
+- [x] `npm run typecheck`
+- [x] `npm test`
+- [x] `npm run build`
 
 ## Manual Setup
 
@@ -18,7 +18,7 @@ This checklist maps the approved v1 design criteria to implementation and verifi
 
 ## Conversational Session
 
-- [ ] `npm run dev` opens the conversational DJ session.
+- [x] `npm run dev` opens the conversational DJ session.
 - [ ] Natural input such as `play something for deep work` is classified as playback intent.
 - [ ] Pockedio generates exactly five station tracks.
 - [ ] At least one track starts playback in the successful NetEase path, or unavailable tracks are reported without a crash.
@@ -27,12 +27,14 @@ This checklist maps the approved v1 design criteria to implementation and verifi
 - [ ] Ordinary playback does not call FishAudio and does not play spoken DJ audio.
 - [ ] User feedback phrases such as `more like this`, `skip this`, and `never play this artist again` are stored as feedback.
 
-## Explicit DJ Audio
+## Spoken DJ Program
 
-- [ ] Input such as `make me a short DJ intro for tonight` maps to explicit DJ audio intent.
-- [ ] Pockedio generates concise English DJ copy.
+- [ ] Standalone requests such as `make me a short DJ intro for tonight` do not generate or play loose DJ audio clips.
+- [ ] If no station is pending, Pockedio explains that DJ voice belongs to a station/program and asks the user to describe the set first.
+- [ ] If a station is pending, `dj` prepares a spoken DJ version.
+- [ ] Pockedio generates concise English DJ program copy.
 - [ ] FishAudio synthesizes local audio.
-- [ ] Generated DJ audio plays directly without a review step.
+- [ ] Generated DJ program audio starts only after the user confirms playback.
 - [ ] DJ audio text, audio path, and status are stored in SQLite.
 - [ ] If FishAudio fails, Pockedio shows fallback text and records `text_fallback`.
 
@@ -84,5 +86,61 @@ This checklist maps the approved v1 design criteria to implementation and verifi
 
 ## Current Evidence
 
+- Automated verification passed on 2026-05-21:
+  - `npm test`: 203 tests passed.
+  - `npm run typecheck`: passed.
+  - `npm run build`: passed.
 - Automated coverage includes config, database, personas, taste import, provider adapters, context adapters, voice rules, intent parsing, station generation, session runner, scheduler, and status command tests.
-- Manual smoke checks should be re-run before tagging or merging v1.
+- Manual PTY smoke checks passed on 2026-05-21:
+  - `npm run dev` opens the interactive session and shows startup guidance.
+  - 3.14 fallback conversation:
+    - `I'm tired today.` replies conversationally and does not start playback.
+    - `Something softer maybe?` asks whether to shape a station or keep talking.
+    - `Crossfade this into Spotify.` explains the unsupported external-app action and offers nearby controls.
+    - `Tell me about this song.` with no current track asks for a song/artist or a station context.
+  - 3.15 session boundary:
+    - `stop` keeps the CLI prompt open.
+    - `exit` closes the session with `Session closed.`
+    - `quit` closes the session with `Session closed.`
+    - Ctrl+C closes cleanly.
+  - Processing interrupt:
+    - Interactive status lines include `Ctrl+C to cancel`.
+    - Ctrl+C during processing cancels the in-flight turn and returns to the prompt.
+- Manual smoke checks still needed before tagging or merging v1:
+  - Full first-setup run on the user's machine.
+  - Member-only preview/full-length comparison for NetEase account playback.
+  - Ear-level FishAudio QA by the user, since this smoke pass verified generation/playback plumbing but not subjective audio quality.
+- Real-config smoke pass on 2026-05-21:
+  - `pockedio status` reported NetEase reachable with account-backed `exhigh` playback, FishAudio paths present, Calendar enabled, weather set to `guangzhou`, and the database migrated after the interactive run.
+  - Conversational fallback: `I'm tired today.` stayed conversational and did not start playback.
+  - Explicit playback: `play something for deep work` generated five tracks and started NetEase playback with `Weightless Part 1 - Marconi Union`.
+  - Current-track questions worked during playback: `who is the singer?` and `tell me about this song` answered against the active track.
+  - Controls worked on the real playback path: `next`, `pause`, `resume`, and `stop`.
+  - Pending-station path: `Want some soft jazz for coding` produced the Enter/`dj`/adjust prompt without starting playback.
+  - Real FishAudio DJ path: `dj` prepared a DJ program, Enter started the generated Mina intro, and NetEase playback started `Blue in Green - Miles Davis`.
+  - DJ transition behavior: first transition stayed quiet; a later manual `next` continued music with the “still preparing” notice instead of blocking.
+  - Standalone loose DJ clip request was rejected with the station/program guidance.
+  - SQLite stored the smoke transcript, station tracks, playback statuses, and the played DJ audio record.
+  - Regression found and fixed: background FishAudio transition synthesis could keep the CLI process alive after `exit`; DJ transition preparation is now cancellable on `stop`/`exit`.
+- NetEase member playback QA on 2026-05-21:
+  - Control track: `江南 - 林俊杰` (`provider_track_id` `108914`).
+  - Account-backed resolution returned a playable `exhigh` MP3 with `durationMs` `267946`.
+  - Anonymous resolution returned a 30-second preview and the provider marked it unavailable with the expected preview/login guidance.
+  - Public CLI command `play 江南 by 林俊杰` started the full `04:27` track, then `stop` marked the interactive playback row as `skipped`.
+  - `exit` closed the interactive session cleanly and no playback/audio child processes remained.
+- FishAudio DJ audio QA on 2026-05-21:
+  - Confirmed configured DJ reference: Mina, English, standard program, reference WAV `/Users/leonw/.pockedio/audio/previews/mina.wav`, `6.22s`, mono 44.1kHz Int16.
+  - Real CLI DJ attempt reached pending `dj`, but live station generation stayed on `Building a station...` for more than a minute and required Ctrl+C cancellation; this should be tracked as a station-generation/LLM timeout issue, separate from FishAudio.
+  - Controlled FishAudio/`afplay` harness played a real opening WAV: `/Users/leonw/.pockedio/audio/dj/1779343963684-d53e8bf0-3f24-4653-9ccf-59177382b771.wav`, `12.03s`, recorded `played`.
+  - Controlled harness waited for and played a real mid-program transition WAV: `/Users/leonw/.pockedio/audio/dj/1779344050688-293eb4b2-a9b1-4f6b-a9fd-ee49e11bef5b.wav`, `10.36s`, recorded `played`.
+  - Closing-focused harness played a real opening WAV and generated/played a real closing WAV: `/Users/leonw/.pockedio/audio/dj/1779344246545-6558f28b-23f6-4cac-a2b9-da4b9670505e.wav`, `7.76s`, recorded `played`.
+  - Final closing surface appeared before the station-complete prompt: `That station’s done. Press Enter to continue this vibe, or tell me where to take it next.`
+  - No `afplay`, FishAudio, MLX, or CLI child processes remained after the harnesses.
+- Scheduled DJ consent behavior added on 2026-05-21:
+  - Scheduled Morning/Evening jobs now announce that the DJ program is ready instead of auto-playing audio.
+  - The prompt supports Enter to play now, `later` to keep the program, and `skip` to dismiss it.
+  - Scheduled DJ program cache expiry is six hours after the configured ready time.
+  - The generated DJ script prompt now explicitly forbids telling the user to press play.
+  - Expiry is now shown as user-readable local time, for example `Available for 6 hours, until 23:00 today.`
+  - Scheduled DJ program copy is constrained as a short spoken opening, not a full transcript, to reduce FishAudio timeout risk.
+  - After confirmation, scheduled DJ playback shows the lineup and `Now playing` surface before starting the first track.
