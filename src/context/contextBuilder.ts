@@ -5,6 +5,7 @@ import type { LlmClient } from "../llm/llmClient.js";
 import { createLlmClient } from "../llm/openaiClient.js";
 import { MemoryStore, type CalendarEventSource, type MemorySummaryRecord, type RecentSessionSummary, type TasteProfileSnapshotRecord, type TasteSignalRecord } from "../memory/store.js";
 import { readCalendarContext, type CalendarContext, type CalendarProcessRunner, type CalendarReadWindow } from "./calendar.js";
+import { consolidateContextMemory } from "./contextMemory.js";
 import { readDiaryContextWithLlmSummary, type DiaryContext } from "./diary.js";
 import { readWeatherContext, type WeatherContext } from "./weather.js";
 
@@ -27,6 +28,7 @@ export type ContextBuilderOptions = {
   calendarRunner?: CalendarProcessRunner;
   calendarWindow?: CalendarReadWindow;
   calendarSource?: CalendarEventSource;
+  consolidateMemory?: boolean;
   fetchImpl?: typeof fetch;
   llm?: LlmClient;
 };
@@ -59,7 +61,7 @@ export async function buildContext(
       })));
     }
 
-    return {
+    const context: PockedioContext = {
       now: now.toISOString(),
       timeOfDay: getTimeOfDay(now),
       calendar,
@@ -68,10 +70,15 @@ export async function buildContext(
       tastePath: config.paths.taste,
       tasteSignals: store.getTasteSignals(30),
       tasteProfile: store.getLatestTasteProfileSnapshot(),
-      memorySummaries: store.getRecentMemorySummaries(5),
+      memorySummaries: [],
       personality: config.personality,
       recentSessions: store.getRecentSessionSummaries(5)
     };
+    if (options.consolidateMemory) {
+      consolidateContextMemory(store, context);
+    }
+    context.memorySummaries = store.getRecentMemoryItems(["summary", "agenda", "diary"], 5);
+    return context;
   } finally {
     store.close();
   }

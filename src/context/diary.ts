@@ -7,6 +7,7 @@ import { MemoryStore } from "../memory/store.js";
 
 export type DiaryContext = {
   filePath: string;
+  sourceMtime?: string;
   summary: string;
   listeningHint: string;
 };
@@ -28,6 +29,7 @@ export function readDiaryContext(config: PockedioConfig): DiaryContext | null {
   const stat = fs.statSync(latest);
   return {
     filePath: latest,
+    sourceMtime: stat.mtime.toISOString(),
     ...metadataDiarySummary(latest, stat.mtime.toISOString())
   };
 }
@@ -49,6 +51,7 @@ export async function readDiaryContextWithLlmSummary(
       const parsed = parseDiarySummaryPayload(cached.summary);
       return {
         filePath: latest.filePath,
+        sourceMtime: latest.sourceMtime,
         summary: parsed.summary,
         listeningHint: parsed.listeningHint
       };
@@ -72,6 +75,7 @@ export async function readDiaryContextWithLlmSummary(
 
     return {
       filePath: latest.filePath,
+      sourceMtime: latest.sourceMtime,
       ...parsed
     };
   } finally {
@@ -99,6 +103,7 @@ function metadataDiaryContext(filePath: string): DiaryContext {
   const stat = fs.statSync(filePath);
   return {
     filePath,
+    sourceMtime: stat.mtime.toISOString(),
     ...metadataDiarySummary(filePath, stat.mtime.toISOString())
   };
 }

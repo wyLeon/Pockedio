@@ -120,6 +120,7 @@ Commands are operational entry points, not the main user experience. The v1 comm
 - `pockedio serve`: run scheduled jobs, including configured weekday Morning DJ, configured weekday Evening DJ, and automatic mood check prompts
 - `pockedio setup`: configure NetEase Cloud Music, Fish TTS, Apple Calendar, weather location, diary permission, user personality profile, and database
 - `pockedio import-taste <file>`: import exported music app data
+- `pockedio refresh-context`: refresh Calendar and diary context into durable local memory without starting playback
 - `pockedio status`: check playback, scheduled jobs, and service health
 
 Natural-language requests inside the DJ session should replace command-first interactions such as `play`, `mood`, or `feedback`.

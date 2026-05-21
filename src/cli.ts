@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { runCalendarSetup, runNetEaseSetup, runSetup } from "./config/setup.js";
+import { runRefreshContext } from "./context/refreshContext.js";
 import { pockedioVersion } from "./index.js";
 import { runServe } from "./scheduler/serve.js";
 import { runInteractiveSession } from "./session/sessionRunner.js";
@@ -45,6 +46,13 @@ program
     console.log(`Imported ${result.trackCount} tracks into ${result.tastePath}.`);
     console.log(`Artists: ${result.artists.join(", ") || "none"}`);
     console.log(`Playlists: ${result.playlists.join(", ") || "none"}`);
+  });
+
+program
+  .command("refresh-context")
+  .description("Refresh Calendar and diary context memory")
+  .action(async () => {
+    await runRefreshContext();
   });
 
 program

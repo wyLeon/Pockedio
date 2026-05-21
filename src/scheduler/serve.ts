@@ -122,7 +122,8 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
   const context = input.context ?? await buildContext(config, {
       now,
       calendarWindow: "last7DaysAndToday",
-      calendarSource: "scheduled"
+      calendarSource: "scheduled",
+      consolidateMemory: true
     });
   if (!input.context) {
     writeOutput("Context ready.");
@@ -254,7 +255,8 @@ export async function prepareScheduledDjJob(input: ScheduledDjPreparationInput):
   const context = input.context ?? await buildContext(config, {
     now,
     calendarWindow: "last7DaysAndToday",
-    calendarSource: "scheduled"
+    calendarSource: "scheduled",
+    consolidateMemory: true
   });
   if (!input.context) {
     writeOutput("Context ready.");

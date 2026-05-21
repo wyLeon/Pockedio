@@ -7,7 +7,9 @@ import type { PockedioConfig } from "../src/config/schema.js";
 import { normalizeCalendarWarning, readCalendarContext, requestCalendarPermission } from "../src/context/calendar.js";
 import { buildContext } from "../src/context/contextBuilder.js";
 import { readDiaryContext, readDiaryContextWithLlmSummary } from "../src/context/diary.js";
+import { formatRefreshContextResult, refreshContext } from "../src/context/refreshContext.js";
 import { readWeatherContext } from "../src/context/weather.js";
+import { withDatabase } from "../src/db/database.js";
 
 const tempDirs: string[] = [];
 
@@ -191,6 +193,7 @@ describe("diary adapter", () => {
 
     expect(readDiaryContext(config)).toEqual({
       filePath: newer,
+      sourceMtime: "2026-05-17T00:00:00.000Z",
       summary: "Latest diary file: newer.md, modified 2026-05-17T00:00:00.000Z.",
       listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
     });
@@ -229,6 +232,7 @@ describe("diary adapter", () => {
 
     expect(first).toEqual({
       filePath: entry,
+      sourceMtime: "2026-05-18T10:00:00.000Z",
       summary: "Recent diary summary: tired after work, better suited to warm recovery music.",
       listeningHint: "Choose low-pressure, warm, emotionally steady music."
     });
@@ -271,6 +275,7 @@ describe("diary adapter", () => {
 
     expect(context).toEqual({
       filePath: entry,
+      sourceMtime: "2026-05-18T10:00:00.000Z",
       summary: "Latest diary file: entry.md, modified 2026-05-18T10:00:00.000Z.",
       listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
     });
@@ -342,5 +347,63 @@ describe("context builder", () => {
       SELECT title, source FROM calendar_events
     `).all());
     expect(rows).toEqual([{ title: "Gym", source: "interactive" }]);
+  });
+
+  it("consolidates calendar and diary context into durable memory on refresh", async () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const entry = path.join(diaryDir, "entry.md");
+    fs.writeFileSync(entry, "Today felt meeting-heavy, but I want a calmer evening.");
+    const entryDate = new Date("2026-05-19T06:00:00.000Z");
+    fs.utimesSync(entry, entryDate, entryDate);
+    const config = makeConfig({
+      calendar: { enabled: true },
+      diary: { enabled: true, path: diaryDir }
+    });
+
+    const result = await refreshContext(config, {
+      now: new Date("2026-05-19T09:00:00+08:00"),
+      calendarRunner: async () => ({
+        stdout: [
+          "Work | Planning Review | Tue May 19 09:30:00 2026 | Tue May 19 10:30:00 2026 | false",
+          "Work | Design Sync | Tue May 19 11:00:00 2026 | Tue May 19 12:00:00 2026 | false"
+        ].join("\n"),
+        stderr: "",
+        timedOut: false,
+        code: 0
+      }),
+      llm: {
+        generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "unused" }),
+        generateText: async () => ({
+          ok: true as const,
+          value: [
+            "Summary: Meeting-heavy day with a preference for a calmer evening transition.",
+            "Listening hint: Favor steady, low-pressure music with soft momentum."
+          ].join("\n")
+        })
+      }
+    });
+
+    expect(result.calendar).toMatchObject({ available: true, eventsRead: 2, memoriesUpdated: 1 });
+    expect(result.diary).toMatchObject({ available: true, latestFile: entry, memoriesUpdated: 1 });
+
+    const rows = withDatabase(config, (database) => database.prepare(`
+      SELECT kind, content
+      FROM memory_items
+      WHERE kind IN ('agenda', 'diary')
+      ORDER BY kind
+    `).all()) as Array<{ kind: string; content: string }>;
+
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.kind === "agenda")?.content).toContain("Planning Review");
+    expect(rows.find((row) => row.kind === "diary")?.content).toContain("Meeting-heavy day");
+  });
+
+  it("formats refresh-context output for manual QA", () => {
+    expect(formatRefreshContextResult({
+      calendar: { available: true, eventsRead: 3, memoriesUpdated: 1 },
+      diary: { available: true, latestFile: "/tmp/diary/entry.md", memoriesUpdated: 1 },
+      tastePath: "/tmp/pockedio/taste.md"
+    })).toContain("Context memory is ready for future stations.");
   });
 });

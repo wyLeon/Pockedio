@@ -384,6 +384,7 @@ pockedio setup
 pockedio setup calendar
 pockedio setup netease
 pockedio import-taste <file>
+pockedio refresh-context
 ```
 
 Unsupported setup sections should fail plainly:
@@ -806,6 +807,38 @@ Playlists: Deep Work, ...
 ```
 
 This command expects a normalized CSV file. First setup uses a NetEase playlist link instead.
+
+## 2.6 `pockedio refresh-context`
+
+Use when the user wants Calendar and diary changes reflected in long-term context memory without starting playback.
+
+```text
+$ pockedio refresh-context
+
+Refreshing context...
+
+Calendar
+  Status            available
+  Events read       12
+  Agenda memories   1 updated
+
+Diary
+  Status            available
+  Latest file       2026-05-21.md
+  Diary memories    1 updated
+
+taste.md           /Users/leonw/.pockedio/taste.md
+
+Context memory is ready for future stations.
+```
+
+Behavior:
+
+- Reads Calendar using the wider context window when available.
+- Reads the latest diary file only when diary context is enabled.
+- Stores summarized `agenda` and `diary` memories in SQLite.
+- Does not store raw diary text in SQLite.
+- Scheduled DJ preparation also refreshes these memories before generating the program.
 
 ## Section 3: Normal Listening Session Flow
 

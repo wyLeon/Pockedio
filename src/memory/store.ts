@@ -75,6 +75,7 @@ export type MessageRecord = {
 
 export type MemorySummaryRecord = {
   id: string;
+  kind?: MemoryKind;
   sourceSessionId: string | null;
   content: string;
   metadata: unknown;
@@ -298,6 +299,14 @@ export class MemoryStore {
     return this.addMemoryItem("summary", content, metadata, sessionId);
   }
 
+  replaceMemoryItemBySourceKey(kind: MemoryKind, sourceKey: string, content: string, metadata?: Record<string, unknown>): string {
+    this.db.prepare(`
+      DELETE FROM memory_items
+      WHERE kind = ? AND json_extract(metadata_json, '$.sourceKey') = ?
+    `).run(kind, sourceKey);
+    return this.addMemoryItem(kind, content, { ...(metadata ?? {}), sourceKey });
+  }
+
   getRecentMemorySummaries(limit: number): MemorySummaryRecord[] {
     const rows = this.db.prepare(`
       SELECT id, source_session_id as sourceSessionId, content, metadata_json as metadataJson, created_at as createdAt
@@ -306,6 +315,24 @@ export class MemoryStore {
       ORDER BY created_at DESC, rowid DESC
       LIMIT ?
     `).all(limit) as Array<Omit<MemorySummaryRecord, "metadata"> & { metadataJson: string | null }>;
+    return rows.map(({ metadataJson, ...row }) => ({
+      ...row,
+      metadata: parseJson(metadataJson)
+    }));
+  }
+
+  getRecentMemoryItems(kinds: MemoryKind[], limit: number): MemorySummaryRecord[] {
+    if (kinds.length === 0) {
+      return [];
+    }
+    const placeholders = kinds.map(() => "?").join(", ");
+    const rows = this.db.prepare(`
+      SELECT id, kind, source_session_id as sourceSessionId, content, metadata_json as metadataJson, created_at as createdAt
+      FROM memory_items
+      WHERE kind IN (${placeholders})
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT ?
+    `).all(...kinds, limit) as Array<Omit<MemorySummaryRecord, "metadata"> & { metadataJson: string | null }>;
     return rows.map(({ metadataJson, ...row }) => ({
       ...row,
       metadata: parseJson(metadataJson)
