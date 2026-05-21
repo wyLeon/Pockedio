@@ -446,6 +446,12 @@ describe("config load and save", () => {
     });
     if (result.ok && result.qrPath) {
       expect(fs.readFileSync(result.qrPath, "utf8")).toBe("fake-png");
+      expect(__netEaseQrLoginForTests.formatInstructions(result)).toContain(
+        `Link: file://${result.qrPath}`
+      );
+      expect(__netEaseQrLoginForTests.formatInstructions(result)).toContain(
+        `File: ${result.qrPath}`
+      );
     }
   });
 

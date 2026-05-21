@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import inquirer from "inquirer";
 import { runMigrations } from "../db/migrations.js";
 import { MemoryStore } from "../memory/store.js";
@@ -960,7 +961,8 @@ export function getNetEaseQualityMenuChoices(): Array<{ name: string; value: Net
 
 export const __netEaseQrLoginForTests = {
   start: startNetEaseQrLogin,
-  poll: pollNetEaseQrLogin
+  poll: pollNetEaseQrLogin,
+  formatInstructions: formatNetEaseQrLoginInstructions
 };
 
 async function applyNetEaseSetupChoice(
@@ -1012,14 +1014,7 @@ async function loginNetEaseWithQr(config: PockedioConfig, fetchImpl: typeof fetc
     }
 
     console.log("");
-    if (start.qrPath) {
-      console.log(`Open and scan this QR image with NetEase Cloud Music: ${start.qrPath}`);
-    } else if (start.qrUrl) {
-      console.log(`Open this NetEase login URL: ${start.qrUrl}`);
-    } else {
-      console.log("Scan the NetEase QR code in your browser or app.");
-    }
-    console.log("The QR code is valid for about 90 seconds.");
+    console.log(formatNetEaseQrLoginInstructions(start));
 
     const result = await withSetupStatus("Waiting for NetEase QR confirmation...", () => pollNetEaseQrLogin(config, start.key, fetchImpl));
     if (result.ok) {
@@ -1034,6 +1029,26 @@ async function loginNetEaseWithQr(config: PockedioConfig, fetchImpl: typeof fetc
       error: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+function formatNetEaseQrLoginInstructions(start: NetEaseQrLoginStart): string {
+  if (!start.ok) {
+    return start.error;
+  }
+
+  const lines: string[] = [];
+  if (start.qrPath) {
+    lines.push("Scan this QR image with NetEase Cloud Music:");
+    lines.push(`  Link: ${pathToFileURL(start.qrPath).href}`);
+    lines.push(`  File: ${start.qrPath}`);
+  } else if (start.qrUrl) {
+    lines.push("Open this NetEase login URL:");
+    lines.push(`  Link: ${start.qrUrl}`);
+  } else {
+    lines.push("Scan the NetEase QR code in your browser or app.");
+  }
+  lines.push("The QR code is valid for about 90 seconds.");
+  return lines.join("\n");
 }
 
 async function startNetEaseQrLogin(config: PockedioConfig, fetchImpl: typeof fetch = fetch): Promise<NetEaseQrLoginStart> {
