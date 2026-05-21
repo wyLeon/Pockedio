@@ -1387,6 +1387,54 @@ describe("runSessionTurn", () => {
     expect(summary.content).toContain("winter evenings in university");
   });
 
+  it("does not promote generic playback requests into durable session memory", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const sessionId = "generic-memory-session";
+
+    withDatabase(config, (db) => {
+      db.prepare(`
+        INSERT INTO sessions (id, started_at, trigger_type, trigger_text)
+        VALUES (?, ?, ?, ?)
+      `).run(sessionId, new Date().toISOString(), "conversation", "interactive session");
+    });
+
+    await runSessionTurn({
+      input: "play something",
+      config,
+      sessionId,
+      endSession: false,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "summarize this session",
+      config,
+      sessionId,
+      endSession: false,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("session_memory_update");
+    expect(result.response).toContain("I do not have a durable session memory");
+    const row = withDatabase(config, (db) => db.prepare(`
+      SELECT COUNT(*) as count
+      FROM memory_items
+      WHERE kind = 'summary'
+    `).get()) as { count: number };
+    expect(row.count).toBe(0);
+  });
+
   it("keeps music playing while responding to personal listening memories", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};

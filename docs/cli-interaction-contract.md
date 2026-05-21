@@ -1979,19 +1979,26 @@ Decision tree:
 ```text
 quit / exit
   -> stop active playback if needed
-  -> save useful session memory silently
+  -> save useful session memory silently only when the session has durable preference, feedback, or reusable context signals
   -> end the CLI session
   -> print: Session closed.
 
 Ctrl+C
   -> stop active playback if needed
-  -> save useful session memory silently
+  -> save useful session memory silently only when the session has durable preference, feedback, or reusable context signals
   -> close the CLI session
 
 stop
   -> not a session-exit command
   -> use 3.10 Playback Controls
 ```
+
+Session transcript and memory rule:
+
+- Full user/Pockedio messages are stored locally as permanent transcript rows.
+- Derived `summary` memory is value-gated.
+- A generic request such as `play something` is kept in transcript but should not become durable summary memory by itself.
+- Durable summary memory requires preference language, feedback/control signals, or reusable context such as work, reading, commute, morning/evening, weather, diary, or recurring use cases.
 
 Rules:
 

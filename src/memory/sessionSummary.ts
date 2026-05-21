@@ -13,6 +13,7 @@ export type SessionSummaryDraft = {
 
 const memoryUpdatePattern = /\b(summarize this session|update memory|save this memory|refresh memory|session memory)\b/i;
 const requestPattern = /\b(play|listen|hear|queue|station|recommend|suggest|dj program|dj version|music)\b/i;
+const durableContextPattern = /\b(morning|evening|night|late night|reading|writing|work|study|focus|deep work|commute|travel|recovery|decompress|workout|meditation|sleep|rainy|winter|summer|weekend|meeting|calendar|diary|usually|always|often|remember|save this|for when)\b/i;
 const tastePattern = /\b(i like|i love|i prefer|i realized|reminds me|this reminds|my taste|for reading|for focus|helps me|distracts me|too bright|too sharp|too busy|too loud|too sleepy|spacious|instrumental|vocals?|calm|relax|deep work|meditation|morning|evening)\b/i;
 const feedbackPattern = /\b(more like this|less like this|favorite this|save this|save this vibe|remember this vibe|never play|ban|skip this|change the vibe|different vibe|good pick|nice pick|love this|like this)\b/i;
 
@@ -43,9 +44,11 @@ export function buildDeterministicSessionSummary(input: { messages: MessageRecor
   const requests = uniqueLimited(userMessages.filter((content) => requestPattern.test(content)), 3);
   const tasteSignals = uniqueLimited(userMessages.filter((content) => tastePattern.test(content)), 4);
   const feedbackSignals = uniqueLimited(userMessages.filter((content) => feedbackPattern.test(content)), 4);
+  const contextSignals = uniqueLimited(userMessages.filter((content) => durableContextPattern.test(content) && !tastePattern.test(content) && !feedbackPattern.test(content)), 3);
+  const durable = tasteSignals.length > 0 || feedbackSignals.length > 0 || contextSignals.length > 0;
 
   const lines = ["Session memory summary:"];
-  if (requests.length > 0) {
+  if (durable && requests.length > 0) {
     lines.push(`- User requests: ${requests.join(" | ")}`);
   }
   if (tasteSignals.length > 0) {
@@ -54,13 +57,16 @@ export function buildDeterministicSessionSummary(input: { messages: MessageRecor
   if (feedbackSignals.length > 0) {
     lines.push(`- Feedback/control signals: ${feedbackSignals.join(" | ")}`);
   }
+  if (contextSignals.length > 0) {
+    lines.push(`- Durable context signals: ${contextSignals.join(" | ")}`);
+  }
   if (lines.length === 1) {
     lines.push("- No durable preference signals found.");
   }
 
   return {
     summary: lines.join("\n"),
-    durable: requests.length > 0 || tasteSignals.length > 0 || feedbackSignals.length > 0
+    durable
   };
 }
 
