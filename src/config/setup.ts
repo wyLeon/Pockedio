@@ -102,6 +102,14 @@ export async function runSetup(): Promise<void> {
   runMigrations(config);
   ensurePersonaFile(config);
 
+  if (answers.importTasteNow && answers.tastePlaylistInput?.trim()) {
+    console.log("");
+    console.log("Reading NetEase playlist...");
+    const result = await importTasteFromNetEasePlaylist(answers.tastePlaylistInput.trim(), config);
+    console.log("");
+    console.log(formatSetupTasteImportSummary(result));
+  }
+
   let calendarStatus = answers.useCalendar
     ? answers.calendarSetupApplied
       ? answers.calendarSetupAvailable ? "enabled" : "unavailable"
@@ -127,14 +135,6 @@ export async function runSetup(): Promise<void> {
     diaryStatus = diary ? "enabled" : "unavailable";
     console.log("");
     console.log(formatDiarySetupSummary(diary));
-  }
-
-  if (answers.importTasteNow && answers.tastePlaylistInput?.trim()) {
-    console.log("");
-    console.log("Reading NetEase playlist...");
-    const result = await importTasteFromNetEasePlaylist(answers.tastePlaylistInput.trim(), config);
-    console.log("");
-    console.log(formatSetupTasteImportSummary(result));
   }
 
   console.log("");
