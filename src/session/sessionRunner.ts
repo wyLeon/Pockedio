@@ -437,7 +437,19 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
           }
         })
       );
-      const response = intent.type === "feedback_skip" && input.playbackState?.station
+      const response = isQueueReshapeFeedback(action) && input.playbackState?.station && currentTrack
+        ? await reshapeRemainingQueueForFeedback({
+            config,
+            sessionId,
+            store,
+            provider,
+            llm,
+            action,
+            playbackState: input.playbackState,
+            currentTrack,
+            signal
+          })
+        : intent.type === "feedback_skip" && input.playbackState?.station
         ? await advancePlayback(input.playbackState, config, store, input.playbackState.startUrlPlayback ?? startUrlPlayback)
         : formatFeedbackConfirmation(action);
       store.addMessage(sessionId, "pockedio", response);
@@ -1900,6 +1912,103 @@ function storeStation(
     storedTracks.push({ dbId, track });
   }
   return storedTracks;
+}
+
+async function reshapeRemainingQueueForFeedback(input: {
+  config: PockedioConfig;
+  sessionId: string;
+  store: MemoryStore;
+  provider: MusicProvider;
+  llm: LlmClient;
+  action: FeedbackAction;
+  playbackState: InteractivePlaybackState;
+  currentTrack: StationTrack;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const currentIndex = input.playbackState.currentIndex;
+  const storedTracks = input.playbackState.storedTracks ?? [];
+  const station = input.playbackState.station;
+  if (currentIndex === undefined || !station || storedTracks.length <= currentIndex + 1) {
+    return formatFeedbackConfirmation(input.action);
+  }
+
+  const request = buildFeedbackReshapeRequest(station.request, input.currentTrack, input.action);
+  const context: Partial<PockedioContext> = {
+    personality: input.config.personality,
+    tasteSignals: input.store.getTasteSignals(30)
+  };
+  const reshaped = await generateStation({
+    request,
+    config: input.config,
+    context,
+    provider: input.provider,
+    llm: input.llm,
+    signal: input.signal
+  });
+
+  const remainingCount = storedTracks.length - currentIndex - 1;
+  const currentKey = normalizeTrackQueueKey(input.currentTrack);
+  const replacementTracks = reshaped.tracks
+    .filter((track) => normalizeTrackQueueKey(track) !== currentKey)
+    .slice(0, remainingCount)
+    .map((track, index) => ({
+      ...track,
+      position: currentIndex + index + 2
+    }));
+
+  if (replacementTracks.length === 0) {
+    return formatFeedbackConfirmation(input.action);
+  }
+
+  for (const old of storedTracks.slice(currentIndex + 1)) {
+    input.store.updateTrackPlayback(old.dbId, "skipped");
+  }
+
+  const replacementStoredTracks = replacementTracks.map((track) => ({
+    dbId: input.store.addStationTrack(input.sessionId, {
+      position: track.position,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      provider: track.provider,
+      providerTrackId: track.providerTrackId,
+      playableUrl: track.playable.available ? track.playable.playableUrl : null,
+      playbackStatus: track.playable.available ? "planned" : "unavailable",
+      failureReason: track.playable.available ? null : track.playable.reason
+    }),
+    track
+  }));
+
+  input.playbackState.storedTracks = [
+    ...storedTracks.slice(0, currentIndex + 1),
+    ...replacementStoredTracks
+  ];
+  input.playbackState.station = {
+    ...station,
+    tracks: input.playbackState.storedTracks.map((entry) => entry.track)
+  };
+  cancelDjProgramPreparations(input.playbackState);
+
+  return [
+    formatFeedbackConfirmation(input.action),
+    `I reshaped the rest of the queue around ${input.currentTrack.title} - ${input.currentTrack.artist}.`,
+    formatUpNext(input.playbackState.storedTracks, currentIndex)
+  ].join("\n");
+}
+
+function isQueueReshapeFeedback(action: FeedbackAction): boolean {
+  return action === "more_like_this" || action === "less_like_this";
+}
+
+function buildFeedbackReshapeRequest(baseRequest: string, currentTrack: StationTrack, action: FeedbackAction): string {
+  const direction = action === "more_like_this"
+    ? `more like the current track ${currentTrack.title} - ${currentTrack.artist}`
+    : `less like the current track ${currentTrack.title} - ${currentTrack.artist}, without banning it`;
+  return `${baseRequest}. Feedback for remaining queue: ${direction}.`;
+}
+
+function normalizeTrackQueueKey(track: Pick<StationTrack, "title" | "artist">): string {
+  return `${track.title} - ${track.artist}`.trim().toLowerCase();
 }
 
 function formatStandaloneDjAudioDisabledResponse(config: PockedioConfig): string {

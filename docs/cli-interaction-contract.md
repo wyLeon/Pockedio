@@ -1691,11 +1691,13 @@ I like this / love this / good pick / nice pick
 more like this / similar to this / keep this vibe
   -> record more_like_this on current track
   -> write stronger positive taste signals for current track, artist, and station direction
+  -> reshape the unplayed queue around the current track when a station is active
   -> "Noted. I will stay near this lane."
 
 less like this / less of this / not so much like this
   -> record less_like_this on current track
   -> write soft negative taste signals for current track and artist
+  -> reshape the unplayed queue away from the current track when a station is active
   -> "Noted. I will ease away from this texture without banning it."
 
 change the vibe / different vibe / switch the mood / change mood
@@ -1725,11 +1727,12 @@ skip / next
 Rules:
 
 - Feedback should attach to the current playing track when possible.
-- Feedback should not create a new station by itself, except `skip / next` advancing within the existing station.
+- `more like this` and `less like this` should keep the current track playing and reshape only the unplayed queue.
+- Feedback should not create a fully new station by itself, except `skip / next` advancing within the existing station.
 - Feedback should be stored twice: raw `feedback` event plus derived `taste_signals`.
 - Future stations should read recent taste signals during `Reading your context...` and use them during `Building a station...`.
 - Hard bans should exclude matching artists or tracks from future station plans.
-- Positive seeds and favorites should bias future station planning and fallback search, not interrupt the current queue.
+- Positive seeds and favorites should bias future station planning and fallback search; only explicit queue-shaping feedback should change the current queue.
 - `favorite` should not be treated as a normal NetEase favorite until account-backed collection behavior is designed.
 
 ### 3.12.1 Taste Profile Growth

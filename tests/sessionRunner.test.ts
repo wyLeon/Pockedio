@@ -1179,6 +1179,67 @@ describe("runSessionTurn", () => {
     ]);
   });
 
+  it("reshapes the remaining queue for more-like-this feedback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    let stationPlanCalls = 0;
+    const llm: LlmClient = {
+      generateJson: async () => {
+        stationPlanCalls += 1;
+        if (stationPlanCalls === 1) {
+          return { ok: false as const, errorCode: "llm_unavailable" as const, error: "use fallback first" };
+        }
+        return {
+          ok: true as const,
+          value: {
+            tracks: [
+              { title: "Near Lane 1", artist: "Reshape Artist", rationale: "closer to current track" },
+              { title: "Near Lane 2", artist: "Reshape Artist", rationale: "closer to current track" },
+              { title: "Near Lane 3", artist: "Reshape Artist", rationale: "closer to current track" },
+              { title: "Near Lane 4", artist: "Reshape Artist", rationale: "closer to current track" },
+              { title: "Near Lane 5", artist: "Reshape Artist", rationale: "closer to current track" }
+            ]
+          }
+        };
+      },
+      generateText: async () => ({ ok: true as const, value: "Tonight's set stays crisp and nocturnal." })
+    };
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const originalCurrent = playbackState.storedTracks?.[0]?.track.title;
+    const result = await runSessionTurn({
+      input: "more like this",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    expect(result.response).toContain("reshaped the rest of the queue");
+    expect(playbackState.currentIndex).toBe(0);
+    expect(playbackState.storedTracks?.[0]?.track.title).toBe(originalCurrent);
+    expect(playbackState.storedTracks?.slice(1).map((entry) => entry.track.title)).toEqual([
+      "Near Lane 1 Reshape Artist",
+      "Near Lane 2 Reshape Artist",
+      "Near Lane 3 Reshape Artist",
+      "Near Lane 4 Reshape Artist"
+    ]);
+  });
+
   it("records soft negative, favorite, and saved-vibe feedback as taste signals", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
