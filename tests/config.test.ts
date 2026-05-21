@@ -12,7 +12,9 @@ import {
   formatCalendarSetupSummary,
   formatDiarySetupSummary,
   formatScheduledDjSetupSummary,
+  formatSetupTasteImportFailure,
   formatSetupTasteImportSummary,
+  formatSetupTasteStatus,
   formatNetEaseSetupSummary,
   formatWeatherSetupSummary,
   getDjPreviewPath,
@@ -470,6 +472,20 @@ describe("config load and save", () => {
       "",
       "taste.md will grow as we talk and listen, so Pockedio can understand you better."
     ].join("\n"));
+  });
+
+  it("formats setup taste import failures without stopping setup", () => {
+    expect(formatSetupTasteImportFailure(new Error("NetEase playlist import failed with HTTP 404."))).toEqual([
+      "Could not import this NetEase playlist.",
+      "  Reason            NetEase playlist import failed with HTTP 404.",
+      "Setup will continue without playlist taste import."
+    ].join("\n"));
+  });
+
+  it("formats final setup taste status from import result", () => {
+    expect(formatSetupTasteStatus({ importTasteNow: false })).toBe("skipped");
+    expect(formatSetupTasteStatus({ importTasteNow: true, tasteImportStatus: "imported" })).toBe("imported");
+    expect(formatSetupTasteStatus({ importTasteNow: true, tasteImportStatus: "failed" })).toBe("failed");
   });
 
   it("formats weather setup checks", () => {

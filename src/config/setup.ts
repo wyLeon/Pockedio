@@ -37,6 +37,7 @@ type ScheduledDjSetupChoice = typeof scheduledDjSetupChoices[number];
 const neteaseSetupMethods = ["qr", "cookie", "anonymous"] as const;
 type NetEaseSetupMethod = typeof neteaseSetupMethods[number];
 type NetEaseQualityMenuValue = NetEaseQualityLevel | "back";
+type SetupTasteImportStatus = "imported" | "failed" | "skipped";
 
 type SetupAnswers = {
   neteaseBaseUrl: string;
@@ -76,6 +77,7 @@ export type FirstSetupAnswers = {
   djChoice: DjChoice;
   importTasteNow: boolean;
   tastePlaylistInput?: string;
+  tasteImportStatus?: SetupTasteImportStatus;
   useWeather: boolean;
   weatherLocation?: string;
   useCalendar: boolean;
@@ -102,12 +104,8 @@ export async function runSetup(): Promise<void> {
   runMigrations(config);
   ensurePersonaFile(config);
 
-  if (answers.importTasteNow && answers.tastePlaylistInput?.trim()) {
-    console.log("");
-    console.log("Reading NetEase playlist...");
-    const result = await importTasteFromNetEasePlaylist(answers.tastePlaylistInput.trim(), config);
-    console.log("");
-    console.log(formatSetupTasteImportSummary(result));
+  if (answers.importTasteNow && answers.tastePlaylistInput?.trim() && !answers.tasteImportStatus) {
+    answers.tasteImportStatus = await importNetEasePlaylistTasteDuringSetup(answers.tastePlaylistInput.trim(), config);
   }
 
   let calendarStatus = answers.useCalendar
@@ -141,7 +139,7 @@ export async function runSetup(): Promise<void> {
   console.log("Setup complete");
   console.log(`  Music            ${formatNetEaseSetupSummary(config)}`);
   console.log(`  DJ                ${config.dj.displayName}`);
-  console.log(`  Taste             ${answers.importTasteNow ? "imported" : "skipped"}`);
+  console.log(`  Taste             ${formatSetupTasteStatus(answers)}`);
   console.log(`  Calendar          ${calendarStatus}`);
   console.log(`  Diary             ${diaryStatus}`);
   console.log(`  Scheduled DJ      ${formatScheduledDjSetupSummary(config)}`);
@@ -282,6 +280,20 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
       when: (answers) => answers.importTasteNow
     }
   ]);
+  const tasteImportStatus = tasteAnswers.importTasteNow && tasteAnswers.tastePlaylistInput?.trim()
+    ? await importNetEasePlaylistTasteDuringSetup(
+        tasteAnswers.tastePlaylistInput.trim(),
+        buildConfigForImmediateTasteImport(current, {
+          ...musicProviderAnswer,
+          ...neteaseAnswers,
+          ...neteaseSetupResult,
+          ...trialAnswer,
+          ...previewAnswer,
+          ...djAnswers,
+          ...tasteAnswers
+        })
+      )
+    : "skipped";
 
   console.log("");
   console.log("Context");
@@ -391,6 +403,7 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
     ...previewAnswer,
     ...djAnswers,
     ...tasteAnswers,
+    tasteImportStatus,
     ...weatherGate,
     ...weatherAnswers,
     ...calendarGate,
@@ -400,6 +413,21 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
     ...scheduleGate,
     ...scheduleAnswers
   };
+}
+
+function buildConfigForImmediateTasteImport(
+  current: PockedioConfig,
+  answers: Partial<FirstSetupAnswers> & Pick<FirstSetupAnswers, "listenToDjTrial" | "djChoice" | "importTasteNow">
+): PockedioConfig {
+  return buildConfigFromFirstSetupAnswers(current, {
+    ...answers,
+    useWeather: current.weather.enabled,
+    weatherLocation: current.weather.location,
+    useCalendar: current.calendar.enabled,
+    useDiary: current.diary.enabled,
+    diaryPath: current.diary.path,
+    scheduledDjPrograms: inferCurrentScheduledDjChoice(current)
+  });
 }
 
 async function applyFirstSetupNetEaseChoice(
@@ -860,6 +888,37 @@ export function formatSetupTasteImportSummary(result: TasteImportResult): string
     "",
     "taste.md will grow as we talk and listen, so Pockedio can understand you better."
   ].join("\n");
+}
+
+export function formatSetupTasteImportFailure(error: unknown): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  return [
+    "Could not import this NetEase playlist.",
+    `  Reason            ${reason}`,
+    "Setup will continue without playlist taste import."
+  ].join("\n");
+}
+
+export function formatSetupTasteStatus(answers: Pick<FirstSetupAnswers, "importTasteNow" | "tasteImportStatus">): string {
+  if (!answers.importTasteNow) {
+    return "skipped";
+  }
+  return answers.tasteImportStatus ?? "pending";
+}
+
+async function importNetEasePlaylistTasteDuringSetup(playlistInput: string, config: PockedioConfig): Promise<SetupTasteImportStatus> {
+  console.log("");
+  console.log("Reading NetEase playlist...");
+  try {
+    const result = await importTasteFromNetEasePlaylist(playlistInput, config);
+    console.log("");
+    console.log(formatSetupTasteImportSummary(result));
+    return "imported";
+  } catch (error) {
+    console.log("");
+    console.log(formatSetupTasteImportFailure(error));
+    return "failed";
+  }
 }
 
 export function formatWeatherSetupSummary(weather: WeatherContext | null): string {
