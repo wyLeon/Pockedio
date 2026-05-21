@@ -1722,6 +1722,33 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("Tell me what you want to hear");
   });
 
+  it("uses imported taste.md when answering direct taste questions", async () => {
+    const config = makeConfig();
+    fs.writeFileSync(config.paths.taste, [
+      "# Pockedio Taste",
+      "",
+      "## Imported Tracks",
+      "",
+      "- Merry Christmas Mr. Lawrence - Ryuichi Sakamoto",
+      "- An Ending (Ascent) - Brian Eno",
+      ""
+    ].join("\n"));
+    const prompts: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "What is my taste for music?",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Your imported playlist points toward spacious piano and ambient instrumentals.", prompts)
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(prompts[0]).toContain("Taste context:");
+    expect(prompts[0]).toContain("Merry Christmas Mr. Lawrence - Ryuichi Sakamoto");
+    expect(prompts[0]).toContain("An Ending (Ascent) - Brian Eno");
+    expect(result.response).toContain("imported playlist");
+  });
+
   it("keeps plain fallback conversation human without starting playback", async () => {
     const config = makeConfig();
     const playedUrls: string[] = [];

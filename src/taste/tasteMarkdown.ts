@@ -31,6 +31,10 @@ export function generateTasteMarkdown(rows: TasteImportRow[], importedAt = new D
     `- Last import: ${importedDate}`,
     `- Imported tracks: ${summary.trackCount}`,
     "",
+    "## Imported Tracks",
+    "",
+    ...formatImportedTracks(rows),
+    "",
     "## High-Confidence Artists",
     "",
     ...listOrEmpty(summary.artists),
@@ -58,6 +62,22 @@ function sortedUnique(values: string[]): string[] {
 
 function listOrEmpty(values: string[]): string[] {
   return values.length > 0 ? values.map((value) => `- ${value}`) : ["- No signals yet."];
+}
+
+function formatImportedTracks(rows: TasteImportRow[]): string[] {
+  if (rows.length === 0) {
+    return ["- No tracks imported yet."];
+  }
+
+  return rows.map((row) => {
+    const details = [row.album, row.playlist, row.source]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join("; ");
+    return details
+      ? `- ${row.title} - ${row.artist} (${details})`
+      : `- ${row.title} - ${row.artist}`;
+  });
 }
 
 export function upsertGeneratedTasteProfileSection(markdown: string, generatedProfile: string): string {

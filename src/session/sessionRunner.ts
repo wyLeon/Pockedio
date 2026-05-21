@@ -1646,10 +1646,27 @@ function formatConversationPrompt(
     config ? formatLanguageInstruction(config) : "Reply in English by default, even if the user writes in another language. Preserve song titles and artist names as written.",
     "Do not act as a therapist, diagnose the user, or give life advice.",
     "Do not claim spoken audio was generated. Do not change playback or promise queue edits unless the user explicitly asked for playback control.",
+    formatConversationTasteContext(config, userText),
     formatConversationCalendarContext(context),
     formatConversationPlaybackContext(playbackState),
     `User: ${userText}`
   ].filter(Boolean).join("\n");
+}
+
+function formatConversationTasteContext(config: PockedioConfig | undefined, userText: string): string {
+  if (!config || !isTasteInsightQuestion(userText) || !fs.existsSync(config.paths.taste)) {
+    return "";
+  }
+
+  const taste = fs.readFileSync(config.paths.taste, "utf8").trim();
+  if (!taste || !hasTasteSignals(config.paths.taste)) {
+    return "Taste context: no imported taste signals yet.";
+  }
+
+  return [
+    "Taste context:",
+    taste.split(/\r?\n/).slice(0, 120).join("\n")
+  ].join("\n");
 }
 
 function formatConversationCalendarContext(context: Partial<PockedioContext> | undefined): string {
@@ -1666,6 +1683,12 @@ function isContextualCalendarConversation(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return /\b(today|this morning|this afternoon|tonight|my day|my schedule|calendar|meeting|meetings|focus block|work block|get through|afternoon|evening|morning)\b/.test(normalized)
     && /\b(how|what|help|suggest|fit|fits|should|listen|music|feel|look|plan|through)\b/.test(normalized);
+}
+
+function isTasteInsightQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return /\b(what|how|describe|summarize|tell me|do you know|what's|what is)\b/.test(normalized)
+    && /\b(my taste|my music taste|taste for music|music taste|listening taste|what i like|what do i like)\b/.test(normalized);
 }
 
 function formatConversationPlaybackContext(playbackState: InteractivePlaybackState | undefined): string {

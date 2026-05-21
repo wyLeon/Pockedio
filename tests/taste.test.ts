@@ -45,7 +45,7 @@ describe("taste import", () => {
     expect(() => parseTasteCsv(invalidCsv)).toThrow("liked_at");
   });
 
-  it("writes taste.md with artists and playlists", () => {
+  it("writes taste.md with artists, playlists, and imported tracks", () => {
     const config = makeConfig();
     const result = importTaste("tests/fixtures/taste-normalized.csv", config);
     const markdown = fs.readFileSync(result.tastePath, "utf8");
@@ -54,6 +54,8 @@ describe("taste import", () => {
     expect(markdown).toContain("## High-Confidence Artists");
     expect(markdown).toContain("- Ryuichi Sakamoto");
     expect(markdown).toContain("- deep focus jazz");
+    expect(markdown).toContain("## Imported Tracks");
+    expect(markdown).toContain("- Blue in Green - Miles Davis");
   });
 
   it("writes a taste_imports row", () => {
@@ -106,6 +108,8 @@ describe("taste import", () => {
     const markdown = fs.readFileSync(result.tastePath, "utf8");
     expect(markdown).toContain("- Late Night Piano");
     expect(markdown).toContain("- Ryuichi Sakamoto");
+    expect(markdown).toContain("- Merry Christmas Mr. Lawrence - Ryuichi Sakamoto");
+    expect(markdown).toContain("- An Ending (Ascent) - Brian Eno");
 
     const row = withDatabase(config, (db) => db.prepare(`
       SELECT source_file as sourceFile, track_count as trackCount
