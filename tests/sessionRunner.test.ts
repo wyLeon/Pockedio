@@ -7,7 +7,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupGuide, formatStartupSetupNote, handleInteractiveInterrupt, runSessionTurn, stopPlaybackForSessionExit, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatStartupSetupNote, handleInteractiveInterrupt, runSessionTurn, stopPlaybackForSessionExit, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
@@ -201,6 +201,22 @@ describe("runSessionTurn", () => {
     expect(guide).toContain("stop");
     expect(guide).toContain("what's playing?");
     expect(guide).toContain("Ctrl+C exits, or cancels while processing");
+  });
+
+  it("uses the selected voice as the interactive startup identity", () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+    config.tts.provider = "macos";
+    config.tts.macosVoice = "sable";
+
+    expect(formatInteractiveStartupDisplayName(config, "darwin")).toBe("Sable");
+
+    config.tts.provider = "fish";
+    config.tts.fishVoice = "nova";
+    expect(formatInteractiveStartupDisplayName(config, "darwin")).toBe("Nova");
+
+    config.tts.provider = "text";
+    expect(formatInteractiveStartupDisplayName(config, "darwin")).toBe("Pockedio");
   });
 
   it("shows a concise startup setup note when taste is missing", () => {

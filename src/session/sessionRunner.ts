@@ -39,6 +39,7 @@ import type { GeneratedStation, StationTrack } from "../station/stationTypes.js"
 import { updateTasteProfile } from "../taste/profile.js";
 import { synthesizeDjAudio as synthesizeFishAudioDefault, type DjAudioOptions as FishAudioOptions } from "../tts/djAudio.js";
 import type { FishAudioResult } from "../tts/fishAudio.js";
+import { formatFishVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
 import { parseDeterministicIntent, parseIntent, type SessionIntent } from "./intent.js";
 
 type OutputWriter = (text: string) => void;
@@ -197,6 +198,19 @@ export function formatInteractiveStartupGuide(displayName = "Pockedio", setupNot
     lines.push("", setupNote);
   }
   return lines.join("\n");
+}
+
+export function formatInteractiveStartupDisplayName(config: PockedioConfig, platform: NodeJS.Platform = process.platform): string {
+  if (config.tts.provider === "fish") {
+    return formatFishVoiceName(config.tts.fishVoice);
+  }
+  if (config.tts.provider === "macos" || (config.tts.provider === "auto" && platform === "darwin")) {
+    return formatMacosVoiceName(config.tts.macosVoice);
+  }
+  if (config.tts.provider === "text") {
+    return "Pockedio";
+  }
+  return config.dj.displayName;
 }
 
 export function formatStartupSetupNote(config: PockedioConfig): string {
@@ -2293,7 +2307,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
   store.close();
   const statusWriter = createInteractiveStatusWriter(defaultOutput);
   try {
-    console.log(formatInteractiveStartupGuide(config.dj.displayName, formatStartupSetupNote(config)));
+    console.log(formatInteractiveStartupGuide(formatInteractiveStartupDisplayName(config), formatStartupSetupNote(config)));
     while (true) {
       let line: string;
       try {
