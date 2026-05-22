@@ -432,6 +432,10 @@ describe("config load and save", () => {
       { name: "Yes, paste MUSIC_U cookie", value: "cookie" },
       { name: "Not now, use anonymous playback", value: "anonymous" }
     ]);
+    expect(getNetEaseSetupMethodChoices({ includeBack: true })).toContainEqual({
+      name: "Back",
+      value: "back"
+    });
     expect(getNetEaseQualityMenuChoices().slice(0, 5)).toEqual([
       { name: "hires - best quality, may be unavailable", value: "hires" },
       { name: "lossless - very high quality, needs support", value: "lossless" },

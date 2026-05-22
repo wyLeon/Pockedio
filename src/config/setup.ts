@@ -36,6 +36,7 @@ const scheduledDjSetupChoices = ["not_now", "morning", "evening", "both"] as con
 type ScheduledDjSetupChoice = typeof scheduledDjSetupChoices[number];
 const neteaseSetupMethods = ["qr", "cookie", "anonymous"] as const;
 type NetEaseSetupMethod = typeof neteaseSetupMethods[number];
+type NetEaseSetupMenuValue = NetEaseSetupMethod | "back";
 type NetEaseQualityMenuValue = NetEaseQualityLevel | "back";
 type SetupTasteImportStatus = "imported" | "failed" | "skipped";
 
@@ -154,7 +155,10 @@ export async function runNetEaseSetup(): Promise<void> {
   console.log("Connecting your account can reduce unavailable tracks and preview-only playback.");
   console.log("");
 
-  const answers = await promptForNetEaseSetup(current);
+  const answers = await promptForStandaloneNetEaseSetup(current);
+  if (!answers) {
+    return;
+  }
   let config = buildConfigFromNetEaseSetupAnswers(current, answers);
   ensureRuntimeDirs(config);
   saveConfig(config);
@@ -174,24 +178,32 @@ export async function runCalendarSetup(): Promise<void> {
   console.log("  Pockedio stores event title and time only.");
   console.log("");
 
-  const answers = await inquirer.prompt<{ calendarEnabled: boolean }>([
+  const answers = await inquirer.prompt<{ calendarAction: "enable" | "disable" | "back" }>([
     {
-      type: "confirm",
-      name: "calendarEnabled",
-      message: "Enable Apple Calendar context?",
-      default: current.calendar.enabled
+      type: "list",
+      name: "calendarAction",
+      message: "Apple Calendar context",
+      choices: [
+        { name: "Enable Apple Calendar context", value: "enable" },
+        { name: "Disable Apple Calendar context", value: "disable" },
+        { name: "Back", value: "back" }
+      ],
+      default: current.calendar.enabled ? "enable" : "disable"
     }
   ]);
+  if (answers.calendarAction === "back") {
+    return;
+  }
 
   const config = pockedioConfigSchema.parse({
     ...current,
-    calendar: { enabled: answers.calendarEnabled }
+    calendar: { enabled: answers.calendarAction === "enable" }
   });
   ensureRuntimeDirs(config);
   saveConfig(config);
   runMigrations(config);
 
-  if (!answers.calendarEnabled) {
+  if (answers.calendarAction === "disable") {
     console.log("");
     console.log("Saved");
     console.log("  Calendar          disabled");
@@ -562,6 +574,61 @@ async function promptForNetEaseSetup(current: PockedioConfig): Promise<Pick<Firs
 
     return {
       ...methodAnswer,
+      neteaseQualityLevel: qualityAnswer.neteaseQualityLevel,
+      ...cookieAnswer
+    };
+  }
+}
+
+async function promptForStandaloneNetEaseSetup(
+  current: PockedioConfig
+): Promise<Pick<FirstSetupAnswers, "neteaseSetupMethod" | "neteaseCookie" | "neteaseQualityLevel"> | undefined> {
+  while (true) {
+    const methodAnswer = await inquirer.prompt<{ neteaseSetupMethod: NetEaseSetupMenuValue }>([
+      {
+        type: "list",
+        name: "neteaseSetupMethod",
+        message: "Connect NetEase account now?",
+        choices: getNetEaseSetupMethodChoices({ includeBack: true }),
+        default: inferCurrentNetEaseSetupMethod(current)
+      }
+    ]);
+
+    if (methodAnswer.neteaseSetupMethod === "back") {
+      return undefined;
+    }
+    if (methodAnswer.neteaseSetupMethod === "anonymous") {
+      return { neteaseSetupMethod: "anonymous" };
+    }
+
+    const qualityAnswer = await inquirer.prompt<{ neteaseQualityLevel: NetEaseQualityMenuValue }>([
+      {
+        type: "list",
+        name: "neteaseQualityLevel",
+        message: "Preferred playback quality",
+        choices: getNetEaseQualityMenuChoices(),
+        default: current.netease.qualityLevel === "standard" ? "exhigh" : current.netease.qualityLevel
+      }
+    ]);
+
+    if (qualityAnswer.neteaseQualityLevel === "back") {
+      continue;
+    }
+
+    const cookieAnswer = methodAnswer.neteaseSetupMethod === "cookie"
+      ? await inquirer.prompt<Pick<FirstSetupAnswers, "neteaseCookie">>([
+        {
+          type: "password",
+          name: "neteaseCookie",
+          message: "Paste MUSIC_U cookie",
+          mask: "*",
+          validate: (value) => value.trim().length > 0 || "Paste MUSIC_U=... or the MUSIC_U value."
+        }
+      ])
+      : {};
+
+    return {
+      neteaseSetupMethod: methodAnswer.neteaseSetupMethod,
       neteaseQualityLevel: qualityAnswer.neteaseQualityLevel,
       ...cookieAnswer
     };
@@ -999,12 +1066,16 @@ export function formatNetEaseSetupSummary(config: PockedioConfig): string {
   ].join(" - ");
 }
 
-export function getNetEaseSetupMethodChoices(): Array<{ name: string; value: NetEaseSetupMethod }> {
-  return [
+export function getNetEaseSetupMethodChoices(options: { includeBack?: boolean } = {}): Array<{ name: string; value: NetEaseSetupMenuValue }> {
+  const choices: Array<{ name: string; value: NetEaseSetupMenuValue }> = [
     { name: "Yes, scan QR", value: "qr" },
     { name: "Yes, paste MUSIC_U cookie", value: "cookie" },
     { name: "Not now, use anonymous playback", value: "anonymous" }
   ];
+  if (options.includeBack) {
+    choices.push({ name: "Back", value: "back" });
+  }
+  return choices;
 }
 
 export function getNetEaseQualityMenuChoices(): Array<{ name: string; value: NetEaseQualityMenuValue }> {
