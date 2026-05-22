@@ -70,6 +70,7 @@ describe("config load and save", () => {
     expect(config.weather.location).toBe("Shanghai");
     expect(config.calendar.enabled).toBe(true);
     expect(config.diary.enabled).toBe(false);
+    expect(config.memory).toEqual({ dailyHeartbeat: true, heartbeatHistoryLimit: 20 });
     expect(config.personality.mbti).toBeUndefined();
     expect(config.llm.model).toBe("gpt-4.1-mini");
     expect(config.llm.baseUrl).toBeUndefined();
@@ -432,21 +433,13 @@ describe("config load and save", () => {
       { name: "Yes, paste MUSIC_U cookie", value: "cookie" },
       { name: "Not now, use anonymous playback", value: "anonymous" }
     ]);
-    expect(getNetEaseSetupMethodChoices({ includeBack: true })).toContainEqual({
-      name: "Back",
-      value: "back"
-    });
-    expect(getNetEaseQualityMenuChoices().slice(0, 5)).toEqual([
+    expect(getNetEaseQualityMenuChoices()).toEqual([
       { name: "hires - best quality, may be unavailable", value: "hires" },
       { name: "lossless - very high quality, needs support", value: "lossless" },
       { name: "exhigh - best daily default", value: "exhigh" },
       { name: "higher - good fallback", value: "higher" },
       { name: "standard - safest fallback", value: "standard" }
     ]);
-    expect(getNetEaseQualityMenuChoices()).toContainEqual({
-      name: "Back to account options",
-      value: "back"
-    });
   });
 
   it("creates a visible NetEase QR image before polling", async () => {

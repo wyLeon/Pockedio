@@ -139,6 +139,24 @@ CREATE TABLE IF NOT EXISTS taste_imports (
   summary TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS context_refresh_runs (
+  id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'skipped')),
+  trigger TEXT NOT NULL CHECK (trigger IN ('startup_heartbeat', 'manual')),
+  local_day TEXT NOT NULL,
+  calendar_events_read INTEGER NOT NULL DEFAULT 0,
+  agenda_memories_updated INTEGER NOT NULL DEFAULT 0,
+  diary_latest_available INTEGER NOT NULL DEFAULT 0 CHECK (diary_latest_available IN (0, 1)),
+  diary_latest_file TEXT,
+  diary_files_scanned INTEGER NOT NULL DEFAULT 0,
+  diary_summaries_generated INTEGER NOT NULL DEFAULT 0,
+  diary_summaries_reused INTEGER NOT NULL DEFAULT 0,
+  diary_memories_updated INTEGER NOT NULL DEFAULT 0,
+  error TEXT
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value_json TEXT NOT NULL,
@@ -154,3 +172,4 @@ CREATE INDEX IF NOT EXISTS idx_memory_items_kind_created ON memory_items(kind, c
 CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_diary_summaries_source ON diary_summaries(source_file, source_mtime);
 CREATE INDEX IF NOT EXISTS idx_scheduled_dj_preparations_kind_target ON scheduled_dj_preparations(kind, target_play_time);
+CREATE INDEX IF NOT EXISTS idx_context_refresh_runs_trigger_day ON context_refresh_runs(trigger, local_day, started_at);

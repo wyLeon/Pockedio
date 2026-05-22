@@ -4,7 +4,7 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import fs from "node:fs";
 import { loadConfig } from "../config/load.js";
 import type { PockedioConfig } from "../config/schema.js";
-import { buildContext, type PockedioContext } from "../context/contextBuilder.js";
+import { buildContext, type ContextBuilderOptions, type PockedioContext } from "../context/contextBuilder.js";
 import { createWikidataMusicFreshnessProvider, type MusicFreshnessProvider, type MusicFreshnessSource } from "../context/musicFreshness.js";
 import { runMigrations } from "../db/migrations.js";
 import {
@@ -138,7 +138,7 @@ export type SessionTurnInput = {
   endSession?: boolean;
   provider?: MusicProvider;
   llm?: LlmClient;
-  buildContext?: (config: PockedioConfig) => Promise<Partial<PockedioContext>>;
+  buildContext?: (config: PockedioConfig, options?: ContextBuilderOptions) => Promise<Partial<PockedioContext>>;
   writeOutput?: OutputWriter;
   writeStatus?: StatusWriter;
   playUrl?: (url: string) => Promise<PlayerResult>;
@@ -206,6 +206,19 @@ export function formatInteractiveStartupDisplayName(config: PockedioConfig, plat
   }
   if (config.tts.provider === "macos" || (config.tts.provider === "auto" && platform === "darwin")) {
     return formatMacosVoiceName(config.tts.macosVoice);
+  }
+  if (config.tts.provider === "text") {
+    return "Pockedio";
+  }
+  return config.dj.displayName;
+}
+
+export function formatRuntimeDjDisplayName(config: PockedioConfig, platform: NodeJS.Platform = process.platform): string {
+  if (config.tts.provider === "fish") {
+    return formatFishVoiceName(config.tts.fishVoice);
+  }
+  if (config.tts.provider === "macos") {
+    return platform === "darwin" ? formatMacosVoiceName(config.tts.macosVoice) : config.dj.displayName;
   }
   if (config.tts.provider === "text") {
     return "Pockedio";
@@ -674,7 +687,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (intent.type === "music_recommendation") {
-      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config), signal);
+      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, { memoryQuery: userText }), signal);
       store.addContextSnapshot(sessionId, {
         calendarSummary: context.calendar?.summary,
         weather: context.weather,
@@ -825,7 +838,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     const conversationContext = isContextualCalendarConversation(userText)
-      ? await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config), signal)
+      ? await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, { memoryQuery: userText }), signal)
       : undefined;
     if (conversationContext) {
       store.addContextSnapshot(sessionId, {
@@ -1359,7 +1372,7 @@ async function handlePlaybackRequest(input: {
   llm: LlmClient;
   requestText: string;
   intentType: "playback_request" | "direct_playback_request";
-  buildContext?: (config: PockedioConfig) => Promise<Partial<PockedioContext>>;
+  buildContext?: (config: PockedioConfig, options?: ContextBuilderOptions) => Promise<Partial<PockedioContext>>;
   writeStatus: StatusWriter;
   playUrl: (url: string) => Promise<PlayerResult>;
   startUrlPlayback: StartUrlPlayback;
@@ -1371,7 +1384,7 @@ async function handlePlaybackRequest(input: {
   startDuckedIntroPlayback?: StartDuckedIntroPlayback;
   signal?: AbortSignal;
 }): Promise<{ response: string; station: GeneratedStation }> {
-  const context = await withStatus(input.writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(input.config), input.signal);
+  const context = await withStatus(input.writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(input.config, { memoryQuery: input.requestText }), input.signal);
   input.store.addContextSnapshot(input.sessionId, {
     calendarSummary: context.calendar?.summary,
     weather: context.weather,
@@ -1482,14 +1495,14 @@ async function prepareDjProgramRequest(input: {
   provider: MusicProvider;
   llm: LlmClient;
   requestText: string;
-  buildContext?: (config: PockedioConfig) => Promise<Partial<PockedioContext>>;
+  buildContext?: (config: PockedioConfig, options?: ContextBuilderOptions) => Promise<Partial<PockedioContext>>;
   writeStatus: StatusWriter;
   playbackState: InteractivePlaybackState;
   synthesize: SynthesizeFishAudio;
   playFile?: (filePath: string) => Promise<PlayerResult>;
   signal?: AbortSignal;
 }): Promise<{ response: string; station: GeneratedStation }> {
-  const context = await withStatus(input.writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(input.config), input.signal);
+  const context = await withStatus(input.writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(input.config, { memoryQuery: input.requestText }), input.signal);
   input.store.addContextSnapshot(input.sessionId, {
     calendarSummary: context.calendar?.summary,
     weather: context.weather,
@@ -1624,7 +1637,7 @@ async function generateStationIntroResponse(input: {
   const totalTracks = input.station.tracks.length;
   const playableTracks = input.station.tracks.filter((track) => track.playable.available).length;
   const prompt = [
-    `You are ${input.config.dj.displayName}, Pockedio's personal DJ.`,
+    `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's personal DJ.`,
     "Write a warm, concise station introduction for a CLI music session.",
     "Acknowledge the user's mood or request in human language before mentioning the station.",
     "Keep it to 2-3 sentences.",
@@ -1669,7 +1682,7 @@ async function generateMusicRecommendationResponse(input: {
   signal?: AbortSignal;
 }): Promise<string> {
   const prompt = [
-    `You are ${input.config.dj.displayName}, Pockedio's concise personal DJ.`,
+    `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's concise personal DJ.`,
     "The user is asking what they should listen to, but has not asked you to start playback.",
     "Recommend one clear listening direction in 2-4 sentences, tuned to their mood or context.",
     "End by asking whether they want you to build or play that station.",
@@ -1741,7 +1754,7 @@ function isMidStationDjModeRequest(text: string, playbackState: InteractivePlayb
 function formatMidStationDjModeResponse(config: PockedioConfig): string {
   return [
     "DJ mode is a before-playback choice.",
-    `Let this station finish, or stop and ask ${config.dj.displayName} for a new DJ version.`
+    `Let this station finish, or stop and ask ${formatRuntimeDjDisplayName(config)} for a new DJ version.`
   ].join(" ");
 }
 
@@ -1887,7 +1900,7 @@ async function handlePendingStationFollowup(input: {
   input.playbackState.pendingStationNeedsChoice = false;
 
   const prompt = [
-    `You are ${input.config.dj.displayName}, Pockedio's concise personal DJ.`,
+    `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's concise personal DJ.`,
     "The user is refining a pending station before playback starts.",
     "Acknowledge the refinement in one short sentence.",
     "Then ask whether to play this version.",
@@ -1918,7 +1931,7 @@ async function answerPendingStationQuestion(input: {
 }): Promise<string> {
   const pending = input.playbackState.pendingStationRequest ?? "";
   const prompt = [
-    `You are ${input.config.dj.displayName}, Pockedio's concise personal DJ.`,
+    `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's concise personal DJ.`,
     "The user asked a question before confirming a pending station.",
     "Answer briefly and keep the pending station alive.",
     "End with a natural confirmation question, but do not use the fixed startup phrase.",
@@ -1987,7 +2000,7 @@ async function generateIdentityCapabilityResponse(input: {
   userText: string;
   signal?: AbortSignal;
 }): Promise<string> {
-  const displayName = input.config.dj.displayName;
+  const displayName = formatRuntimeDjDisplayName(input.config);
   const prompt = [
     `You are ${displayName}, Pockedio's concise personal DJ in a terminal.`,
     "Answer the user's identity or capability question directly.",
@@ -2054,7 +2067,7 @@ function formatConversationPrompt(
   config?: PockedioConfig,
   context?: Partial<PockedioContext>
 ): string {
-  const displayName = config?.dj.displayName ?? "Pockedio";
+  const displayName = config ? formatRuntimeDjDisplayName(config) : "Pockedio";
   return [
     `You are ${displayName}, Pockedio's concise personal DJ in a text conversation.`,
     "The user may be sharing a personal memory, listening insight, mood, taste signal, or a question about the current music.",
@@ -2131,7 +2144,7 @@ function formatConversationPlaybackContext(playbackState: InteractivePlaybackSta
 }
 
 function formatConversationFallback(userText: string, playbackState: InteractivePlaybackState | undefined, config?: PockedioConfig): string {
-  const displayName = config?.dj.displayName ?? "Pockedio";
+  const displayName = config ? formatRuntimeDjDisplayName(config) : "Pockedio";
   if (isCapabilityQuestion(userText)) {
     return [
       `${displayName} is here.`,
@@ -2582,7 +2595,7 @@ function normalizeTrackQueueKey(track: Pick<StationTrack, "title" | "artist">): 
 function formatStandaloneDjAudioDisabledResponse(config: PockedioConfig): string {
   return [
     "DJ voice belongs to a station, not a loose clip.",
-    `Tell ${config.dj.displayName} what kind of set you want; when I suggest it, type "dj" for a spoken DJ version.`
+    `Tell ${formatRuntimeDjDisplayName(config)} what kind of set you want; when I suggest it, type "dj" for a spoken DJ version.`
   ].join(" ");
 }
 
@@ -2598,7 +2611,7 @@ async function generateStationDjProgramIntro(input: {
   signal?: AbortSignal;
 }): Promise<GeneratedDjProgramIntro> {
   const textResult = await input.llm.generateText([
-    `You are ${input.config.dj.displayName}, Pockedio's spoken DJ.`,
+    `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's spoken DJ.`,
     "Write a warm, concise opening for a five-track DJ program.",
     "Sound human and specific, but keep it under 70 words.",
     formatLanguageInstruction(input.config),
@@ -2610,7 +2623,7 @@ async function generateStationDjProgramIntro(input: {
   ].join("\n"), { signal: input.signal });
   const text = isUsableGeneratedText(input.config, textResult)
     ? textResult.value.trim()
-    : `${input.config.dj.displayName} here. I’ll open this as a short DJ program and ease you into the first track with the station already shaped around your request.`;
+    : `${formatRuntimeDjDisplayName(input.config)} here. I’ll open this as a short DJ program and ease you into the first track with the station already shaped around your request.`;
   const djAudio = shouldUseSpokenDjAudio({
     triggerType: "conversation",
     userExplicitlyRequestedDjAudio: true
@@ -2910,7 +2923,7 @@ function formatDjTranscript(config: PockedioConfig, text: string): string {
 }
 
 function formatDjTranscriptLabel(config: PockedioConfig): string {
-  return `${config.dj.displayName}:`;
+  return `${formatRuntimeDjDisplayName(config)}:`;
 }
 
 async function handleActivePlaybackFailure(
@@ -3161,7 +3174,7 @@ function formatDjIntroStillPreparingNotice(
   if (!preparation || preparedIntro || !playbackState.storedTracks?.[trackIndex]?.track.playable.available) {
     return "";
   }
-  return `${config.dj.displayName} is still preparing the next voice break, so I’ll keep the music moving.`;
+  return `${formatRuntimeDjDisplayName(config)} is still preparing the next voice break, so I’ll keep the music moving.`;
 }
 
 async function generateTrackDjProgramIntro(input: {
@@ -3176,7 +3189,7 @@ async function generateTrackDjProgramIntro(input: {
   signal?: AbortSignal;
 }): Promise<GeneratedDjProgramIntro | undefined> {
   const textResult = await input.llm.generateText([
-    `You are ${input.config.dj.displayName}, Pockedio's spoken DJ.`,
+    `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's spoken DJ.`,
     `Write a warm transition intro for Track ${input.track.position}: ${input.track.title} - ${input.track.artist}.`,
     "Keep it under 45 words.",
     formatLanguageInstruction(input.config),
@@ -3189,7 +3202,7 @@ async function generateTrackDjProgramIntro(input: {
   ].filter(Boolean).join("\n"));
   const text = isUsableGeneratedText(input.config, textResult)
     ? textResult.value.trim()
-    : `${input.config.dj.displayName} here. Track ${input.track.position} keeps the set moving with ${input.track.title} by ${input.track.artist}.`;
+    : `${formatRuntimeDjDisplayName(input.config)} here. Track ${input.track.position} keeps the set moving with ${input.track.title} by ${input.track.artist}.`;
   const djAudio = await input.synthesize(input.config, text, { signal: input.signal });
   if (!djAudio.ok) {
     return { text: formatDjAudioFallbackText(text, djAudio.error), rawText: text };
@@ -3268,7 +3281,7 @@ function formatTrackStartSurface(
   return [
     formatTrackStartNowPlayingLine(track, startedAt, now, queue.length),
     "",
-    `${config.dj.displayName}'s note:`,
+    `${formatRuntimeDjDisplayName(config)}'s note:`,
     formatDjTrackNote(track),
     formatUpNext(queue, currentIndex),
     formatCurrentQueueSnapshot(queue, currentIndex)

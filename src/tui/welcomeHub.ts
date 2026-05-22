@@ -25,11 +25,12 @@ export type WelcomeReadiness = {
 };
 
 export type WelcomeHubAction = "session" | "setup" | "llm_setup" | "voice_setup" | "taste" | "status" | "quit";
-export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" | "netease_setup" | "calendar_setup" | "back" | "quit";
+export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" | "netease_setup" | "context_setup" | "back" | "quit";
 export type LlmProviderId = "openai" | "deepseek" | "openrouter" | "local_vllm" | "custom";
 export type LlmSetupAction = LlmProviderId | "test_connection" | "back" | "quit";
 export type LlmProviderAction = "paste_key" | "use_shell_env" | "change_model" | "change_base_url" | "change_api_key_env" | "check_server" | "discover_models" | "test_connection" | "back" | "quit";
 export type VoiceSetupAction = "choose_voice" | "fish_tts" | "text_only" | "back" | "quit";
+export type ContextSetupAction = "calendar" | "weather" | "diary" | "back" | "quit";
 export type DjVoiceChoiceId =
   | `macos:${PockedioConfig["tts"]["macosVoice"]}`
   | `fish:${PockedioConfig["tts"]["fishVoice"]}`;
@@ -38,7 +39,7 @@ export type DjVoiceChooserResult = {
   selectedVoice: DjVoiceChoiceId;
   submit?: DjVoiceChooserSubmit;
 };
-export type TasteMemoryAction = "import" | "rebuild_profile" | "show_summary" | "start_station" | "back" | "quit";
+export type TasteMemoryAction = "import" | "show_summary" | "back" | "quit";
 
 export type DefaultEntryMode = "hub" | "session";
 
@@ -64,7 +65,7 @@ export type WelcomeReadinessOptions = {
 
 const welcomeHubEntries: Array<{ action: WelcomeHubAction; label: string; description: string }> = [
   { action: "session", label: "Enter DJ Session", description: "Talk, ask, play, reshape, queue, DJ mode" },
-  { action: "setup", label: "Setup & Connections", description: "Music, LLM, voice, calendar, weather, diary" },
+  { action: "setup", label: "Setup & Connections", description: "Music, LLM, voice, context" },
   { action: "taste", label: "Taste & Memory", description: "Import taste, review personalization inputs" },
   { action: "status", label: "Status", description: "Playback, scheduler, health, version" }
 ];
@@ -74,8 +75,7 @@ const setupConnectionsEntries: Array<{ action: SetupConnectionsAction; label: st
   { action: "llm_setup", label: "Configure LLM" },
   { action: "voice_setup", label: "Configure Voice" },
   { action: "netease_setup", label: "Configure NetEase" },
-  { action: "calendar_setup", label: "Configure Calendar" },
-  { action: "back", label: "Back" }
+  { action: "context_setup", label: "Configure Context" }
 ];
 
 const llmSetupEntries: Array<{ action: LlmSetupAction; label: string; description: string }> = [
@@ -84,16 +84,14 @@ const llmSetupEntries: Array<{ action: LlmSetupAction; label: string; descriptio
   { action: "openrouter", label: "Use OpenRouter", description: "OpenRouter model, OPENROUTER_API_KEY, https://openrouter.ai/api/v1" },
   { action: "local_vllm", label: "Use local vLLM", description: "OpenAI-compatible local server, no hosted provider required" },
   { action: "custom", label: "Custom OpenAI-compatible", description: "Set model, base URL, and API key env manually" },
-  { action: "test_connection", label: "Test current setup", description: "Make a minimal LLM call with the current config" },
-  { action: "back", label: "Back", description: "Return to Setup & Connections" }
+  { action: "test_connection", label: "Test current setup", description: "Make a minimal LLM call with the current config" }
 ];
 
 const hostedLlmProviderEntries: Array<{ action: LlmProviderAction; label: string }> = [
   { action: "paste_key", label: "Paste API key" },
   { action: "use_shell_env", label: "Use shell env" },
   { action: "change_model", label: "Change model" },
-  { action: "test_connection", label: "Test connection" },
-  { action: "back", label: "Back" }
+  { action: "test_connection", label: "Test connection" }
 ];
 
 const customLlmProviderEntries: Array<{ action: LlmProviderAction; label: string }> = [
@@ -102,8 +100,7 @@ const customLlmProviderEntries: Array<{ action: LlmProviderAction; label: string
   { action: "change_model", label: "Change model" },
   { action: "change_base_url", label: "Change base URL" },
   { action: "change_api_key_env", label: "Set API key env" },
-  { action: "test_connection", label: "Test connection" },
-  { action: "back", label: "Back" }
+  { action: "test_connection", label: "Test connection" }
 ];
 
 const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string }> = [
@@ -111,23 +108,24 @@ const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string
   { action: "discover_models", label: "Discover models" },
   { action: "paste_key", label: "Paste API key" },
   { action: "change_model", label: "Set model manually" },
-  { action: "change_base_url", label: "Set base URL" },
-  { action: "back", label: "Back" }
+  { action: "change_base_url", label: "Set base URL" }
 ];
 
 const voiceSetupEntries: Array<{ action: VoiceSetupAction; label: string }> = [
   { action: "choose_voice", label: "Choose DJ voice" },
   { action: "fish_tts", label: "Configure Fish TTS" },
-  { action: "text_only", label: "Use text-only DJ copy" },
-  { action: "back", label: "Back" }
+  { action: "text_only", label: "Use text-only DJ copy" }
+];
+
+const contextSetupEntries: Array<{ action: ContextSetupAction; label: string }> = [
+  { action: "calendar", label: "Configure Calendar" },
+  { action: "weather", label: "Configure Weather" },
+  { action: "diary", label: "Configure Diary" }
 ];
 
 const tasteMemoryEntries: Array<{ action: TasteMemoryAction; label: string }> = [
-  { action: "import", label: "Import playlist or taste file" },
-  { action: "rebuild_profile", label: "Rebuild taste profile" },
-  { action: "show_summary", label: "Show taste summary" },
-  { action: "start_station", label: "Start station from latest import" },
-  { action: "back", label: "Back" }
+  { action: "import", label: "Import playlist" },
+  { action: "show_summary", label: "Show taste summary" }
 ];
 
 export function buildWelcomeReadiness(options: WelcomeReadinessOptions): WelcomeReadiness {
@@ -176,14 +174,31 @@ export function renderSetupConnectionsSurface(
     formatSetupLine("Music", byLabel.get("Music")?.value ?? "Unknown"),
     formatSetupLine("LLM", byLabel.get("LLM")?.value ?? "Unknown"),
     formatSetupLine("Voice", byLabel.get("Voice")?.value ?? "Unknown"),
-    formatSetupLine("Calendar", byLabel.get("Calendar")?.value ?? "Unknown"),
-    formatSetupLine("Weather", options.config.weather.enabled ? options.config.weather.location : "Not enabled"),
-    formatSetupLine("Diary", options.config.diary.enabled ? "Enabled" : "Not enabled"),
+    formatSetupLine("Context", formatContextSummary(options.config, byLabel.get("Calendar")?.value ?? "Unknown")),
     "",
     "Actions:",
     ...setupConnectionsEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit"
+    `↑↓ Select  |  Enter Open  |  1-${setupConnectionsEntries.length} Open  |  B Back  |  Q Quit`
+  ].join("\n");
+}
+
+export function renderContextSetupSurface(
+  options: Pick<WelcomeReadinessOptions, "config">,
+  renderOptions: { selectedAction?: ContextSetupAction } = {}
+): string {
+  const selectedAction = renderOptions.selectedAction ?? "calendar";
+  return [
+    "Context",
+    "",
+    formatSetupLine("Calendar", options.config.calendar.enabled ? "Enabled" : "Not enabled"),
+    formatSetupLine("Weather", options.config.weather.enabled ? options.config.weather.location : "Not enabled"),
+    formatSetupLine("Diary", options.config.diary.enabled ? "Enabled" : "Not enabled"),
+    "",
+    "Actions:",
+    ...contextSetupEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
+    "",
+    `↑↓ Select  |  Enter Open  |  1-${contextSetupEntries.length} Open  |  B Back  |  Q Quit`
   ].join("\n");
 }
 
@@ -210,7 +225,7 @@ export function renderLlmSetupSurface(
     "Actions:",
     ...llmSetupEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, `${entry.label}  ${entry.description}`)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-7 Open  |  B Back  |  Q Quit"
+    `↑↓ Select  |  Enter Open  |  1-${llmSetupEntries.length} Open  |  B Back  |  Q Quit`
   ].join("\n");
 }
 
@@ -266,7 +281,7 @@ export function renderVoiceSetupSurface(
     "Actions:",
     ...voiceSetupEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit"
+    `↑↓ Select  |  Enter Open  |  1-${voiceSetupEntries.length} Open  |  B Back  |  Q Quit`
   ].join("\n");
 }
 
@@ -320,7 +335,7 @@ export function renderTasteMemorySurface(
     "Actions:",
     ...tasteMemoryEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit"
+    `↑↓ Select  |  Enter Open  |  1-${tasteMemoryEntries.length} Open  |  B Back  |  Q Quit`
   ].join("\n");
 }
 
@@ -336,12 +351,44 @@ export function renderTasteImportResultSurface(result: TasteImportResult): strin
     "Updated:",
     "  Imported taste signals",
     "  Taste memory",
-    "  Taste profile needs refresh",
     "",
-    "Actions:",
-    "> Rebuild taste profile",
-    "  Start station from this playlist",
-    "  Back to Taste & Memory"
+    "Press Enter to return to Taste & Memory."
+  ].join("\n");
+}
+
+export function renderTasteSummarySurface(options: Pick<WelcomeReadinessOptions, "config">): string {
+  const summary = readTasteMemorySummary(options.config);
+  const details = readTasteMemoryDetails(options.config);
+  if (!details.exists) {
+    return [
+      "Taste Summary",
+      "",
+      "No taste file has been created yet.",
+      "",
+      "Import a NetEase playlist first, then Pockedio can summarize your listening signals.",
+      "",
+      "Press Enter to return to Taste & Memory."
+    ].join("\n");
+  }
+
+  return [
+    "Taste Summary",
+    "",
+    formatTasteLine("Imported", summary.importedLists, 14),
+    formatTasteLine("Last import", summary.lastImport, 14),
+    formatTasteLine("Profile", summary.profileStatus, 14),
+    formatTasteLine("Taste file", options.config.paths.taste, 14),
+    "",
+    "Top artists",
+    ...formatRankedList(details.topArtists, "No imported artists yet."),
+    "",
+    "Playlists",
+    ...formatPlainList(details.playlists, "No imported playlists yet.", 5),
+    "",
+    "Sample tracks",
+    ...formatPlainList(details.sampleTracks, "No imported tracks yet.", 6),
+    "",
+    "Press Enter to return to Taste & Memory."
   ].join("\n");
 }
 
@@ -467,6 +514,14 @@ export async function promptVoiceSetup(options: Pick<WelcomeReadinessOptions, "c
   });
 }
 
+export async function promptContextSetup(options: Pick<WelcomeReadinessOptions, "config">): Promise<ContextSetupAction> {
+  return promptNumberedSurface({
+    entries: contextSetupEntries,
+    initialAction: "calendar",
+    render: (action) => renderContextSetupSurface(options, { selectedAction: action })
+  });
+}
+
 export async function promptDjVoiceChooser(
   options: Pick<WelcomeReadinessOptions, "config" | "platform">,
   initialVoice?: DjVoiceChoiceId
@@ -557,6 +612,19 @@ export function applyVoiceSetupKey(
 ): SelectableKeyResult<VoiceSetupAction> {
   return applySelectableKey({
     entries: voiceSetupEntries,
+    selectedAction,
+    key,
+    backAction: "back",
+    quitAction: "quit"
+  });
+}
+
+export function applyContextSetupKey(
+  selectedAction: ContextSetupAction,
+  key: SelectableKeyInput
+): SelectableKeyResult<ContextSetupAction> {
+  return applySelectableKey({
+    entries: contextSetupEntries,
     selectedAction,
     key,
     backAction: "back",
@@ -737,11 +805,14 @@ export function resolveWelcomeHubAction(input: string): WelcomeHubAction {
   return "session";
 }
 
-export function resolveSetupConnectionsAction(input: string): SetupConnectionsAction {
+export function resolveSetupConnectionsAction(input: string): SetupConnectionsAction | undefined {
   const normalized = input.trim().toLowerCase();
   const numericIndex = Number(normalized) - 1;
   if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < setupConnectionsEntries.length) {
     return setupConnectionsEntries[numericIndex]!.action;
+  }
+  if (/^\d+$/.test(normalized)) {
+    return undefined;
   }
   if (normalized === "" || normalized === "enter") {
     return "full_setup";
@@ -755,8 +826,8 @@ export function resolveSetupConnectionsAction(input: string): SetupConnectionsAc
   if (normalized === "n" || normalized === "netease") {
     return "netease_setup";
   }
-  if (normalized === "c" || normalized === "calendar") {
-    return "calendar_setup";
+  if (normalized === "c" || normalized === "context" || normalized === "calendar") {
+    return "context_setup";
   }
   if (normalized === "b" || normalized === "back") {
     return "back";
@@ -767,11 +838,41 @@ export function resolveSetupConnectionsAction(input: string): SetupConnectionsAc
   return "full_setup";
 }
 
-export function resolveLlmSetupAction(input: string): LlmSetupAction {
+export function resolveContextSetupAction(input: string): ContextSetupAction | undefined {
+  const normalized = input.trim().toLowerCase();
+  const numericIndex = Number(normalized) - 1;
+  if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < contextSetupEntries.length) {
+    return contextSetupEntries[numericIndex]!.action;
+  }
+  if (/^\d+$/.test(normalized)) {
+    return undefined;
+  }
+  if (normalized === "" || normalized === "enter" || normalized === "calendar") {
+    return "calendar";
+  }
+  if (normalized === "weather") {
+    return "weather";
+  }
+  if (normalized === "diary") {
+    return "diary";
+  }
+  if (normalized === "b" || normalized === "back") {
+    return "back";
+  }
+  if (normalized === "q" || normalized === "quit") {
+    return "quit";
+  }
+  return "calendar";
+}
+
+export function resolveLlmSetupAction(input: string): LlmSetupAction | undefined {
   const normalized = input.trim().toLowerCase();
   const numericIndex = Number(normalized) - 1;
   if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < llmSetupEntries.length) {
     return llmSetupEntries[numericIndex]!.action;
+  }
+  if (/^\d+$/.test(normalized)) {
+    return undefined;
   }
   if (normalized === "" || normalized === "enter" || normalized === "openai") {
     return "openai";
@@ -800,12 +901,15 @@ export function resolveLlmSetupAction(input: string): LlmSetupAction {
   return "openai";
 }
 
-export function resolveLlmProviderAction(input: string, providerId: LlmProviderId): LlmProviderAction {
+export function resolveLlmProviderAction(input: string, providerId: LlmProviderId): LlmProviderAction | undefined {
   const normalized = input.trim().toLowerCase();
   const entries = getLlmProviderEntries(providerId);
   const numericIndex = Number(normalized) - 1;
   if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < entries.length) {
     return entries[numericIndex]!.action;
+  }
+  if (/^\d+$/.test(normalized)) {
+    return undefined;
   }
   if (normalized === "" || normalized === "enter" || normalized === "paste" || normalized === "key") {
     return entries[0]!.action;
@@ -840,11 +944,14 @@ export function resolveLlmProviderAction(input: string, providerId: LlmProviderI
   return entries[0]!.action;
 }
 
-export function resolveVoiceSetupAction(input: string): VoiceSetupAction {
+export function resolveVoiceSetupAction(input: string): VoiceSetupAction | undefined {
   const normalized = input.trim().toLowerCase();
   const numericIndex = Number(normalized) - 1;
   if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < voiceSetupEntries.length) {
     return voiceSetupEntries[numericIndex]!.action;
+  }
+  if (/^\d+$/.test(normalized)) {
+    return undefined;
   }
   if (normalized === "" || normalized === "enter" || normalized === "choose" || normalized === "voice") {
     return "choose_voice";
@@ -864,23 +971,20 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction {
   return "choose_voice";
 }
 
-export function resolveTasteMemoryAction(input: string): TasteMemoryAction {
+export function resolveTasteMemoryAction(input: string): TasteMemoryAction | undefined {
   const normalized = input.trim().toLowerCase();
   const numericIndex = Number(normalized) - 1;
   if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < tasteMemoryEntries.length) {
     return tasteMemoryEntries[numericIndex]!.action;
   }
+  if (/^\d+$/.test(normalized)) {
+    return undefined;
+  }
   if (normalized === "" || normalized === "enter" || normalized === "import") {
     return "import";
   }
-  if (normalized === "rebuild" || normalized === "profile") {
-    return "rebuild_profile";
-  }
   if (normalized === "summary") {
     return "show_summary";
-  }
-  if (normalized === "start") {
-    return "start_station";
   }
   if (normalized === "b" || normalized === "back") {
     return "back";
@@ -908,6 +1012,15 @@ function buildMusicReadiness(config: PockedioConfig): WelcomeReadinessItem {
     value: accountReady ? "NetEase connected" : "NetEase anonymous",
     ok: true
   };
+}
+
+function formatContextSummary(config: PockedioConfig, calendarStatus: string): string {
+  const parts = [
+    `Calendar ${calendarStatus.toLowerCase()}`,
+    config.weather.enabled ? `Weather ${config.weather.location}` : "Weather off",
+    config.diary.enabled ? "Diary on" : "Diary off"
+  ];
+  return parts.join(", ");
 }
 
 function buildLlmReadiness(config: PockedioConfig, env: PockedioEnv): WelcomeReadinessItem {
@@ -1169,6 +1282,76 @@ function readTasteMemorySummary(config: PockedioConfig): {
     recentSignals: "Stored locally when feedback exists",
     sessionMemory: "Updated during sessions"
   };
+}
+
+function readTasteMemoryDetails(config: PockedioConfig): {
+  exists: boolean;
+  topArtists: Array<{ label: string; count: number }>;
+  playlists: string[];
+  sampleTracks: string[];
+} {
+  if (!fs.existsSync(config.paths.taste)) {
+    return {
+      exists: false,
+      topArtists: [],
+      playlists: [],
+      sampleTracks: []
+    };
+  }
+
+  const markdown = fs.readFileSync(config.paths.taste, "utf8");
+  const tracks = extractMarkdownSection(markdown, "Imported Tracks")
+    .map((line) => parseImportedTrackSummaryLine(line.trim()))
+    .filter((track): track is { title: string; artist: string } => Boolean(track));
+  const artistCounts = new Map<string, number>();
+  for (const track of tracks) {
+    artistCounts.set(track.artist, (artistCounts.get(track.artist) ?? 0) + 1);
+  }
+
+  return {
+    exists: true,
+    topArtists: [...artistCounts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, 8),
+    playlists: extractMarkdownSection(markdown, "Situational Playlists")
+      .map((line) => line.match(/^- (.+)$/)?.[1]?.trim())
+      .filter((value): value is string => Boolean(value) && value !== "No signals yet.")
+      .slice(0, 5),
+    sampleTracks: tracks
+      .slice(0, 6)
+      .map((track) => `${track.title} - ${track.artist}`)
+  };
+}
+
+function parseImportedTrackSummaryLine(line: string): { title: string; artist: string } | null {
+  if (!line.startsWith("- ") || line.includes("No tracks imported yet.")) {
+    return null;
+  }
+  const content = line.replace(/^- /, "");
+  const withoutDetails = content.replace(/\s+\([^)]*\)$/, "");
+  const separator = withoutDetails.lastIndexOf(" - ");
+  if (separator < 0) {
+    return null;
+  }
+  return {
+    title: withoutDetails.slice(0, separator).trim(),
+    artist: withoutDetails.slice(separator + 3).trim()
+  };
+}
+
+function formatRankedList(items: Array<{ label: string; count: number }>, emptyLabel: string): string[] {
+  if (items.length === 0) {
+    return [`  ${emptyLabel}`];
+  }
+  return items.map((item, index) => `  ${index + 1}. ${item.label} (${item.count})`);
+}
+
+function formatPlainList(items: string[], emptyLabel: string, max: number): string[] {
+  if (items.length === 0) {
+    return [`  ${emptyLabel}`];
+  }
+  return items.slice(0, max).map((item) => `  - ${item}`);
 }
 
 function countImportedTrackLines(markdown: string): number {

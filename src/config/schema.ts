@@ -51,6 +51,10 @@ export const pockedioConfigSchema = z.object({
   freshness: z.object({
     enabled: z.boolean().default(true)
   }).default({}),
+  memory: z.object({
+    dailyHeartbeat: z.boolean().default(true),
+    heartbeatHistoryLimit: z.number().int().min(0).max(500).default(20)
+  }).default({}),
   llm: z.object({
     provider: z.literal("openai").default("openai"),
     model: z.string().min(1).default("gpt-4.1-mini"),

@@ -7,7 +7,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatStartupSetupNote, handleInteractiveInterrupt, runSessionTurn, stopPlaybackForSessionExit, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatRuntimeDjDisplayName, formatStartupSetupNote, handleInteractiveInterrupt, runSessionTurn, stopPlaybackForSessionExit, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
@@ -210,13 +210,16 @@ describe("runSessionTurn", () => {
     config.tts.macosVoice = "sable";
 
     expect(formatInteractiveStartupDisplayName(config, "darwin")).toBe("Sable");
+    expect(formatRuntimeDjDisplayName(config, "darwin")).toBe("Sable");
 
     config.tts.provider = "fish";
     config.tts.fishVoice = "nova";
     expect(formatInteractiveStartupDisplayName(config, "darwin")).toBe("Nova");
+    expect(formatRuntimeDjDisplayName(config, "darwin")).toBe("Nova");
 
     config.tts.provider = "text";
     expect(formatInteractiveStartupDisplayName(config, "darwin")).toBe("Pockedio");
+    expect(formatRuntimeDjDisplayName(config, "darwin")).toBe("Pockedio");
   });
 
   it("shows a concise startup setup note when taste is missing", () => {
@@ -395,6 +398,30 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("Queue:");
     expect(playbackState.station).toBeUndefined();
     expect(playbackState.storedTracks).toHaveLength(1);
+  });
+
+  it("labels playback notes with the selected built-in voice, not the legacy DJ name", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+    config.tts.provider = "macos";
+    config.tts.macosVoice = "lumen";
+    const playbackState: InteractivePlaybackState = {};
+
+    const result = await runSessionTurn({
+      input: "play To Be Alone With You by Sufjan Stevens",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    expect(result.response).toContain("Lumen's note:");
+    expect(result.response).not.toContain("Mina's note:");
   });
 
   it("opens a station continuation prompt after a direct song finishes", async () => {
@@ -3743,7 +3770,10 @@ describe("runSessionTurn", () => {
   it("prepares an explicit DJ program and waits for the user to start it", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
+    config.tts.provider = "macos";
+    config.tts.macosVoice = "lumen";
     const events: string[] = [];
+    const prompts: string[] = [];
     const playbackState: InteractivePlaybackState = {
       activePlayback: {
         target: "https://example.com/current.mp3",
@@ -3756,7 +3786,10 @@ describe("runSessionTurn", () => {
     };
     const llm: LlmClient = {
       generateJson: async () => ({ ok: true, value: { type: "playback_request", confidence: "high" } }),
-      generateText: async () => ({ ok: true, value: "Mina here. I’ll turn this into a short radio-style opening." })
+      generateText: async (prompt) => {
+        prompts.push(prompt);
+        return { ok: true, value: "Lumen here. I’ll turn this into a short radio-style opening." };
+      }
     };
 
     const result = await runSessionTurn({
@@ -3790,6 +3823,8 @@ describe("runSessionTurn", () => {
     expect(result.response).toBe("DJ program is ready.\n\nPress Enter to start it, or tell me how to adjust it.");
     expect(result.response).not.toContain("Press Enter to play it");
     expect(result.response).not.toContain('type "dj"');
+    expect(prompts.some((prompt) => prompt.includes("You are Lumen, Pockedio's spoken DJ."))).toBe(true);
+    expect(prompts.some((prompt) => prompt.includes("You are Mina, Pockedio's spoken DJ."))).toBe(false);
     expect(events.some((event) => event.startsWith("start-ducked:"))).toBe(false);
     expect(playbackState.pendingDjProgram).toBeDefined();
     expect(playbackState.djProgram).toBeUndefined();

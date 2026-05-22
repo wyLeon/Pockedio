@@ -34,6 +34,7 @@ describe("database migrations", () => {
 
     expect(tables).toEqual([
       "calendar_events",
+      "context_refresh_runs",
       "context_snapshots",
       "diary_summaries",
       "dj_audio",

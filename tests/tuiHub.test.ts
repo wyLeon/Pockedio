@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ensureRuntimeDirs, loadConfig } from "../src/config/load.js";
 import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { importTaste } from "../src/taste/importTaste.js";
-import { applyDjVoiceChooserKey, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderDjVoiceChooserSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
+import { applyContextSetupKey, applyDjVoiceChooserKey, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveContextSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderContextSetupSurface, renderDjVoiceChooserSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderTasteSummarySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-tui-test-"));
@@ -123,9 +123,11 @@ describe("MOLE-inspired welcome hub", () => {
     expect(setup).toContain("Music");
     expect(setup).toContain("LLM");
     expect(setup).toContain("Voice");
+    expect(setup).toContain("Context");
     expect(setup).toContain("> 1. Run full setup");
     expect(setup).toContain("Configure LLM");
     expect(setup).toContain("Configure Voice");
+    expect(setup).toContain("Configure Context");
 
     const llm = renderLlmSetupSurface({ config, env });
     expect(llm).toContain("LLM");
@@ -154,14 +156,43 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(setup).toContain("  1. Run full setup");
     expect(setup).toContain("> 3. Configure Voice");
-    expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
+    expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit");
     expect(resolveSetupConnectionsAction("1")).toBe("full_setup");
     expect(resolveSetupConnectionsAction("2")).toBe("llm_setup");
     expect(resolveSetupConnectionsAction("3")).toBe("voice_setup");
     expect(resolveSetupConnectionsAction("4")).toBe("netease_setup");
-    expect(resolveSetupConnectionsAction("5")).toBe("calendar_setup");
-    expect(resolveSetupConnectionsAction("6")).toBe("back");
+    expect(resolveSetupConnectionsAction("5")).toBe("context_setup");
+    expect(resolveSetupConnectionsAction("6")).toBeUndefined();
     expect(resolveSetupConnectionsAction("b")).toBe("back");
+  });
+
+  it("renders real Context setup actions for calendar, weather, and diary", () => {
+    const { config } = makeConfig();
+    const contextConfig = {
+      ...config,
+      weather: { enabled: true, location: "Guangzhou" },
+      diary: { enabled: false, path: "/Users/leonw/Diary" }
+    };
+    const context = renderContextSetupSurface({ config: contextConfig }, { selectedAction: "weather" });
+
+    expect(context).toContain("Context");
+    expect(context).toContain("Calendar        Enabled");
+    expect(context).toContain("Weather         Guangzhou");
+    expect(context).toContain("Diary           Not enabled");
+    expect(context).toContain("  1. Configure Calendar");
+    expect(context).toContain("> 2. Configure Weather");
+    expect(context).toContain("3. Configure Diary");
+    expect(context).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit");
+    expect(resolveContextSetupAction("1")).toBe("calendar");
+    expect(resolveContextSetupAction("2")).toBe("weather");
+    expect(resolveContextSetupAction("3")).toBe("diary");
+    expect(resolveContextSetupAction("4")).toBeUndefined();
+    expect(resolveContextSetupAction("b")).toBe("back");
+    expect(applyContextSetupKey("calendar", { name: "down" })).toEqual({ selectedAction: "weather" });
+    expect(applyContextSetupKey("weather", { name: "return" })).toEqual({
+      selectedAction: "weather",
+      submittedAction: "weather"
+    });
   });
 
   it("moves the visible cursor inside LLM setup options and routes LLM shortcuts", () => {
@@ -172,14 +203,14 @@ describe("MOLE-inspired welcome hub", () => {
     expect(llm).toContain("> 4. Use local vLLM");
     expect(llm).toContain("Current config");
     expect(llm).toContain("OpenAI-compatible");
-    expect(llm).toContain("↑↓ Select  |  Enter Open  |  1-7 Open  |  B Back  |  Q Quit");
+    expect(llm).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
     expect(resolveLlmSetupAction("1")).toBe("openai");
     expect(resolveLlmSetupAction("2")).toBe("deepseek");
     expect(resolveLlmSetupAction("3")).toBe("openrouter");
     expect(resolveLlmSetupAction("4")).toBe("local_vllm");
     expect(resolveLlmSetupAction("5")).toBe("custom");
     expect(resolveLlmSetupAction("6")).toBe("test_connection");
-    expect(resolveLlmSetupAction("7")).toBe("back");
+    expect(resolveLlmSetupAction("7")).toBeUndefined();
     expect(resolveLlmSetupAction("b")).toBe("back");
   });
 
@@ -195,13 +226,13 @@ describe("MOLE-inspired welcome hub", () => {
     expect(openai).toContain("2. Use shell env");
     expect(openai).toContain("3. Change model");
     expect(openai).toContain("4. Test connection");
-    expect(openai).toContain("5. Back");
-    expect(openai).toContain("↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit");
+    expect(openai).not.toContain("5. Back");
+    expect(openai).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit");
     expect(resolveLlmProviderAction("1", "openai")).toBe("paste_key");
     expect(resolveLlmProviderAction("2", "openai")).toBe("use_shell_env");
     expect(resolveLlmProviderAction("3", "openai")).toBe("change_model");
     expect(resolveLlmProviderAction("4", "openai")).toBe("test_connection");
-    expect(resolveLlmProviderAction("5", "openai")).toBe("back");
+    expect(resolveLlmProviderAction("5", "openai")).toBeUndefined();
     expect(applyLlmProviderKey("paste_key", { name: "down" }, "openai")).toEqual({ selectedAction: "use_shell_env" });
   });
 
@@ -217,13 +248,13 @@ describe("MOLE-inspired welcome hub", () => {
     expect(vllm).toContain("3. Paste API key");
     expect(vllm).toContain("4. Set model manually");
     expect(vllm).toContain("5. Set base URL");
-    expect(vllm).toContain("6. Back");
+    expect(vllm).not.toContain("6. Back");
     expect(resolveLlmProviderAction("1", "local_vllm")).toBe("check_server");
     expect(resolveLlmProviderAction("2", "local_vllm")).toBe("discover_models");
     expect(resolveLlmProviderAction("3", "local_vllm")).toBe("paste_key");
     expect(resolveLlmProviderAction("4", "local_vllm")).toBe("change_model");
     expect(resolveLlmProviderAction("5", "local_vllm")).toBe("change_base_url");
-    expect(resolveLlmProviderAction("6", "local_vllm")).toBe("back");
+    expect(resolveLlmProviderAction("6", "local_vllm")).toBeUndefined();
   });
 
   it("keeps edited provider config visible inside provider detail screens", () => {
@@ -252,7 +283,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(custom).toContain("4. Change base URL");
     expect(custom).toContain("> 5. Set API key env");
     expect(custom).toContain("6. Test connection");
-    expect(custom).toContain("7. Back");
+    expect(custom).not.toContain("7. Back");
     expect(resolveLlmProviderAction("5", "custom")).toBe("change_api_key_env");
     expect(resolveLlmProviderAction("key_env", "custom")).toBe("change_api_key_env");
   });
@@ -278,7 +309,7 @@ describe("MOLE-inspired welcome hub", () => {
       selectedAction: "deepseek"
     });
     expect(applyLlmSetupKey("openai", { name: "up" })).toEqual({
-      selectedAction: "back"
+      selectedAction: "test_connection"
     });
     expect(applyLlmSetupKey("local_vllm", { name: "return" })).toEqual({
       selectedAction: "local_vllm",
@@ -304,11 +335,11 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(voice).toContain("  1. Choose DJ voice");
     expect(voice).toContain("> 2. Configure Fish TTS");
-    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit");
+    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit");
     expect(resolveVoiceSetupAction("1")).toBe("choose_voice");
     expect(resolveVoiceSetupAction("2")).toBe("fish_tts");
     expect(resolveVoiceSetupAction("3")).toBe("text_only");
-    expect(resolveVoiceSetupAction("4")).toBe("back");
+    expect(resolveVoiceSetupAction("4")).toBeUndefined();
     expect(applyVoiceSetupKey("choose_voice", { name: "down" })).toEqual({ selectedAction: "fish_tts" });
     expect(applyVoiceSetupKey("fish_tts", { name: "return" })).toEqual({
       selectedAction: "fish_tts",
@@ -365,30 +396,37 @@ describe("MOLE-inspired welcome hub", () => {
     expect(taste).toContain("Taste & Memory");
     expect(taste).toContain("Imported lists  3 playlists, 3 tracks");
     expect(taste).toContain("Taste profile   Needs refresh");
-    expect(taste).toContain("> 1. Import playlist or taste file");
-    expect(taste).toContain("Start station from latest import");
+    expect(taste).toContain("> 1. Import playlist");
+    expect(taste).not.toContain("Start station");
 
     const imported = renderTasteImportResultSurface(result);
     expect(imported).toContain("Imported playlist");
     expect(imported).toContain("Tracks        3");
-    expect(imported).toContain("Taste profile needs refresh");
-    expect(imported).toContain("> Rebuild taste profile");
-    expect(imported).toContain("Start station from this playlist");
+    expect(imported).not.toContain("Taste profile needs refresh");
+    expect(imported).not.toContain("Rebuild taste profile");
+    expect(imported).not.toContain("Start station");
+    expect(imported).toContain("Press Enter to return to Taste & Memory.");
+
+    const summary = renderTasteSummarySurface({ config });
+    expect(summary).toContain("Taste Summary");
+    expect(summary).toContain("Imported      3 playlists, 3 tracks");
+    expect(summary).toContain("Top artists");
+    expect(summary).toContain("1. Brian Eno (1)");
+    expect(summary).toContain("- ambient reset");
+    expect(summary).toContain("- Blue in Green - Miles Davis");
   });
 
   it("moves and submits Taste & Memory actions", () => {
     const { config } = makeConfig();
     const taste = renderTasteMemorySurface({ config }, { selectedAction: "show_summary" });
 
-    expect(taste).toContain("  1. Import playlist or taste file");
-    expect(taste).toContain("> 3. Show taste summary");
-    expect(taste).toContain("↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit");
+    expect(taste).toContain("  1. Import playlist");
+    expect(taste).toContain("> 2. Show taste summary");
+    expect(taste).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B Back  |  Q Quit");
     expect(resolveTasteMemoryAction("1")).toBe("import");
-    expect(resolveTasteMemoryAction("2")).toBe("rebuild_profile");
-    expect(resolveTasteMemoryAction("3")).toBe("show_summary");
-    expect(resolveTasteMemoryAction("4")).toBe("start_station");
-    expect(resolveTasteMemoryAction("5")).toBe("back");
-    expect(applyTasteMemoryKey("import", { name: "down" })).toEqual({ selectedAction: "rebuild_profile" });
+    expect(resolveTasteMemoryAction("2")).toBe("show_summary");
+    expect(resolveTasteMemoryAction("3")).toBeUndefined();
+    expect(applyTasteMemoryKey("import", { name: "down" })).toEqual({ selectedAction: "show_summary" });
     expect(applyTasteMemoryKey("show_summary", { name: "return" })).toEqual({
       selectedAction: "show_summary",
       submittedAction: "show_summary"

@@ -43,7 +43,7 @@ Pockedio
 Personal AI DJ for context-aware listening
 
 > Enter DJ Session        Talk, ask, play, reshape, queue, DJ mode
-  Setup & Connections     Music, LLM, voice, calendar, weather, diary
+  Setup & Connections     Music, LLM, voice, context
   Taste & Memory          Import taste, review personalization inputs
   Status                  Playback, scheduler, health, version
 
@@ -103,17 +103,16 @@ Setup & Connections
 Music           NetEase connected
 LLM             OpenAI key missing
 Voice           Vale, built-in macOS
-Calendar        Enabled
-Weather         Shanghai
-Diary           Not enabled
+Context         Calendar enabled, Weather Shanghai, Diary off
 
 Actions:
 > Run full setup
   Configure LLM
   Configure Voice
   Configure NetEase
-  Configure Calendar
-  Back
+  Configure Context
+
+↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit
 ```
 
 ### Behavior
@@ -122,8 +121,32 @@ Actions:
 - `Configure LLM` maps to a focused LLM setup flow.
 - `Configure Voice` maps to a focused voice setup flow.
 - `Configure NetEase` maps to existing NetEase setup flow.
-- `Configure Calendar` maps to existing Calendar setup flow.
+- `Configure Context` opens a real submenu for Calendar, Weather, and Diary setup.
 - The setup flow should stay shallow. Each action opens one focused configuration surface and returns to `Setup & Connections`.
+
+### Context Setup Surface
+
+```text
+Context
+
+Calendar        Enabled
+Weather         Shanghai
+Diary           Not enabled
+
+Actions:
+> Configure Calendar
+  Configure Weather
+  Configure Diary
+
+↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit
+```
+
+### Context Behavior
+
+- `Configure Calendar` enables/disables Apple Calendar context and runs the calendar permission/readiness check when enabled.
+- `Configure Weather` enables/disables weather context, lets the user change city, and tests the weather lookup.
+- `Configure Diary` enables/disables diary context, lets the user change the diary folder path, and tests latest-entry lookup.
+- Weather and Diary are not displayed as inert rows on `Setup & Connections`; they are grouped under `Context` because they influence DJ context rather than acting as service connections.
 
 ### LLM Setup Surface
 
@@ -303,16 +326,15 @@ Session memory  Last updated if available
 Diary           Summary available / not enabled
 
 Actions:
-> Import playlist or taste file
-  Rebuild taste profile
+> Import playlist
   Show taste summary
-  Start station from latest import
-  Back
+
+↑↓ Select  |  Enter Open  |  1-2 Open  |  B Back  |  Q Quit
 ```
 
 ### Behavior
 
-- `Import playlist or taste file` should accept a normalized taste CSV file, a NetEase playlist link, or a NetEase playlist ID.
+- `Import playlist` should accept only a NetEase playlist link or NetEase playlist ID in the interactive TUI.
 - Import can be run at any time. It should not stop current playback, skip tracks, or replace the current station silently.
 - A new import is a taste signal, not an immediate playback command.
 - Imports should merge into the existing taste surface and preserve user-authored `taste.md` notes.
@@ -329,16 +351,10 @@ Taste file    ~/.pockedio/taste.md
 Updated:
   Imported taste signals
   Taste memory
-  Taste profile needs refresh
 
-Actions:
-> Rebuild taste profile
-  Start station from this playlist
-  Back to Taste & Memory
+Press Enter to return to Taste & Memory.
 ```
 
-- `Rebuild taste profile` should map to the current taste profile update behavior.
-- `Start station from latest import` should open the main DJ session with the playlist context available as the station seed. It should not start automatically right after import.
 - `Show taste summary` should show a compact summary, not raw diary or full transcripts.
 
 ## Entry Point 4: Status
@@ -408,9 +424,9 @@ After implementation, verify the goals with these checks:
 - Open `Configure Voice` on macOS. Expected: Lumen, Sable, Arden, Vale, and Sol are available, with Vale as default.
 - Select a built-in voice and request a spoken DJ station. Expected: Pockedio prepares DJ voice without requiring Fish TTS.
 - Select Fish TTS / Mina or Nova. Expected: Pockedio asks for Fish runtime details only in that advanced path.
-- Open `Taste & Memory`, import a NetEase playlist link, and return to the surface. Expected: latest import, imported playlist count, and `Taste profile needs refresh` are visible.
+- Open `Taste & Memory`, import a NetEase playlist link, and return to the surface. Expected: last import and imported playlist count are visible.
 - Import a second playlist. Expected: previous playlist tracks and user-authored `taste.md` notes are preserved.
-- Import while playback is active. Expected: playback continues and the current queue is not replaced unless the user chooses `Start station from this playlist`.
+- Import while playback is active. Expected: playback continues and the current queue is not replaced.
 - Run a non-TTY command such as `pockedio status` or piped invocation. Expected: plain command behavior, no interactive hub.
 - Run the automated tests covering hub routing, readiness formatting, LLM config detection, voice provider defaults, and non-TTY bypass.
 

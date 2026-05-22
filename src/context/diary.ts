@@ -12,6 +12,19 @@ export type DiaryContext = {
   listeningHint: string;
 };
 
+export type DiaryHistoryRefreshResult = {
+  available: boolean;
+  filesScanned: number;
+  summariesGenerated: number;
+  summariesReused: number;
+  memoriesUpdated: number;
+};
+
+export type DiaryHistoryRefreshOptions = {
+  limit?: number;
+  now?: Date;
+};
+
 export function readDiaryContext(config: PockedioConfig): DiaryContext | null {
   if (!config.diary.enabled || !config.diary.path) {
     return null;
@@ -31,6 +44,75 @@ export function readDiaryContext(config: PockedioConfig): DiaryContext | null {
     filePath: latest,
     sourceMtime: stat.mtime.toISOString(),
     ...metadataDiarySummary(latest, stat.mtime.toISOString())
+  };
+}
+
+export async function refreshDiaryHistoryMemory(
+  config: PockedioConfig,
+  llm: LlmClient,
+  options: DiaryHistoryRefreshOptions = {}
+): Promise<DiaryHistoryRefreshResult> {
+  const files = listDiaryFiles(config.diary.enabled ? config.diary.path : undefined).slice(0, options.limit ?? 120);
+  if (files.length === 0) {
+    return {
+      available: false,
+      filesScanned: 0,
+      summariesGenerated: 0,
+      summariesReused: 0,
+      memoriesUpdated: 0
+    };
+  }
+
+  runMigrations(config);
+  const store = new MemoryStore(config);
+  let summariesGenerated = 0;
+  let summariesReused = 0;
+  let memoriesUpdated = 0;
+  const now = (options.now ?? new Date()).toISOString();
+  try {
+    for (const filePath of files) {
+      const sourceMtime = fs.statSync(filePath).mtime.toISOString();
+      let parsed = store.getDiarySummary(filePath, sourceMtime);
+      if (parsed) {
+        summariesReused += 1;
+      } else {
+        const result = await llm.generateText(buildDiarySummaryPrompt(filePath));
+        const context = result.ok
+          ? parseDiarySummaryPayload(result.value.trim())
+          : metadataDiarySummary(filePath, sourceMtime);
+        store.upsertDiarySummary({
+          sourceFile: filePath,
+          sourceMtime,
+          summary: formatDiarySummaryPayload(context),
+          generatedAt: now
+        });
+        parsed = store.getDiarySummary(filePath, sourceMtime);
+        summariesGenerated += 1;
+      }
+
+      const context = {
+        filePath,
+        sourceMtime,
+        ...parseDiarySummaryPayload(parsed?.summary ?? formatDiarySummaryPayload(metadataDiarySummary(filePath, sourceMtime)))
+      };
+      store.replaceMemoryItemBySourceKey(
+        "diary",
+        diaryMemorySourceKey(context),
+        formatDiaryMemoryContent(context),
+        buildDiaryMemoryMetadata(context, now, "history")
+      );
+      memoriesUpdated += 1;
+    }
+  } finally {
+    store.close();
+  }
+
+  return {
+    available: true,
+    filesScanned: files.length,
+    summariesGenerated,
+    summariesReused,
+    memoriesUpdated
   };
 }
 
@@ -81,6 +163,56 @@ export async function readDiaryContextWithLlmSummary(
   } finally {
     store.close();
   }
+}
+
+export function formatDiaryMemoryContent(context: DiaryContext): string {
+  return [
+    "Diary memory:",
+    context.summary,
+    `Listening fit: ${context.listeningHint}`
+  ].join(" ");
+}
+
+export function buildDiaryMemoryMetadata(
+  context: DiaryContext,
+  generatedAt: string,
+  source: "latest" | "history"
+): Record<string, unknown> {
+  const date = inferDiaryDate(context.filePath, context.sourceMtime);
+  return {
+    source: "diary",
+    sourceFile: context.filePath,
+    sourceMtime: context.sourceMtime,
+    date,
+    month: date?.slice(0, 7),
+    moodTags: extractMoodTags(`${context.summary} ${context.listeningHint}`),
+    lifeContextTags: extractLifeContextTags(`${context.summary} ${context.listeningHint}`),
+    musicHint: context.listeningHint,
+    generatedAt,
+    sensitivity: "summary_only",
+    scope: source
+  };
+}
+
+export function diaryMemorySourceKey(context: DiaryContext): string {
+  const sourceMtime = context.sourceMtime ?? hashText(context.summary);
+  return `diary:${context.filePath}:${sourceMtime}`;
+}
+
+export function rankDiaryMemoryItems<T extends { content: string; metadata: unknown; createdAt: string }>(
+  items: T[],
+  query = "",
+  limit = 5
+): T[] {
+  const queryTokens = tokenizeForDiaryRank(query);
+  return items
+    .map((item, index) => ({
+      item,
+      score: scoreDiaryMemory(item, queryTokens, index)
+    }))
+    .sort((a, b) => b.score - a.score || b.item.createdAt.localeCompare(a.item.createdAt))
+    .slice(0, limit)
+    .map(({ item }) => item);
 }
 
 function getLatestDiaryFileWithMtime(config: PockedioConfig): { filePath: string; sourceMtime: string } | null {
@@ -167,11 +299,85 @@ function deriveDiaryListeningHint(summary: string): string {
 }
 
 function findLatestDiaryFile(root: string): string | null {
+  return listDiaryFiles(root)[0] ?? null;
+}
+
+function listDiaryFiles(root: string | undefined): string[] {
+  if (!root || !fs.existsSync(root)) {
+    return [];
+  }
   const entries = fs.readdirSync(root, { withFileTypes: true });
-  const files = entries
+  return entries
     .filter((entry) => entry.isFile() && /\.(md|markdown|txt)$/i.test(entry.name))
     .map((entry) => path.join(root, entry.name))
     .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+}
 
-  return files[0] ?? null;
+function inferDiaryDate(filePath: string, sourceMtime: string | undefined): string | undefined {
+  const basename = path.basename(filePath);
+  const match = basename.match(/(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)/);
+  if (match) {
+    return `${match[1]}-${match[2]}-${match[3]}`;
+  }
+  return sourceMtime?.slice(0, 10);
+}
+
+function extractMoodTags(text: string): string[] {
+  return extractTags(text, {
+    tired: /\b(exhausted|tired|drained|burned out|burnout|fatigue)\b/i,
+    calm: /\b(calm|peaceful|quiet|relieved|gentle)\b/i,
+    excited: /\b(excited|celebrat|energized|breakthrough|momentum)\b/i,
+    reflective: /\b(reflective|nostalg|memory|closure|transition)\b/i,
+    stressed: /\b(stress|stressed|pressure|overloaded|anxious)\b/i
+  });
+}
+
+function extractLifeContextTags(text: string): string[] {
+  return extractTags(text, {
+    work: /\b(work|meeting|deadline|project|focus|deep work|writing|study)\b/i,
+    travel: /\b(travel|commute|flight|train|trip)\b/i,
+    recovery: /\b(recovery|rest|sleep|decompress|reset)\b/i,
+    social: /\b(friend|family|dinner|date|social)\b/i,
+    weather: /\b(rain|rainy|winter|summer|humid|cold|hot)\b/i
+  });
+}
+
+function extractTags(text: string, patterns: Record<string, RegExp>): string[] {
+  return Object.entries(patterns)
+    .filter(([, pattern]) => pattern.test(text))
+    .map(([tag]) => tag);
+}
+
+function scoreDiaryMemory(
+  item: { content: string; metadata: unknown },
+  queryTokens: string[],
+  index: number
+): number {
+  const metadata = isRecord(item.metadata) ? item.metadata : {};
+  const searchable = [
+    item.content,
+    metadata.date,
+    metadata.month,
+    metadata.musicHint,
+    ...(Array.isArray(metadata.moodTags) ? metadata.moodTags : []),
+    ...(Array.isArray(metadata.lifeContextTags) ? metadata.lifeContextTags : [])
+  ].join(" ").toLowerCase();
+  const queryScore = queryTokens.reduce((score, token) => score + (searchable.includes(token) ? 4 : 0), 0);
+  return queryScore + Math.max(0, 3 - index * 0.1);
+}
+
+function tokenizeForDiaryRank(query: string): string[] {
+  return [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((token) => token.length >= 3))].slice(0, 12);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function hashText(value: string): string {
+  let hash = 0;
+  for (const char of value) {
+    hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  }
+  return Math.abs(hash).toString(16);
 }

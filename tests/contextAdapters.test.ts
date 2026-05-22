@@ -6,7 +6,7 @@ import { loadConfig, saveConfig } from "../src/config/load.js";
 import type { PockedioConfig } from "../src/config/schema.js";
 import { normalizeCalendarWarning, readCalendarContext, requestCalendarPermission } from "../src/context/calendar.js";
 import { buildContext } from "../src/context/contextBuilder.js";
-import { readDiaryContext, readDiaryContextWithLlmSummary } from "../src/context/diary.js";
+import { readDiaryContext, readDiaryContextWithLlmSummary, refreshDiaryHistoryMemory } from "../src/context/diary.js";
 import { formatRefreshContextResult, refreshContext } from "../src/context/refreshContext.js";
 import { readWeatherContext } from "../src/context/weather.js";
 import { withDatabase } from "../src/db/database.js";
@@ -280,6 +280,106 @@ describe("diary adapter", () => {
       listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
     });
   });
+
+  it("backfills historical diary files as summary-only durable memories", async () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const tired = path.join(diaryDir, "2026-05-01.md");
+    const rainy = path.join(diaryDir, "2026-05-02.md");
+    fs.writeFileSync(tired, "raw private burnout text");
+    fs.writeFileSync(rainy, "raw private rainy focus text");
+    fs.utimesSync(tired, new Date("2026-05-01T10:00:00.000Z"), new Date("2026-05-01T10:00:00.000Z"));
+    fs.utimesSync(rainy, new Date("2026-05-02T10:00:00.000Z"), new Date("2026-05-02T10:00:00.000Z"));
+    const config = makeConfig({ diary: { enabled: true, path: diaryDir } });
+    const prompts: string[] = [];
+
+    const result = await refreshDiaryHistoryMemory(config, {
+      generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "unused" }),
+      generateText: async (prompt: string) => {
+        prompts.push(prompt);
+        return {
+          ok: true as const,
+          value: prompt.includes("rainy focus")
+            ? [
+                "Summary: Rainy workday with a need for calm focus.",
+                "Listening hint: Favor soft focus music with rainy-night warmth."
+              ].join("\n")
+            : [
+                "Summary: Tired after intense work and looking for recovery.",
+                "Listening hint: Choose low-pressure recovery music."
+              ].join("\n")
+        };
+      }
+    }, { now: new Date("2026-05-03T00:00:00.000Z") });
+
+    expect(result).toMatchObject({
+      available: true,
+      filesScanned: 2,
+      summariesGenerated: 2,
+      summariesReused: 0,
+      memoriesUpdated: 2
+    });
+    expect(prompts).toHaveLength(2);
+
+    const rows = withDatabase(config, (database) => database.prepare(`
+      SELECT content, metadata_json as metadataJson
+      FROM memory_items
+      WHERE kind = 'diary'
+      ORDER BY content
+    `).all()) as Array<{ content: string; metadataJson: string }>;
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.content).join("\n")).not.toContain("raw private");
+    expect(rows[0].metadataJson).toContain("\"sensitivity\":\"summary_only\"");
+    expect(rows[0].metadataJson).toContain("\"scope\":\"history\"");
+  });
+
+  it("reuses cached historical diary summaries and ranks relevant memories in context", async () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const tired = path.join(diaryDir, "2026-05-01.md");
+    const rainy = path.join(diaryDir, "2026-05-02.md");
+    fs.writeFileSync(tired, "private tired work text");
+    fs.writeFileSync(rainy, "private rainy focus text");
+    fs.utimesSync(tired, new Date("2026-05-01T10:00:00.000Z"), new Date("2026-05-01T10:00:00.000Z"));
+    fs.utimesSync(rainy, new Date("2026-05-02T10:00:00.000Z"), new Date("2026-05-02T10:00:00.000Z"));
+    const config = makeConfig({
+      calendar: { enabled: false },
+      weather: { enabled: false, location: "Shanghai" },
+      diary: { enabled: true, path: diaryDir }
+    });
+    const llm = {
+      generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "unused" }),
+      generateText: async (prompt: string) => ({
+        ok: true as const,
+        value: prompt.includes("rainy focus")
+          ? [
+              "Summary: Rainy writing day that needs soft focus.",
+              "Listening hint: Use rainy soft focus music."
+            ].join("\n")
+          : [
+              "Summary: Tired workday that needs recovery.",
+              "Listening hint: Use warm recovery music."
+            ].join("\n")
+      })
+    };
+
+    await refreshDiaryHistoryMemory(config, llm);
+    const reused = await refreshDiaryHistoryMemory(config, {
+      ...llm,
+      generateText: async () => {
+        throw new Error("should reuse cached historical summaries");
+      }
+    });
+    const context = await buildContext(config, {
+      llm,
+      memoryQuery: "rainy focus station",
+      calendarRunner: async () => ({ stdout: "", stderr: "", timedOut: false, code: 0 })
+    });
+
+    expect(reused.summariesReused).toBe(2);
+    expect(context.memorySummaries[0]?.content).toContain("Rainy writing day");
+  });
 });
 
 describe("context builder", () => {
@@ -403,7 +503,14 @@ describe("context builder", () => {
     expect(formatRefreshContextResult({
       calendar: { available: true, eventsRead: 3, memoriesUpdated: 1 },
       diary: { available: true, latestFile: "/tmp/diary/entry.md", memoriesUpdated: 1 },
+      diaryHistory: {
+        available: true,
+        filesScanned: 8,
+        summariesGenerated: 2,
+        summariesReused: 6,
+        memoriesUpdated: 8
+      },
       tastePath: "/tmp/pockedio/taste.md"
-    })).toContain("Context memory is ready for future stations.");
+    })).toContain("History summaries 2 generated, 6 reused");
   });
 });

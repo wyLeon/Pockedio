@@ -7,7 +7,8 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import { getPockedioHome } from "./config/paths.js";
 import { loadConfig, saveConfig } from "./config/load.js";
 import { hasLocalLlmApiKey, saveLlmApiKey } from "./config/llmSecrets.js";
-import { runCalendarSetup, runNetEaseSetup, runSetup } from "./config/setup.js";
+import { runCalendarSetup, runDiarySetup, runNetEaseSetup, runSetup, runWeatherSetup } from "./config/setup.js";
+import { startDailyContextHeartbeat } from "./context/heartbeat.js";
 import { runRefreshContext } from "./context/refreshContext.js";
 import { pockedioVersion } from "./index.js";
 import { createLlmClient } from "./llm/openaiClient.js";
@@ -16,9 +17,9 @@ import { discoverVllmModels } from "./llm/vllmDiscovery.js";
 import { runProcess } from "./player/afplay.js";
 import { runServe } from "./scheduler/serve.js";
 import { runInteractiveSession } from "./session/sessionRunner.js";
-import { printStatus } from "./status/status.js";
+import { formatStatusReport, getStatusReport, printStatus } from "./status/status.js";
 import { importTasteInput } from "./taste/importTaste.js";
-import { updateTasteProfile } from "./taste/profile.js";
+import { importTasteFromNetEasePlaylist } from "./taste/neteasePlaylist.js";
 import {
   buildFishVoicePreview,
   buildMacosVoicePreview,
@@ -37,6 +38,7 @@ import {
   buildWelcomeReadiness,
   isFishTtsReady,
   promptDjVoiceChooser,
+  promptContextSetup,
   promptLlmProvider,
   promptLlmSetup,
   promptSetupConnections,
@@ -45,8 +47,10 @@ import {
   promptVoiceSetup,
   renderTasteImportResultSurface,
   renderTasteMemorySurface,
+  renderTasteSummarySurface,
   renderVoiceSetupSurface,
   resolveDefaultEntryMode,
+  type ContextSetupAction,
   type DjVoiceChoiceId,
   type LlmProviderAction,
   type LlmProviderId,
@@ -66,6 +70,8 @@ program
   .option("--session", "skip the welcome hub and enter the DJ session")
   .option("--no-hub", "skip the welcome hub and enter the DJ session")
   .action(async (options: { session?: boolean; hub?: boolean }) => {
+    const config = loadConfig();
+    startDailyContextHeartbeat(config);
     const mode = resolveDefaultEntryMode({
       stdinIsTty: process.stdin.isTTY,
       stdoutIsTty: process.stdout.isTTY,
@@ -76,7 +82,7 @@ program
       await runInteractiveSession();
       return;
     }
-    await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config: loadConfig() })));
+    await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config })));
   });
 
 program
@@ -86,6 +92,18 @@ program
   .action(async (section?: string) => {
     if (section === "calendar") {
       await runCalendarSetup();
+      return;
+    }
+    if (section === "weather") {
+      await runWeatherSetup();
+      return;
+    }
+    if (section === "diary") {
+      await runDiarySetup();
+      return;
+    }
+    if (section === "context") {
+      await runContextSetupLoop();
       return;
     }
     if (section === "netease") {
@@ -121,8 +139,9 @@ program
 program
   .command("refresh-context")
   .description("Refresh Calendar and diary context memory")
-  .action(async () => {
-    await runRefreshContext();
+  .option("--diary-history", "scan historical diary files into summary-only memory")
+  .action(async (options: { diaryHistory?: boolean }) => {
+    await runRefreshContext({ diaryHistory: Boolean(options.diaryHistory) });
   });
 
 program
@@ -151,7 +170,7 @@ async function runWelcomeHubAction(action: WelcomeHubAction): Promise<void> {
     return;
   }
   if (action === "setup") {
-    await runSetupConnectionsAction(await promptSetupConnections({ config: loadConfig() }));
+    await runSetupConnectionsLoop();
     return;
   }
   if (action === "llm_setup") {
@@ -163,7 +182,7 @@ async function runWelcomeHubAction(action: WelcomeHubAction): Promise<void> {
     return;
   }
   if (action === "status") {
-    await printStatus();
+    await showInteractiveStatus();
     return;
   }
   if (action === "taste") {
@@ -171,30 +190,82 @@ async function runWelcomeHubAction(action: WelcomeHubAction): Promise<void> {
   }
 }
 
-async function runSetupConnectionsAction(action: SetupConnectionsAction): Promise<void> {
+async function showInteractiveStatus(): Promise<void> {
+  await pauseWithMessage(formatStatusReport(await getStatusReport()));
+  await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config: loadConfig() })));
+}
+
+type SetupConnectionsOutcome = "continue" | "back" | "quit";
+
+async function runSetupConnectionsLoop(): Promise<void> {
+  while (true) {
+    const outcome = await runSetupConnectionsAction(await promptSetupConnections({ config: loadConfig() }));
+    if (outcome === "continue") {
+      continue;
+    }
+    if (outcome === "back") {
+      await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config: loadConfig() })));
+    }
+    return;
+  }
+}
+
+async function runSetupConnectionsAction(action: SetupConnectionsAction): Promise<SetupConnectionsOutcome> {
   if (action === "full_setup") {
     await runSetup();
-    return;
+    return "continue";
   }
   if (action === "llm_setup") {
     await runLlmSetupLoop();
-    return;
+    return "continue";
   }
   if (action === "voice_setup") {
     await runVoiceSetupLoop();
-    return;
+    return "continue";
   }
   if (action === "netease_setup") {
-    await runNetEaseSetup();
-    return;
+    const outcome = await runNetEaseSetup();
+    return outcome === "quit" ? "quit" : "continue";
   }
-  if (action === "calendar_setup") {
-    await runCalendarSetup();
-    return;
+  if (action === "context_setup") {
+    const outcome = await runContextSetupLoop();
+    return outcome === "quit" ? "quit" : "continue";
   }
   if (action === "back") {
-    await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config: loadConfig() })));
+    return "back";
   }
+  return "quit";
+}
+
+type ContextSetupOutcome = "continue" | "back" | "quit";
+
+async function runContextSetupLoop(): Promise<ContextSetupOutcome> {
+  while (true) {
+    const outcome = await runContextSetupAction(await promptContextSetup({ config: loadConfig() }));
+    if (outcome === "continue") {
+      continue;
+    }
+    return outcome;
+  }
+}
+
+async function runContextSetupAction(action: ContextSetupAction): Promise<ContextSetupOutcome> {
+  if (action === "calendar") {
+    const outcome = await runCalendarSetup();
+    return outcome === "quit" ? "quit" : "continue";
+  }
+  if (action === "weather") {
+    const outcome = await runWeatherSetup();
+    return outcome === "quit" ? "quit" : "continue";
+  }
+  if (action === "diary") {
+    const outcome = await runDiarySetup();
+    return outcome === "quit" ? "quit" : "continue";
+  }
+  if (action === "back") {
+    return "back";
+  }
+  return "quit";
 }
 
 type VoiceSetupOutcome = "continue" | "back" | "quit";
@@ -206,7 +277,7 @@ async function runVoiceSetupLoop(): Promise<void> {
       continue;
     }
     if (outcome === "back") {
-      await runSetupConnectionsAction(await promptSetupConnections({ config: loadConfig() }));
+      await runSetupConnectionsLoop();
     }
     return;
   }
@@ -217,8 +288,7 @@ async function runVoiceSetupAction(action: VoiceSetupAction): Promise<VoiceSetup
     return chooseDjVoice();
   }
   if (action === "fish_tts") {
-    await configureFishTts();
-    return "continue";
+    return await configureFishTts() === "quit" ? "quit" : "continue";
   }
   if (action === "text_only") {
     saveTtsConfig({ provider: "text" });
@@ -245,7 +315,9 @@ async function chooseDjVoice(initialVoice?: DjVoiceChoiceId): Promise<VoiceSetup
       return "continue";
     }
     if (result.submit === "fish_setup") {
-      await configureFishTts();
+      if (await configureFishTts() === "quit") {
+        return "quit";
+      }
       continue;
     }
     if (result.submit === "back") {
@@ -303,10 +375,13 @@ async function saveDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
   await pauseWithMessage(`Saved Fish voice: ${fishVoiceOptions.find((voice) => voice.id === parsed.voice)?.label ?? parsed.voice}`);
 }
 
-async function configureFishTts(): Promise<void> {
+async function configureFishTts(): Promise<"back" | "quit"> {
   while (true) {
     const config = loadConfig();
-    const answer = await promptFishNumberedSurface(5, (selected) => renderFishTtsSetupSurface(config, selected));
+    const answer = await promptFishNumberedSurface(4, (selected) => renderFishTtsSetupSurface(config, selected));
+    if (answer === "back" || answer === "quit") {
+      return answer;
+    }
     if (answer === 1) {
       await installFishTtsLocally();
       continue;
@@ -324,10 +399,7 @@ async function configureFishTts(): Promise<void> {
       if (next === "choose") {
         await chooseDjVoice(`fish:${loadConfig().tts.fishVoice}`);
       }
-      return;
-    }
-    if (answer === 5) {
-      return;
+      return "back";
     }
   }
 }
@@ -379,7 +451,10 @@ async function installFishTtsLocally(): Promise<void> {
 async function useExistingFishTtsInstall(): Promise<void> {
   while (true) {
     const detection = await withCliProgress("Searching Fish TTS install...", async () => detectFishTtsInstall(loadConfig(), getPockedioHome()));
-    const answer = await promptFishNumberedSurface(4, (selected) => renderUseExistingFishTtsSurface(detection, selected));
+    const answer = await promptFishNumberedSurface(3, (selected) => renderUseExistingFishTtsSurface(detection, selected));
+    if (answer === "back" || answer === "quit") {
+      return;
+    }
     if (answer === 1) {
       if (detection.missing.length > 0) {
         await pauseWithMessage([
@@ -401,16 +476,16 @@ async function useExistingFishTtsInstall(): Promise<void> {
     if (answer === 3) {
       continue;
     }
-    if (answer === 4) {
-      return;
-    }
   }
 }
 
 async function editFishTtsPathsManually(): Promise<void> {
   while (true) {
     const config = loadConfig();
-    const answer = await promptFishNumberedSurface(7, (selected) => renderFishTtsManualPathSurface(config, selected));
+    const answer = await promptFishNumberedSurface(6, (selected) => renderFishTtsManualPathSurface(config, selected));
+    if (answer === "back" || answer === "quit") {
+      return;
+    }
     if (answer === 1) {
       saveFishAudioConfig({ pythonPath: await askLine(`Python path (${config.fishAudio.pythonPath}): `) || config.fishAudio.pythonPath });
       continue;
@@ -435,9 +510,6 @@ async function editFishTtsPathsManually(): Promise<void> {
     }
     if (answer === 6) {
       await testFishTtsSetup();
-      return;
-    }
-    if (answer === 7) {
       return;
     }
   }
@@ -514,8 +586,7 @@ function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, select
     "Install Fish TTS locally",
     "Use existing Fish TTS install",
     "Edit paths manually",
-    "Test Fish TTS",
-    "Back"
+    "Test Fish TTS"
   ];
   return [
     "Configure Fish TTS",
@@ -531,7 +602,7 @@ function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, select
     "Actions",
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-5 Open"
+    "↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit"
   ].join("\n");
 }
 
@@ -539,8 +610,7 @@ function renderUseExistingFishTtsSurface(detection: ReturnType<typeof detectFish
   const actions = [
     "Use detected setup",
     "Edit paths",
-    "Search again",
-    "Back"
+    "Search again"
   ];
   return [
     "Use existing Fish TTS install",
@@ -553,7 +623,7 @@ function renderUseExistingFishTtsSurface(detection: ReturnType<typeof detectFish
     "Actions",
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-4 Open"
+    "↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit"
   ].join("\n");
 }
 
@@ -565,8 +635,7 @@ function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>, s
     `Model directory   ${config.fishAudio.modelDir}`,
     `Mina reference    ${fs.existsSync(detection.minaReferencePath) ? "Available" : "Missing"}`,
     `Nova reference    ${fs.existsSync(detection.novaReferencePath) ? "Available" : "Missing"}`,
-    "Test Fish TTS",
-    "Back"
+    "Test Fish TTS"
   ];
   return [
     "Edit Fish TTS paths manually",
@@ -574,7 +643,7 @@ function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>, s
     "Actions",
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-7 Open"
+    "↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit"
   ].join("\n");
 }
 
@@ -716,24 +785,15 @@ async function runTasteMemoryLoop(): Promise<void> {
 
 async function runTasteMemoryAction(action: TasteMemoryAction): Promise<TasteMemoryOutcome> {
   if (action === "import") {
-    const input = await askLine("Playlist link, NetEase playlist ID, or taste CSV path: ");
+    const input = await askLine("NetEase playlist link or ID: ");
     if (input.trim()) {
-      const result = await importTasteInput(input.trim());
+      const result = await withCliProgress("Importing NetEase playlist...", () => importTasteFromNetEasePlaylist(input.trim(), loadConfig()));
       await pauseWithMessage(renderTasteImportResultSurface(result));
     }
     return "continue";
   }
-  if (action === "rebuild_profile") {
-    const result = updateTasteProfile(loadConfig());
-    await pauseWithMessage(`Taste profile rebuilt from ${result.signalCount} local feedback signals.\nTaste file: ${result.tastePath}`);
-    return "continue";
-  }
   if (action === "show_summary") {
-    await pauseWithMessage(renderTasteMemorySurface({ config: loadConfig() }));
-    return "continue";
-  }
-  if (action === "start_station") {
-    await pauseWithMessage("Start station from latest import is planned for the next Taste & Memory slice.");
+    await pauseWithMessage(renderTasteSummarySurface({ config: loadConfig() }));
     return "continue";
   }
   if (action === "back") {
@@ -751,7 +811,7 @@ async function runLlmSetupLoop(): Promise<void> {
       continue;
     }
     if (outcome === "back") {
-      await runSetupConnectionsAction(await promptSetupConnections({ config: loadConfig() }));
+      await runSetupConnectionsLoop();
     }
     return;
   }
@@ -1064,7 +1124,7 @@ function clearCurrentLine(): void {
   defaultOutput.write("\r\x1B[2K");
 }
 
-function promptFishNumberedSurface(max: number, renderSurface: (selected: number) => string): Promise<number> {
+function promptFishNumberedSurface(max: number, renderSurface: (selected: number) => string): Promise<number | "back" | "quit"> {
   return new Promise((resolve) => {
     let selected = 1;
     const previousRawMode = defaultInput.isRaw;
@@ -1074,7 +1134,7 @@ function promptFishNumberedSurface(max: number, renderSurface: (selected: number
       defaultOutput.write("\x1B[H\x1B[2J");
       defaultOutput.write(renderSurface(selected));
     };
-    const cleanup = (choice: number) => {
+    const cleanup = (choice: number | "back" | "quit") => {
       defaultInput.off("keypress", onKeypress);
       if (defaultInput.isTTY) {
         defaultInput.setRawMode(previousRawMode);
@@ -1096,6 +1156,14 @@ function promptFishNumberedSurface(max: number, renderSurface: (selected: number
       }
       if (key.name === "return") {
         cleanup(selected);
+        return;
+      }
+      if (key.name === "b") {
+        cleanup("back");
+        return;
+      }
+      if (key.name === "q" || (key.name === "c" && key.ctrl)) {
+        cleanup("quit");
         return;
       }
       const numericIndex = Number(key.name);

@@ -6,7 +6,7 @@ import { loadConfig } from "../src/config/load.js";
 import { withDatabase } from "../src/db/database.js";
 import { parseTasteCsv } from "../src/taste/csv.js";
 import { importTaste, importTasteInput } from "../src/taste/importTaste.js";
-import { extractNetEasePlaylistId, importTasteFromNetEasePlaylist } from "../src/taste/neteasePlaylist.js";
+import { extractNetEasePlaylistId, importTasteFromNetEasePlaylist, normalizeNetEasePlaylistRows } from "../src/taste/neteasePlaylist.js";
 import { updateTasteProfile } from "../src/taste/profile.js";
 import { generatedTasteProfileEnd, generatedTasteProfileStart, upsertGeneratedTasteProfileSection } from "../src/taste/tasteMarkdown.js";
 import { runMigrations } from "../src/db/migrations.js";
@@ -180,6 +180,32 @@ describe("taste import", () => {
       sourceFile: "netease:playlist:123456",
       trackCount: 2
     });
+  });
+
+  it("removes exact repeated songs from one NetEase playlist import", () => {
+    const rows = normalizeNetEasePlaylistRows({
+      playlist: { name: "Repeated Set" },
+      songs: [
+        {
+          name: "Mercury",
+          ar: [{ name: "VaVa" }],
+          al: { name: "Album A" }
+        },
+        {
+          name: "Mercury",
+          ar: [{ name: "VaVa" }],
+          al: { name: "Album A" }
+        },
+        {
+          name: "Mercury",
+          ar: [{ name: "VaVa" }],
+          al: { name: "Live Version" }
+        }
+      ]
+    }, "123456");
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.album)).toEqual(["Album A", "Live Version"]);
   });
 
   it("imports either a local taste CSV or a NetEase playlist link from one input helper", async () => {

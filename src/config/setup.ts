@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
+import { emitKeypressEvents, type Key } from "node:readline";
 import { pathToFileURL } from "node:url";
 import inquirer from "inquirer";
 import { runMigrations } from "../db/migrations.js";
@@ -36,8 +38,9 @@ const scheduledDjSetupChoices = ["not_now", "morning", "evening", "both"] as con
 type ScheduledDjSetupChoice = typeof scheduledDjSetupChoices[number];
 const neteaseSetupMethods = ["qr", "cookie", "anonymous"] as const;
 type NetEaseSetupMethod = typeof neteaseSetupMethods[number];
-type NetEaseSetupMenuValue = NetEaseSetupMethod | "back";
-type NetEaseQualityMenuValue = NetEaseQualityLevel | "back";
+type NetEaseSetupMenuValue = NetEaseSetupMethod;
+type NetEaseQualityMenuValue = NetEaseQualityLevel;
+type SetupRunResult = "done" | "back" | "quit";
 type SetupTasteImportStatus = "imported" | "failed" | "skipped";
 
 type SetupAnswers = {
@@ -149,15 +152,12 @@ export async function runSetup(): Promise<void> {
   console.log("  pockedio");
 }
 
-export async function runNetEaseSetup(): Promise<void> {
+export async function runNetEaseSetup(): Promise<SetupRunResult> {
   const current = loadConfig();
-  console.log("NetEase playback");
-  console.log("Connecting your account can reduce unavailable tracks and preview-only playback.");
-  console.log("");
 
   const answers = await promptForStandaloneNetEaseSetup(current);
-  if (!answers) {
-    return;
+  if (answers === "back" || answers === "quit") {
+    return answers;
   }
   let config = buildConfigFromNetEaseSetupAnswers(current, answers);
   ensureRuntimeDirs(config);
@@ -167,47 +167,44 @@ export async function runNetEaseSetup(): Promise<void> {
   console.log("");
   console.log("Saved");
   console.log(`  Music            ${formatNetEaseSetupSummary(config)}`);
+  return "done";
 }
 
-export async function runCalendarSetup(): Promise<void> {
+export async function runCalendarSetup(): Promise<SetupRunResult> {
   const current = loadConfig();
-  console.log("Calendar");
-  console.log("");
-  console.log("Privacy");
-  console.log("  Calendar context stays local.");
-  console.log("  Pockedio stores event title and time only.");
-  console.log("");
-
-  const answers = await inquirer.prompt<{ calendarAction: "enable" | "disable" | "back" }>([
-    {
-      type: "list",
-      name: "calendarAction",
-      message: "Apple Calendar context",
-      choices: [
-        { name: "Enable Apple Calendar context", value: "enable" },
-        { name: "Disable Apple Calendar context", value: "disable" },
-        { name: "Back", value: "back" }
-      ],
-      default: current.calendar.enabled ? "enable" : "disable"
-    }
-  ]);
-  if (answers.calendarAction === "back") {
-    return;
+  const calendarAction = await promptSetupMenu<"enable" | "disable">({
+    title: [
+      "Calendar",
+      "",
+      "Privacy",
+      "  Calendar context stays local.",
+      "  Pockedio stores event title and time only.",
+      "",
+      "Actions"
+    ].join("\n"),
+    entries: [
+      { name: "Enable Apple Calendar context", value: "enable" },
+      { name: "Disable Apple Calendar context", value: "disable" }
+    ],
+    defaultValue: current.calendar.enabled ? "enable" : "disable"
+  });
+  if (calendarAction === "back" || calendarAction === "quit") {
+    return calendarAction;
   }
 
   const config = pockedioConfigSchema.parse({
     ...current,
-    calendar: { enabled: answers.calendarAction === "enable" }
+    calendar: { enabled: calendarAction === "enable" }
   });
   ensureRuntimeDirs(config);
   saveConfig(config);
   runMigrations(config);
 
-  if (answers.calendarAction === "disable") {
+  if (calendarAction === "disable") {
     console.log("");
     console.log("Saved");
     console.log("  Calendar          disabled");
-    return;
+    return "done";
   }
 
   console.log("");
@@ -216,6 +213,146 @@ export async function runCalendarSetup(): Promise<void> {
 
   console.log("");
   console.log(formatCalendarSetupSummary(calendar));
+  return "done";
+}
+
+export async function runWeatherSetup(): Promise<SetupRunResult> {
+  const current = loadConfig();
+  const weatherAction = await promptSetupMenu<"enable" | "disable" | "change_location" | "test">({
+    title: [
+      "Weather",
+      "",
+      "Weather context is optional and used lightly for station tone.",
+      "",
+      `Current location  ${current.weather.location}`,
+      `Status            ${current.weather.enabled ? "Enabled" : "Not enabled"}`,
+      "",
+      "Actions"
+    ].join("\n"),
+    entries: [
+      { name: "Enable weather context", value: "enable" },
+      { name: "Disable weather context", value: "disable" },
+      { name: "Change weather city", value: "change_location" },
+      { name: "Test weather lookup", value: "test" }
+    ],
+    defaultValue: current.weather.enabled ? "test" : "enable"
+  });
+  if (weatherAction === "back" || weatherAction === "quit") {
+    return weatherAction;
+  }
+
+  if (weatherAction === "disable") {
+    const config = pockedioConfigSchema.parse({
+      ...current,
+      weather: { ...current.weather, enabled: false }
+    });
+    ensureRuntimeDirs(config);
+    saveConfig(config);
+    console.log("");
+    console.log("Saved");
+    console.log("  Weather           disabled");
+    return "done";
+  }
+
+  let location = current.weather.location;
+  if (weatherAction === "change_location" || weatherAction === "enable") {
+    const answer = await inquirer.prompt<{ weatherLocation: string }>([
+      {
+        type: "input",
+        name: "weatherLocation",
+        message: "Weather city",
+        default: current.weather.location,
+        validate: (value) => value.trim().length > 0 || "Enter a city or location."
+      }
+    ]);
+    location = answer.weatherLocation.trim();
+  }
+
+  const config = pockedioConfigSchema.parse({
+    ...current,
+    weather: {
+      enabled: weatherAction === "test" ? current.weather.enabled : true,
+      location
+    }
+  });
+  ensureRuntimeDirs(config);
+  saveConfig(config);
+
+  console.log("");
+  const weather = await withSetupStatus("Checking weather...", () => readWeatherContext(location));
+  console.log("");
+  console.log(formatWeatherSetupSummary(weather));
+  return "done";
+}
+
+export async function runDiarySetup(): Promise<SetupRunResult> {
+  const current = loadConfig();
+  const diaryAction = await promptSetupMenu<"enable" | "disable" | "change_path" | "test">({
+    title: [
+      "Diary",
+      "",
+      "Diary access is explicit and local-first.",
+      "If your LLM is remote, summary generation may send a diary excerpt.",
+      "",
+      `Current path  ${current.diary.path}`,
+      `Status        ${current.diary.enabled ? "Enabled" : "Not enabled"}`,
+      "",
+      "Actions"
+    ].join("\n"),
+    entries: [
+      { name: "Enable diary context", value: "enable" },
+      { name: "Disable diary context", value: "disable" },
+      { name: "Change diary path", value: "change_path" },
+      { name: "Test diary lookup", value: "test" }
+    ],
+    defaultValue: current.diary.enabled ? "test" : "enable"
+  });
+  if (diaryAction === "back" || diaryAction === "quit") {
+    return diaryAction;
+  }
+
+  if (diaryAction === "disable") {
+    const config = pockedioConfigSchema.parse({
+      ...current,
+      diary: { ...current.diary, enabled: false }
+    });
+    ensureRuntimeDirs(config);
+    saveConfig(config);
+    console.log("");
+    console.log("Saved");
+    console.log("  Diary             disabled");
+    return "done";
+  }
+
+  let diaryPath = current.diary.path;
+  if (diaryAction === "change_path" || diaryAction === "enable") {
+    const answer = await inquirer.prompt<{ diaryPath: string }>([
+      {
+        type: "input",
+        name: "diaryPath",
+        message: "Diary path",
+        default: current.diary.path,
+        validate: (value) => value.trim().length > 0 || "Enter a diary folder path."
+      }
+    ]);
+    diaryPath = answer.diaryPath.trim();
+  }
+
+  const config = pockedioConfigSchema.parse({
+    ...current,
+    diary: {
+      enabled: diaryAction === "test" ? current.diary.enabled : true,
+      path: diaryPath
+    }
+  });
+  ensureRuntimeDirs(config);
+  saveConfig(config);
+
+  console.log("");
+  const diary = await withSetupStatus("Checking diary...", () => setupDiaryContext(config));
+  console.log("");
+  console.log(formatDiarySetupSummary(diary));
+  return "done";
 }
 
 export async function promptForSetup(current: PockedioConfig): Promise<FirstSetupAnswers> {
@@ -556,10 +693,6 @@ async function promptForNetEaseSetup(current: PockedioConfig): Promise<Pick<Firs
       }
     ]);
 
-    if (qualityAnswer.neteaseQualityLevel === "back") {
-      continue;
-    }
-
     const cookieAnswer = methodAnswer.neteaseSetupMethod === "cookie"
       ? await inquirer.prompt<Pick<FirstSetupAnswers, "neteaseCookie">>([
         {
@@ -582,40 +715,40 @@ async function promptForNetEaseSetup(current: PockedioConfig): Promise<Pick<Firs
 
 async function promptForStandaloneNetEaseSetup(
   current: PockedioConfig
-): Promise<Pick<FirstSetupAnswers, "neteaseSetupMethod" | "neteaseCookie" | "neteaseQualityLevel"> | undefined> {
+): Promise<Pick<FirstSetupAnswers, "neteaseSetupMethod" | "neteaseCookie" | "neteaseQualityLevel"> | "back" | "quit"> {
   while (true) {
-    const methodAnswer = await inquirer.prompt<{ neteaseSetupMethod: NetEaseSetupMenuValue }>([
-      {
-        type: "list",
-        name: "neteaseSetupMethod",
-        message: "Connect NetEase account now?",
-        choices: getNetEaseSetupMethodChoices({ includeBack: true }),
-        default: inferCurrentNetEaseSetupMethod(current)
-      }
-    ]);
+    const neteaseSetupMethod = await promptSetupMenu<NetEaseSetupMethod>({
+      title: [
+        "NetEase playback",
+        "",
+        "Connecting your account can reduce unavailable tracks and preview-only playback.",
+        "",
+        "Connect NetEase account now?"
+      ].join("\n"),
+      entries: getNetEaseSetupMethodChoices(),
+      defaultValue: inferCurrentNetEaseSetupMethod(current)
+    });
 
-    if (methodAnswer.neteaseSetupMethod === "back") {
-      return undefined;
+    if (neteaseSetupMethod === "back" || neteaseSetupMethod === "quit") {
+      return neteaseSetupMethod;
     }
-    if (methodAnswer.neteaseSetupMethod === "anonymous") {
+    if (neteaseSetupMethod === "anonymous") {
       return { neteaseSetupMethod: "anonymous" };
     }
 
-    const qualityAnswer = await inquirer.prompt<{ neteaseQualityLevel: NetEaseQualityMenuValue }>([
-      {
-        type: "list",
-        name: "neteaseQualityLevel",
-        message: "Preferred playback quality",
-        choices: getNetEaseQualityMenuChoices(),
-        default: current.netease.qualityLevel === "standard" ? "exhigh" : current.netease.qualityLevel
-      }
-    ]);
-
-    if (qualityAnswer.neteaseQualityLevel === "back") {
+    const neteaseQualityLevel = await promptSetupMenu<NetEaseQualityLevel>({
+      title: "Preferred playback quality",
+      entries: getNetEaseQualityMenuChoices(),
+      defaultValue: current.netease.qualityLevel === "standard" ? "exhigh" : current.netease.qualityLevel
+    });
+    if (neteaseQualityLevel === "back") {
       continue;
     }
+    if (neteaseQualityLevel === "quit") {
+      return "quit";
+    }
 
-    const cookieAnswer = methodAnswer.neteaseSetupMethod === "cookie"
+    const cookieAnswer = neteaseSetupMethod === "cookie"
       ? await inquirer.prompt<Pick<FirstSetupAnswers, "neteaseCookie">>([
         {
           type: "password",
@@ -628,11 +761,82 @@ async function promptForStandaloneNetEaseSetup(
       : {};
 
     return {
-      neteaseSetupMethod: methodAnswer.neteaseSetupMethod,
-      neteaseQualityLevel: qualityAnswer.neteaseQualityLevel,
+      neteaseSetupMethod,
+      neteaseQualityLevel,
       ...cookieAnswer
     };
   }
+}
+
+function promptSetupMenu<TValue extends string>(options: {
+  title: string;
+  entries: Array<{ name: string; value: TValue }>;
+  defaultValue?: TValue;
+}): Promise<TValue | "back" | "quit"> {
+  return new Promise((resolve) => {
+    let selected = Math.max(0, options.entries.findIndex((entry) => entry.value === options.defaultValue));
+    if (selected < 0) {
+      selected = 0;
+    }
+    const previousRawMode = defaultInput.isRaw;
+
+    const render = () => {
+      defaultOutput.write("\x1B[?25l");
+      defaultOutput.write("\x1B[H\x1B[2J");
+      defaultOutput.write([
+        options.title,
+        "",
+        ...options.entries.map((entry, index) => `${selected === index ? ">" : " "} ${index + 1}. ${entry.name}`),
+        "",
+        `↑↓ Select  |  Enter Open  |  1-${options.entries.length} Open  |  B Back  |  Q Quit`
+      ].join("\n"));
+    };
+    const cleanup = (choice: TValue | "back" | "quit") => {
+      defaultInput.off("keypress", onKeypress);
+      if (defaultInput.isTTY) {
+        defaultInput.setRawMode(previousRawMode);
+      }
+      defaultInput.pause();
+      defaultOutput.write("\x1B[?25h\n");
+      resolve(choice);
+    };
+    const onKeypress = (_value: string, key: Key) => {
+      if (key.name === "up") {
+        selected = selected === 0 ? options.entries.length - 1 : selected - 1;
+        render();
+        return;
+      }
+      if (key.name === "down") {
+        selected = selected === options.entries.length - 1 ? 0 : selected + 1;
+        render();
+        return;
+      }
+      if (key.name === "return") {
+        cleanup(options.entries[selected]!.value);
+        return;
+      }
+      if (key.name === "b") {
+        cleanup("back");
+        return;
+      }
+      if (key.name === "q" || (key.name === "c" && key.ctrl)) {
+        cleanup("quit");
+        return;
+      }
+      const numericIndex = Number(key.name) - 1;
+      if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < options.entries.length) {
+        cleanup(options.entries[numericIndex]!.value);
+      }
+    };
+
+    emitKeypressEvents(defaultInput);
+    defaultInput.resume();
+    if (defaultInput.isTTY) {
+      defaultInput.setRawMode(true);
+    }
+    defaultInput.on("keypress", onKeypress);
+    render();
+  });
 }
 
 export async function promptForAdvancedSetup(current: PockedioConfig): Promise<SetupAnswers> {
@@ -1066,16 +1270,12 @@ export function formatNetEaseSetupSummary(config: PockedioConfig): string {
   ].join(" - ");
 }
 
-export function getNetEaseSetupMethodChoices(options: { includeBack?: boolean } = {}): Array<{ name: string; value: NetEaseSetupMenuValue }> {
-  const choices: Array<{ name: string; value: NetEaseSetupMenuValue }> = [
+export function getNetEaseSetupMethodChoices(): Array<{ name: string; value: NetEaseSetupMenuValue }> {
+  return [
     { name: "Yes, scan QR", value: "qr" },
     { name: "Yes, paste MUSIC_U cookie", value: "cookie" },
     { name: "Not now, use anonymous playback", value: "anonymous" }
   ];
-  if (options.includeBack) {
-    choices.push({ name: "Back", value: "back" });
-  }
-  return choices;
 }
 
 export function getNetEaseQualityMenuChoices(): Array<{ name: string; value: NetEaseQualityMenuValue }> {
@@ -1084,8 +1284,7 @@ export function getNetEaseQualityMenuChoices(): Array<{ name: string; value: Net
     { name: "lossless - very high quality, needs support", value: "lossless" },
     { name: "exhigh - best daily default", value: "exhigh" },
     { name: "higher - good fallback", value: "higher" },
-    { name: "standard - safest fallback", value: "standard" },
-    { name: "Back to account options", value: "back" }
+    { name: "standard - safest fallback", value: "standard" }
   ];
 }
 

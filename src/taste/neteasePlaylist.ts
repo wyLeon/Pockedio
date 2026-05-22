@@ -71,7 +71,7 @@ export async function importTasteFromNetEasePlaylist(
 export function normalizeNetEasePlaylistRows(response: NetEasePlaylistTrackResponse, playlistId: string): TasteImportRow[] {
   const playlist = valueToString(response.playlist?.name) ?? `NetEase playlist ${playlistId}`;
   const songs = Array.isArray(response.songs) ? response.songs : [];
-  return songs.flatMap((song) => {
+  const rows = songs.flatMap((song) => {
     const title = valueToString(song.name);
     if (!title) {
       return [];
@@ -86,6 +86,26 @@ export function normalizeNetEasePlaylistRows(response: NetEasePlaylistTrackRespo
       liked_at: ""
     }];
   });
+  return dedupeNetEasePlaylistRows(rows);
+}
+
+function dedupeNetEasePlaylistRows(rows: TasteImportRow[]): TasteImportRow[] {
+  const seen = new Set<string>();
+  const deduped: TasteImportRow[] = [];
+  for (const row of rows) {
+    const key = [
+      row.title,
+      row.artist,
+      row.album,
+      row.playlist
+    ].map((value) => value.trim().toLowerCase()).join("\u0000");
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(row);
+  }
+  return deduped;
 }
 
 function normalizeArtists(song: NetEaseSong): string[] {
