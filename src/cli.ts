@@ -306,27 +306,27 @@ async function configureFishTts(): Promise<void> {
   while (true) {
     const config = loadConfig();
     console.log(renderFishTtsSetupSurface(config));
-    const answer = (await askLine("Choose 1-5: ")).trim().toLowerCase();
-    if (answer === "1") {
+    const answer = await askNumberChoice(5);
+    if (answer === 1) {
       await installFishTtsLocally();
       continue;
     }
-    if (answer === "2") {
+    if (answer === 2) {
       await useExistingFishTtsInstall();
       continue;
     }
-    if (answer === "3") {
+    if (answer === 3) {
       await editFishTtsPathsManually();
       continue;
     }
-    if (answer === "4" || answer === "test") {
+    if (answer === 4) {
       const next = await testFishTtsSetup();
       if (next === "choose") {
         await chooseDjVoice(`fish:${loadConfig().tts.fishVoice}`);
       }
       return;
     }
-    if (answer === "5" || answer === "b" || answer === "back" || answer === "") {
+    if (answer === 5) {
       return;
     }
   }
@@ -394,8 +394,8 @@ async function useExistingFishTtsInstall(): Promise<void> {
       "3. Search again",
       "4. Back"
     ].join("\n"));
-    const answer = (await askLine("Choose 1-4: ")).trim().toLowerCase();
-    if (answer === "1") {
+    const answer = await askNumberChoice(4);
+    if (answer === 1) {
       if (detection.missing.length > 0) {
         await pauseWithMessage([
           "Detected setup is incomplete.",
@@ -409,14 +409,14 @@ async function useExistingFishTtsInstall(): Promise<void> {
       await pauseWithMessage("Saved detected Fish TTS setup. Run Test Fish TTS next.");
       return;
     }
-    if (answer === "2") {
+    if (answer === 2) {
       await editFishTtsPathsManually();
       return;
     }
-    if (answer === "3") {
+    if (answer === 3) {
       continue;
     }
-    if (answer === "4" || answer === "b" || answer === "back" || answer === "") {
+    if (answer === 4) {
       return;
     }
   }
@@ -426,34 +426,34 @@ async function editFishTtsPathsManually(): Promise<void> {
   while (true) {
     const config = loadConfig();
     console.log(renderFishTtsManualPathSurface(config));
-    const answer = (await askLine("Choose 1-7: ")).trim().toLowerCase();
-    if (answer === "1") {
+    const answer = await askNumberChoice(7);
+    if (answer === 1) {
       saveFishAudioConfig({ pythonPath: await askLine(`Python path (${config.fishAudio.pythonPath}): `) || config.fishAudio.pythonPath });
       continue;
     }
-    if (answer === "2") {
+    if (answer === 2) {
       saveFishAudioConfig({ scriptPath: await askLine(`Fish script path (${config.fishAudio.scriptPath}): `) || config.fishAudio.scriptPath });
       continue;
     }
-    if (answer === "3") {
+    if (answer === 3) {
       saveFishAudioConfig({ modelDir: await askLine(`Model directory (${config.fishAudio.modelDir}): `) || config.fishAudio.modelDir });
       continue;
     }
-    if (answer === "4") {
+    if (answer === 4) {
       saveFishReference("mina");
       await pauseWithMessage("Saved Mina as the Fish reference voice.");
       continue;
     }
-    if (answer === "5") {
+    if (answer === 5) {
       saveFishReference("nova");
       await pauseWithMessage("Saved Nova as the Fish reference voice.");
       continue;
     }
-    if (answer === "6" || answer === "test") {
+    if (answer === 6) {
       await testFishTtsSetup();
       return;
     }
-    if (answer === "7" || answer === "b" || answer === "back" || answer === "") {
+    if (answer === 7) {
       return;
     }
   }
@@ -480,11 +480,11 @@ async function testFishTtsSetup(): Promise<"choose" | "return" | "keep"> {
     "  2. Return to Voice Setup",
     "  3. Keep current voice"
   ].join("\n"));
-  const answer = (await askLine("Choose 1-3: ")).trim();
-  if (answer === "1") {
+  const answer = await askNumberChoice(3);
+  if (answer === 1) {
     return "choose";
   }
-  if (answer === "3") {
+  if (answer === 3) {
     return "keep";
   }
   return "return";
@@ -1016,6 +1016,17 @@ async function askLine(message: string): Promise<string> {
     return await rl.question(message);
   } finally {
     rl.close();
+  }
+}
+
+async function askNumberChoice(max: number): Promise<number> {
+  while (true) {
+    const answer = (await askLine(`Choose 1-${max}: `)).trim();
+    const choice = Number(answer);
+    if (Number.isInteger(choice) && choice >= 1 && choice <= max) {
+      return choice;
+    }
+    console.log(`Type a number from 1 to ${max}.`);
   }
 }
 
