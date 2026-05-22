@@ -83,6 +83,9 @@ describe("status report", () => {
     expect(text).toContain("Schedule   Morning DJ weekdays 08:45");
     expect(text).toContain("prepare 20 min before");
     expect(text).toContain("LLM       gpt-4.1-mini (missing key)");
+    expect(text).toContain(process.platform === "darwin"
+      ? "Voice     Vale, built-in macOS"
+      : "Voice     Text-only DJ copy; configure voice for spoken DJ audio");
     expect(text).toContain("Database  ok");
     expect(text).toContain("Session");
   });
@@ -137,6 +140,10 @@ describe("status report", () => {
         pathsPresent: true,
         missing: []
       },
+      voice: {
+        summary: "Mina, Fish TTS ready",
+        showFishMissing: false
+      },
       calendar: { enabled: true },
       weather: { enabled: true, location: "Shanghai" },
       taste: { path: "/tmp/taste.md", present: true },
@@ -167,6 +174,7 @@ describe("status report", () => {
     expect(text).toContain("Setup");
     expect(text).toContain("Music     NetEase connected (account, exhigh)");
     expect(text).toContain("LLM       deepseek-chat (shell env)");
+    expect(text).toContain("Voice     Mina, Fish TTS ready");
     expect(text).toContain("Context   Calendar on, Weather Shanghai");
     expect(text).toContain("Memory");
     expect(text).toContain("Session    2026-05-19T02:00:00.000Z");

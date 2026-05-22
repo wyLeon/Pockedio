@@ -10,6 +10,7 @@ import { getLatestContextRefreshRun, type ContextRefreshRunRecord } from "../con
 import { schemaVersion } from "../db/migrations.js";
 import { NetEaseProvider } from "../providers/netease.js";
 import { resolveRuntimePath } from "../tts/fishAudio.js";
+import { formatFishVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
 
 export type StatusReport = {
   config: {
@@ -49,6 +50,10 @@ export type StatusReport = {
     modelDir: string;
     pathsPresent: boolean;
     missing: string[];
+  };
+  voice: {
+    summary: string;
+    showFishMissing: boolean;
   };
   calendar: {
     enabled: boolean;
@@ -108,6 +113,7 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
       apiKeySource: llmApiKeySource
     },
     fishAudio,
+    voice: getVoiceStatus(config, fishAudio),
     calendar: {
       enabled: config.calendar.enabled
     },
@@ -180,6 +186,35 @@ export function getFishAudioStatus(config: PockedioConfig): StatusReport["fishAu
     pathsPresent: missing.length === 0,
     missing
   };
+}
+
+function getVoiceStatus(config: PockedioConfig, fishAudio: StatusReport["fishAudio"]): StatusReport["voice"] {
+  if (config.tts.provider === "text") {
+    return { summary: "Text-only DJ copy", showFishMissing: false };
+  }
+  if (config.tts.provider === "macos") {
+    return {
+      summary: process.platform === "darwin"
+        ? `${formatMacosVoiceName(config.tts.macosVoice)}, built-in macOS`
+        : "Built-in macOS voice unavailable on this platform",
+      showFishMissing: false
+    };
+  }
+  if (config.tts.provider === "fish") {
+    return {
+      summary: fishAudio.pathsPresent
+        ? `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS ready`
+        : `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS needs setup`,
+      showFishMissing: !fishAudio.pathsPresent
+    };
+  }
+  if (process.platform === "darwin") {
+    return { summary: `${formatMacosVoiceName(config.tts.macosVoice)}, built-in macOS`, showFishMissing: false };
+  }
+  if (fishAudio.pathsPresent) {
+    return { summary: `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS ready`, showFishMissing: false };
+  }
+  return { summary: "Text-only DJ copy; configure voice for spoken DJ audio", showFishMissing: false };
 }
 
 function getDatabaseStatus(config: PockedioConfig): StatusReport["database"] {
@@ -285,7 +320,7 @@ export function formatStatusReport(report: StatusReport): string {
     "Setup",
     `Music     ${formatNetEaseStatus(report.netease)}`,
     `LLM       ${formatLlmStatus(report.llm)}`,
-    `Voice     ${report.fishAudio.pathsPresent ? "Fish TTS ready" : "Fish TTS needs setup"}`,
+    `Voice     ${report.voice.summary}`,
     `Context   Calendar ${report.calendar.enabled ? "on" : "off"}, Weather ${report.weather.enabled ? report.weather.location : "off"}`,
     "",
     "Memory",
@@ -305,7 +340,7 @@ export function formatStatusReport(report: StatusReport): string {
   if (report.netease.error) {
     lines.push(`NetEase detail: ${report.netease.error}`);
   }
-  if (report.fishAudio.missing.length > 0) {
+  if (report.voice.showFishMissing && report.fishAudio.missing.length > 0) {
     lines.push("FishAudio missing:");
     lines.push(...report.fishAudio.missing.map((item) => `- ${item}`));
   }

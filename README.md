@@ -81,7 +81,7 @@ Run:
 pockedio setup
 ```
 
-The setup hub guides you through:
+This runs the full setup prompt. You can also run `pockedio`, choose `Setup & Connections`, and configure the same areas from the setup hub:
 
 - LLM provider and API key.
 - Voice selection.
