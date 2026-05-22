@@ -1892,6 +1892,93 @@ describe("runSessionTurn", () => {
     ]);
   });
 
+  it("lists locally saved favorite songs without starting playback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+    await runSessionTurn({
+      input: "favorite this",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    const result = await runSessionTurn({
+      input: "List my favorite songs",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("favorite_list_request");
+    expect(result.response).toBe([
+      "Your favorite songs:",
+      "1. something deep work - Test Artist"
+    ].join("\n"));
+    expect(started).toHaveLength(1);
+  });
+
+  it("deduplicates historical favorite rows when listing favorite songs", async () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const insert = db.prepare(`
+        INSERT INTO taste_signals (id, source_feedback_id, track_id, signal_type, target_type, target_value, weight, context_json, created_at)
+        VALUES (?, NULL, NULL, 'favorite', 'track', ?, 5, NULL, ?)
+      `);
+      insert.run("favorite-a", "我们俩 - 郭顶", "2026-05-21T15:21:11.514Z");
+      insert.run("favorite-b", "我们俩 - 郭顶", "2026-05-21T15:39:37.832Z");
+      insert.run("favorite-c", "Fly Me To The Moon - 小野リサ", "2026-05-21T15:00:22.128Z");
+    });
+
+    const result = await runSessionTurn({
+      input: "List my favorite songs",
+      config,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("favorite_list_request");
+    expect(result.response).toBe([
+      "Your favorite songs:",
+      "1. 我们俩 - 郭顶",
+      "2. Fly Me To The Moon - 小野リサ"
+    ].join("\n"));
+  });
+
+  it("explains when favorite-song listing is empty", async () => {
+    const config = makeConfig();
+
+    const result = await runSessionTurn({
+      input: "show my favorite tracks",
+      config,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("favorite_list_request");
+    expect(result.response).toContain("No favorite songs saved yet");
+    expect(result.response).toContain("favorite this");
+  });
+
   it("records soft negative, favorite, and saved-vibe feedback as taste signals", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};

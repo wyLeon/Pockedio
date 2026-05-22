@@ -576,6 +576,13 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response, shouldExit: false };
     }
 
+    if (intent.type === "favorite_list_request") {
+      const response = formatFavoriteSongsList(store.getFavoriteTrackCandidates(20));
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
     if (intent.type === "identity_capability") {
       const response = await withStatus(writeStatus, "Thinking...", () => generateIdentityCapabilityResponse({ config, llm, userText, signal }), signal);
       store.addMessage(sessionId, "pockedio", response);
@@ -928,6 +935,7 @@ function isInstantLocalIntent(type: SessionIntent["type"]): boolean {
     || type === "resume"
     || type === "previous"
     || type === "playback_status"
+    || type === "favorite_list_request"
     || type === "feedback_like"
     || type === "feedback_skip"
     || type === "feedback_ban"
@@ -1259,6 +1267,17 @@ async function resolveFavoriteTrackCandidate(
     }
   }
   return undefined;
+}
+
+function formatFavoriteSongsList(favorites: FavoriteTrackCandidate[]): string {
+  if (favorites.length === 0) {
+    return "No favorite songs saved yet. While a song is playing, type \"favorite this\" to save it here.";
+  }
+
+  return [
+    "Your favorite songs:",
+    ...favorites.map((favorite, index) => `${index + 1}. ${favorite.title} - ${favorite.artist}`)
+  ].join("\n");
 }
 
 async function resolveSingleTrackCandidates(input: {
@@ -1861,6 +1880,7 @@ function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: str
     || intent.type === "pause"
     || intent.type === "resume"
     || intent.type === "playback_status"
+    || intent.type === "favorite_list_request"
     || intent.type === "identity_capability"
     || intent.type === "explicit_dj_audio_request"
     || intent.type === "session_memory_update"

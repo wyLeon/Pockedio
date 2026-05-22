@@ -13,6 +13,7 @@ export type SessionIntentType =
   | "single_track_playback"
   | "single_track_selection"
   | "favorite_playback_request"
+  | "favorite_list_request"
   | "feedback_like"
   | "feedback_skip"
   | "feedback_ban"
@@ -54,6 +55,7 @@ const intentTypes = new Set<SessionIntentType>([
   "single_track_playback",
   "single_track_selection",
   "favorite_playback_request",
+  "favorite_list_request",
   "feedback_like",
   "feedback_skip",
   "feedback_ban",
@@ -86,6 +88,7 @@ export async function parseIntent(input: string, llm?: LlmClient, options: LlmRe
       "Use identity_capability when the user asks who Pockedio is, who is talking, or what Pockedio can do.",
       "Use conversation for artist/song background questions, current-track questions, daily chat, personal reflections, or listening observations.",
       "Use playback_request only when the user asks to start music with words like play, put on, queue, or start.",
+      "Use favorite_list_request when the user asks to list, show, or see locally saved favorite songs.",
       "Use pause for natural stop-temporarily wording like pause, hold on, wait a second, or stop for a moment.",
       "Use resume for natural continuation wording like resume, keep playing, continue the music, carry on, or go on.",
       "Use previous for natural back-navigation wording like previous, go back, back one, or go to the previous track.",
@@ -186,6 +189,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (isFavoritePlaybackRequestText(text)) {
     return { type: "favorite_playback_request", confidence: "high" };
   }
+  if (isFavoriteListRequestText(text)) {
+    return { type: "favorite_list_request", confidence: "high" };
+  }
   if (isSingleTrackPlaybackText(text)) {
     return { type: "single_track_playback", confidence: "high" };
   }
@@ -240,6 +246,11 @@ function isPlaybackRequestText(text: string): boolean {
 
 function isFavoritePlaybackRequestText(text: string): boolean {
   return /\b(play|put on|queue|start|listen to|hear)\b.*\b(my favorite song|my favourite song|one of my favorites|one of my favourites|something from my favorites|something from my favourites|my saved favorite|my saved favourite|favorite track|favourite track)\b/.test(text);
+}
+
+function isFavoriteListRequestText(text: string): boolean {
+  return /\b(list|show|see|view|what are|what're|tell me)\b.*\b(my )?(favorite|favourite|saved|liked)\s+(songs|tracks|music)\b/.test(text)
+    || /\b(my )?(favorite|favourite|saved|liked)\s+(songs|tracks|music)\b.*\b(list|show|see|view)\b/.test(text);
 }
 
 function isDjProgramPlaybackText(text: string): boolean {

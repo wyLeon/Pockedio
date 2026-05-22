@@ -277,11 +277,17 @@ export class MemoryStore {
       LIMIT ?
     `).all(limit) as Array<{ targetValue: string; weight: number; contextJson: string | null; createdAt: string }>;
 
+    const seen = new Set<string>();
     return rows.flatMap((row) => {
       const parsed = parseFavoriteTrackTarget(row.targetValue);
       if (!parsed) {
         return [];
       }
+      const dedupeKey = normalizeFavoriteTrackTarget(row.targetValue);
+      if (seen.has(dedupeKey)) {
+        return [];
+      }
+      seen.add(dedupeKey);
       return [{
         ...parsed,
         targetValue: row.targetValue,
@@ -552,6 +558,10 @@ function parseFavoriteTrackTarget(value: string): { title: string; artist: strin
     return null;
   }
   return { title, artist };
+}
+
+function normalizeFavoriteTrackTarget(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function parseJson(value: string | null): unknown {

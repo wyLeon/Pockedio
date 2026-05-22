@@ -146,6 +146,17 @@ describe("parseIntent", () => {
     });
   });
 
+  it("classifies favorite list requests", async () => {
+    await expect(parseIntent("List my favorite songs")).resolves.toEqual({
+      type: "favorite_list_request",
+      confidence: "high"
+    });
+    await expect(parseIntent("show my saved tracks")).resolves.toEqual({
+      type: "favorite_list_request",
+      confidence: "high"
+    });
+  });
+
   it("classifies playback status requests", async () => {
     await expect(parseIntent("what's playing?")).resolves.toEqual({
       type: "playback_status",
