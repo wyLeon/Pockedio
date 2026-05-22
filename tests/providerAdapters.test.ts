@@ -6,6 +6,7 @@ import { startDuckedUrlWithIntro as startDefaultDuckedUrlWithIntro, startUrlPlay
 import { buildFfplayArgs } from "../src/player/ffplay.js";
 import { buildMpvArgs, createMpvIpcPath } from "../src/player/mpv.js";
 import { playFile, playUrl, startDuckedUrlWithIntro, startUrlPlayback, type PlaybackHandle, type ProcessRunner, type ProcessStarter } from "../src/player/afplay.js";
+import { findStalePockedioPlaybackPids } from "../src/player/stalePlayback.js";
 import { NetEaseProvider } from "../src/providers/netease.js";
 
 function makeConfig() {
@@ -375,5 +376,20 @@ describe("streaming player routing", () => {
 
     expect(handle.target).toBe("https://example.com/song.mp3");
     expect(calls).toEqual(["afplay:https://example.com/song.mp3:/tmp/intro.wav"]);
+  });
+});
+
+describe("stale playback cleanup", () => {
+  it("finds stale Pockedio players and older interactive sessions without touching serve", () => {
+    const pids = findStalePockedioPlaybackPids([
+      { pid: 100, ppid: 1, command: "node /usr/local/bin/pockedio" },
+      { pid: 101, ppid: 100, command: "mpv --no-video --input-ipc-server=/tmp/pockedio-mpv-abc123.sock https://example.com/song.mp3" },
+      { pid: 102, ppid: 1, command: "node /usr/local/bin/pockedio serve" },
+      { pid: 200, ppid: 50, command: "node /usr/local/bin/pockedio" },
+      { pid: 201, ppid: 1, command: "mpv --no-video https://example.com/other.mp3" },
+      { pid: 202, ppid: 1, command: "afplay /tmp/pockedio-playback-old.mp3" }
+    ], 200);
+
+    expect(pids.sort((a, b) => a - b)).toEqual([100, 101, 202]);
   });
 });

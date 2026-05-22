@@ -1309,10 +1309,10 @@ The progress bar is duration-aware but not continuously ticking in-place yet. It
 Station-complete rule:
 
 ```text
-That station’s done. Press Enter to continue this vibe, or tell me where to take it next.
+That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.
 ```
 
-When the final playable track finishes, return control to the user with this closure message. Keep the finished station’s request as a pending station direction so Enter continues the same vibe, while any typed response can reshape the next station.
+When the final playable track finishes, return control to the user with this closure message. Keep the finished station’s request as a pending station direction. The first Enter after completion should show the pending-station choice prompt, including the spoken DJ option, instead of immediately starting playback. A second Enter from that choice prompt starts normal playback, while `dj` prepares the spoken DJ version.
 
 The DJ note should be text in normal station mode and should use the selected DJ name in the label, for example `Mina's note:`. It should sound warm and first-person. It may mention one useful angle:
 
@@ -1337,7 +1337,15 @@ DJ program mode:
 
 ```text
 dj
+I want a DJ program
 play it as a DJ program
+I want a DJ program for late night focus
+```
+
+If the user asks for a DJ program without a station direction, do not reject it as a loose voice clip and do not build a generic station. Ask for the missing direction:
+
+```text
+Sure. What kind of set should I build it around?
 ```
 
 This should be explicit and two-step. DJ program mode first prepares the spoken program, then waits for the user to start it:
@@ -1388,13 +1396,20 @@ Now playing: 2/5  Track - Artist
 [>...................] 00:00 / 04:13
 ```
 
-When the final playable track finishes in DJ program mode, Pockedio should play a short closing voice break before the station-complete prompt:
+Before the final playable track starts in DJ program mode, Pockedio should prepare a short closing voice break and play it through the same ducked music handoff as other DJ-program voices. The station-complete prompt should appear immediately when the final track ends; it should not generate or play a delayed standalone outro after the music is already over:
 
 ```text
 Mina:
 [short closing DJ copy]
 
-That station’s done. Press Enter to continue this vibe, or tell me where to take it next.
+Now playing: 5/5  Track - Artist
+[>...................] 00:00 / 04:13
+```
+
+Then, when the final track ends:
+
+```text
+That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.
 ```
 
 DJ mode is not a mid-station toggle. Once normal playback starts, `dj` / `dj mode` should not retrofit spoken mode into that station. The user can stop and ask for a new DJ version, or choose DJ mode before the next station starts.
@@ -1422,6 +1437,14 @@ Now playing: To Be Alone With You - Sufjan Stevens
 Mina's note:
 Playing this one directly. I can keep the station door open after it lands.
 ```
+
+When that direct song finishes, Pockedio should honor the note by returning a continuation surface:
+
+```text
+That song’s done. Press Enter to build a station from this direction, or tell me where to take it next.
+```
+
+This should store a pending station request based on the completed song, so Enter can continue from the single-track direction instead of doing nothing.
 
 If the title is ambiguous:
 
@@ -1581,7 +1604,7 @@ Rules:
 - Resolve phrases like `the singer`, `this artist`, `this song`, and `this track` against the current playback metadata before answering.
 - If Pockedio does not have verified background details, say what is known from metadata instead of inventing a story.
 - Store useful personal listening comments as conversation memory.
-- Positive current-artist preference statements such as `I like her songs` should silently create a positive artist `taste_signals` row for future station planning.
+- Positive current-artist preference statements such as `I like her songs` or `I like her voice` should silently create a positive artist `taste_signals` row for future station planning. These should not be mistaken for DJ voice-mode requests while a track is playing.
 - Keep answers concise; this is still a listening session, not a long article.
 
 ## 3.10 Playback Controls
@@ -1599,7 +1622,7 @@ resume
 Built controls:
 
 ```text
-next / skip / next song / next track
+next / next one / skip / next song / next track
   -> stop current track, mark it skipped, start next playable track, show 3.6 track-start surface
   -> if the next track cannot start, show the playback detail, keep the CLI session open, and let the next `next` try the following track
 
@@ -1687,34 +1710,35 @@ Built feedback:
 I like this / love this / good pick / nice pick
   -> record like on current track
   -> write positive taste signals for current track and artist
-  -> "Noted. I will weigh this direction more strongly."
+  -> acknowledge in short human-facing DJ copy using the current track when available
 
 more like this / similar to this / keep this vibe
   -> record more_like_this on current track
   -> write stronger positive taste signals for current track, artist, and station direction
   -> reshape the unplayed queue around the current track when a station is active
-  -> "Noted. I will stay near this lane."
+  -> acknowledge in short human-facing DJ copy using the current track or station direction
 
 less like this / less of this / not so much like this
   -> record less_like_this on current track
   -> write soft negative taste signals for current track and artist
   -> reshape the unplayed queue away from the current track when a station is active
-  -> "Noted. I will ease away from this texture without banning it."
+  -> acknowledge in short human-facing DJ copy without implying a hard ban
 
 change the vibe / different vibe / switch the mood / change mood
   -> record change_vibe on current track
   -> write a negative taste signal for the current station direction
-  -> "Understood. I will shift the mood."
+  -> acknowledge the mood shift in short human-facing DJ copy
 
 don't play this artist / do not play this artist / never play / ban / block
   -> record ban on current track
   -> write a hard exclude taste signal for the current artist
-  -> "Understood. I will avoid this in future sets."
+  -> acknowledge the future exclusion in short human-facing DJ copy
 
 favorite this / save this / add to best list
   -> record favorite on current track
-  -> write a high-confidence local favorite taste signal
-  -> "Saved locally as a high-confidence favorite signal."
+  -> write a high-confidence local favorite taste signal only if the track is not already favorited
+  -> acknowledge the saved favorite in short human-facing DJ copy using the current track when available
+  -> if the track is already favorited, acknowledge that it is already in favorites without adding another favorite signal
 
 play my favorite song / play one of my favorites / play something from my favorites
   -> read local high-confidence favorite track signals
@@ -1726,7 +1750,7 @@ play my favorite song / play one of my favorites / play something from my favori
 save this vibe / remember this vibe
   -> record save_vibe on current station
   -> write a reusable vibe preset taste signal
-  -> "Saved this vibe as a direction I can return to later."
+  -> acknowledge the saved vibe in short human-facing DJ copy using the station direction when available
 
 skip / next
   -> record skip and a context-bound negative signal for current track, then advance to the next playable track
@@ -1743,6 +1767,7 @@ Rules:
 - Positive seeds and favorites should bias future station planning and fallback search; only explicit queue-shaping feedback should change the current queue.
 - Conversational artist preference statements should create positive artist seeds without reshaping the current queue.
 - `I like this song` should create a weaker positive current-track signal than `favorite this`.
+- Feedback confirmations must not expose backend terms such as `signal`, `weight`, `confidence`, or `locally`.
 - `play my favorite song` should use local favorite signals only; it should not claim access to the user's NetEase favorite library.
 - `favorite` should not be treated as a normal NetEase favorite until account-backed collection behavior is designed.
 

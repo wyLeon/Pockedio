@@ -292,6 +292,16 @@ export class MemoryStore {
     });
   }
 
+  hasFavoriteTrackTarget(targetValue: string): boolean {
+    const row = this.db.prepare(`
+      SELECT 1
+      FROM taste_signals
+      WHERE signal_type = 'favorite' AND target_type = 'track' AND target_value = ?
+      LIMIT 1
+    `).get(targetValue) as { 1: number } | undefined;
+    return row !== undefined;
+  }
+
   addTasteProfileSnapshot(summary: string, metadata?: unknown): string {
     const id = randomUUID();
     this.db.prepare(`

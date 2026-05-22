@@ -7,7 +7,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { createDefaultInteractiveStartUrlPlayback, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupGuide, formatStartupSetupNote, runSessionTurn, stopPlaybackForSessionExit, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupGuide, formatStartupSetupNote, handleInteractiveInterrupt, runSessionTurn, stopPlaybackForSessionExit, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
@@ -327,6 +327,27 @@ describe("runSessionTurn", () => {
     ]);
   });
 
+  it("prints background playback output without swallowing the active prompt input", () => {
+    const writes: string[] = [];
+    const output = {
+      isTTY: true,
+      write: (chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }
+    };
+    const writeOutput = createPromptSafeOutputWriter(
+      { line: "Who is the singer? The background of this song?", cursor: 18 },
+      output,
+      () => true
+    );
+
+    writeOutput("Now playing: 3/5  Misty - Ella Fitzgerald");
+
+    expect(writes.join("")).toContain("Now playing: 3/5  Misty - Ella Fitzgerald\n");
+    expect(writes.join("")).toContain("> Who is the singer? The background of this song?");
+  });
+
   it("plays a specific song directly instead of building a station", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
@@ -358,6 +379,38 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("Queue:");
     expect(playbackState.station).toBeUndefined();
     expect(playbackState.storedTracks).toHaveLength(1);
+  });
+
+  it("opens a station continuation prompt after a direct song finishes", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    let finishPlayback: ((result: { ok: boolean; target: string; exitCode: number; signal: null }) => void) | undefined;
+
+    const result = await runSessionTurn({
+      input: "play To Be Alone With You by Sufjan Stevens",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm(),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          finishPlayback = resolve;
+        }),
+        stop: () => undefined
+      })
+    });
+
+    expect(result.response).toContain("Playing this one directly.");
+    finishPlayback?.({ ok: true, target: "direct-track", exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(output.at(-1)).toBe("That song’s done. Press Enter to build a station from this direction, or tell me where to take it next.");
+    expect(playbackState.pendingStationRequest).toBe("music like To Be Alone With You - Sufjan Stevens");
+    expect(playbackState.pendingStationNeedsChoice).toBe(true);
   });
 
   it("asks the user to choose when a bare song title is ambiguous", async () => {
@@ -600,6 +653,47 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain("Up next:");
     expect(result.response).toContain("> 2.");
     expect(result.response).toContain("Pockedio's note:");
+    expect(stopCalls).toBe(1);
+    expect(started).toHaveLength(2);
+    expect(playbackState.currentIndex).toBe(1);
+  });
+
+  it("treats next one as a skip control during playback", async () => {
+    const config = makeConfig();
+    let stopCalls = 0;
+    const started: string[] = [];
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "next one",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Coming up next: the first song again.")
+    });
+
+    expect(result.intent.type).toBe("feedback_skip");
+    expect(result.response).toContain("Now playing: 2/5");
+    expect(result.response).not.toContain("Coming up next");
     expect(stopCalls).toBe(1);
     expect(started).toHaveLength(2);
     expect(playbackState.currentIndex).toBe(1);
@@ -1206,6 +1300,38 @@ describe("runSessionTurn", () => {
     expect(playbackState.activePlayback).toBeUndefined();
   });
 
+  it("stops active playback before closing on idle Ctrl+C", async () => {
+    const playbackState: InteractivePlaybackState = {};
+    let stopped = false;
+    let closed = false;
+    const events: string[] = [];
+    playbackState.activePlayback = {
+      target: "track-1",
+      done: new Promise(() => undefined),
+      stop: () => {
+        stopped = true;
+        events.push("stop");
+      }
+    };
+    const state: InteractiveInterruptState = {
+      playbackState,
+      exiting: false,
+      suppressIdleInterruptUntil: 0,
+      closeReadline: () => {
+        closed = true;
+        events.push("close");
+      }
+    };
+
+    handleInteractiveInterrupt(state, () => new Date(1_000));
+
+    expect(stopped).toBe(true);
+    expect(closed).toBe(true);
+    expect(events).toEqual(["stop", "close"]);
+    expect(playbackState.activePlayback).toBeUndefined();
+    expect(state.exiting).toBe(true);
+  });
+
   it("announces the next track when playback auto-advances", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -1373,8 +1499,84 @@ describe("runSessionTurn", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    expect(output.at(-1)).toBe("That station’s done. Press Enter to continue this vibe, or tell me where to take it next.");
+    expect(output.at(-1)).toBe("That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.");
     expect(playbackState.pendingStationRequest).toBe("play something for deep work");
+    expect(playbackState.pendingStationNeedsChoice).toBe(true);
+  });
+
+  it("asks for normal or DJ mode before continuing a completed station", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null }) => void> = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            finishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      finishers[index]?.({ ok: true, target: `track-${index + 1}`, exitCode: 0, signal: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const choice = await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(choice.intent.type).toBe("pending_station_refinement");
+    expect(choice.response).toContain("Continue this vibe?");
+    expect(choice.response).toContain("type \"dj\" for a spoken DJ version");
+    expect(started).toHaveLength(5);
+    expect(playbackState.pendingStationNeedsChoice).toBe(false);
+    expect(playbackState.pendingStationRequest).toBe("play something for deep work");
+
+    const playback = await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(playback.intent.type).toBe("pending_station_confirmation");
+    expect(playback.response).toContain("Now playing: 1/5");
+    expect(started).toHaveLength(6);
   });
 
   it("attaches feedback to the current playing track", async () => {
@@ -1499,6 +1701,86 @@ describe("runSessionTurn", () => {
       "Near Lane 2 Reshape Artist",
       "Near Lane 3 Reshape Artist",
       "Near Lane 4 Reshape Artist"
+    ]);
+  });
+
+  it("confirms favorites with human-facing current-track copy", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "favorite this",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.response).toContain("Saved \"something deep work\" as a favorite.");
+    expect(result.response).not.toMatch(/\b(high-confidence|signal|weight|locally)\b/i);
+  });
+
+  it("does not add duplicate favorite signals for the same current track", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    await runSessionTurn({
+      input: "favorite this",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+    const duplicate = await runSessionTurn({
+      input: "favorite this",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(duplicate.response).toContain("\"something deep work\" is already in your favorites.");
+    expect(duplicate.response).not.toMatch(/\b(high-confidence|signal|weight|locally)\b/i);
+
+    const favoriteSignals = withDatabase(config, (db) => db.prepare(`
+      SELECT signal_type as signalType, target_type as targetType, target_value as targetValue
+      FROM taste_signals
+      WHERE signal_type = 'favorite'
+    `).all());
+    expect(favoriteSignals).toEqual([
+      {
+        signalType: "favorite",
+        targetType: "track",
+        targetValue: "something deep work - Test Artist"
+      }
     ]);
   });
 
@@ -1648,7 +1930,8 @@ describe("runSessionTurn", () => {
     expect(result.intent.type).toBe("favorite_playback_request");
     expect(result.response).toContain("Now playing: something deep work - Test Artist");
     expect(result.response).toContain("Pockedio's note:");
-    expect(result.response).toContain("high-confidence favorite");
+    expect(result.response).toContain("saved favorite");
+    expect(result.response).not.toMatch(/\b(high-confidence|signal|weight|locally)\b/i);
     expect(started).toHaveLength(2);
     expect(stopCalls).toBe(1);
     expect(playbackState.storedTracks).toHaveLength(1);
@@ -1908,6 +2191,53 @@ describe("runSessionTurn", () => {
       note: "I like her songs.",
       inferredFrom: "conversation_current_artist_preference",
       currentTrack: "something deep work - Test Artist"
+    });
+  });
+
+  it("treats liking the singer voice as current-artist taste, not DJ voice mode", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "I like her voice",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I’ll remember that this singer’s voice works for you.")
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.response).not.toContain("DJ voice belongs to a station");
+
+    const signals = withDatabase(config, (db) => db.prepare(`
+      SELECT signal_type as signalType, target_type as targetType, target_value as targetValue, weight, context_json as contextJson
+      FROM taste_signals
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `).get()) as { signalType: string; targetType: string; targetValue: string; weight: number; contextJson: string };
+    expect(signals).toMatchObject({
+      signalType: "positive_seed",
+      targetType: "artist",
+      targetValue: "Test Artist",
+      weight: 2
+    });
+    expect(JSON.parse(signals.contextJson)).toMatchObject({
+      note: "I like her voice",
+      inferredFrom: "conversation_current_artist_preference"
     });
   });
 
@@ -2402,6 +2732,31 @@ describe("runSessionTurn", () => {
     expect(result.station).toBeUndefined();
     expect(result.response).toContain("can't hand this off to Spotify yet");
     expect(prompts[0]).toContain("Do not claim spoken audio was generated");
+  });
+
+  it("asks for station direction when the user wants a bare DJ program", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+    const playbackState: InteractivePlaybackState = {};
+    let readContext = false;
+
+    const result = await runSessionTurn({
+      input: "I want a DJ program.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => {
+        readContext = true;
+        return { personality: config.personality };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.response).toBe("Sure. What kind of set should I build it around?");
+    expect(result.station).toBeUndefined();
+    expect(playbackState.pendingDjProgram).toBeUndefined();
+    expect(readContext).toBe(false);
   });
 
   it("uses current playback facts for fallback music knowledge when the LLM is unavailable", async () => {
@@ -3683,12 +4038,13 @@ describe("runSessionTurn", () => {
     expect(transitionCancelled).toBe(true);
   });
 
-  it("plays a short DJ outro when a DJ program station finishes", async () => {
+  it("uses a prepared closing voice on the final DJ-program track instead of a delayed post-station outro", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
     const playbackState: InteractivePlaybackState = {};
     const output: string[] = [];
     const playedFiles: string[] = [];
+    const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
     const finishers: Array<(result: { ok: boolean; target: string; exitCode: number | null; signal: NodeJS.Signals | null }) => void> = [];
 
     await runSessionTurn({
@@ -3709,8 +4065,8 @@ describe("runSessionTurn", () => {
         generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
         generateText: async (prompt) => ({
           ok: true,
-          value: prompt.includes("completed DJ program")
-            ? "Mina here. That set has landed softly. Press Enter and I can keep the room in this glow, or point me somewhere new."
+          value: prompt.includes("Track 5")
+            ? "Mina here. One last warm turn before the set lands softly."
             : prompt.includes("Track 3")
               ? "Track 3 intro is ready."
               : "Mina opens this softly."
@@ -3720,7 +4076,7 @@ describe("runSessionTurn", () => {
       writeOutput: (text) => output.push(text),
       synthesizeFishAudio: async (_config, text) => ({
         ok: true,
-        audioPath: text.includes("landed softly") ? "/tmp/outro.wav" : `/tmp/${text.length}.wav`,
+        audioPath: text.includes("One last warm turn") ? "/tmp/final-closing.wav" : `/tmp/${text.length}.wav`,
         latencyMs: 15
       }),
       playFile: async (filePath) => {
@@ -3738,6 +4094,7 @@ describe("runSessionTurn", () => {
         target: url,
         introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
         done: new Promise((resolve) => {
+          duckedStarts.push({ url, introFilePath });
           finishers.push(resolve);
         }),
         stop: () => undefined
@@ -3761,6 +4118,7 @@ describe("runSessionTurn", () => {
         target: url,
         introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
         done: new Promise((resolve) => {
+          duckedStarts.push({ url, introFilePath });
           finishers.push(resolve);
         }),
         stop: () => undefined
@@ -3774,10 +4132,9 @@ describe("runSessionTurn", () => {
       await Promise.resolve();
     }
 
-    expect(playedFiles).toContain("/tmp/outro.wav");
-    expect(output.at(-1)).toContain("Mina:");
-    expect(output.at(-1)).toContain("That set has landed softly");
-    expect(output.at(-1)).toContain("That station’s done. Press Enter to continue this vibe");
+    expect(duckedStarts.map((start) => start.introFilePath)).toContain("/tmp/final-closing.wav");
+    expect(playedFiles).toEqual([]);
+    expect(output.at(-1)).toBe("That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.");
   });
 
   it("keeps explicit mood playback requests as playback", async () => {
