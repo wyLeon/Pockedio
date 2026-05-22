@@ -21,11 +21,13 @@ export type LlmClient = {
 };
 
 export class UnavailableLlmClient implements LlmClient {
+  constructor(private readonly apiKeyEnv = "OPENAI_API_KEY") {}
+
   async generateJson<T = unknown>(): Promise<LlmResult<T>> {
     return {
       ok: false,
       errorCode: "llm_unavailable",
-      error: "OPENAI_API_KEY is not configured."
+      error: `${this.apiKeyEnv} is not configured.`
     };
   }
 
@@ -33,7 +35,7 @@ export class UnavailableLlmClient implements LlmClient {
     return {
       ok: false,
       errorCode: "llm_unavailable",
-      error: "OPENAI_API_KEY is not configured."
+      error: `${this.apiKeyEnv} is not configured.`
     };
   }
 }

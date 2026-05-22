@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { loadConfig } from "../config/load.js";
+import { hasLocalLlmApiKey } from "../config/llmSecrets.js";
 import { readNetEaseCookie } from "../config/neteaseAuth.js";
 import { getConfigPath, type PockedioEnv } from "../config/paths.js";
 import type { PockedioConfig } from "../config/schema.js";
@@ -39,6 +40,7 @@ export type StatusReport = {
     baseUrl?: string;
     apiKeyEnv: string;
     apiKeyPresent: boolean;
+    apiKeySource: "env" | "local_secret" | "missing";
   };
   fishAudio: {
     pythonPath: string;
@@ -87,6 +89,7 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
     present: fs.existsSync(getConfigPath(env))
   };
   const database = getDatabaseStatus(config);
+  const llmApiKeySource = getLlmApiKeySource(config, env);
   const baseReport = {
     config: configStatus,
     runtime: {
@@ -99,7 +102,8 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
       model: config.llm.model,
       baseUrl: config.llm.baseUrl,
       apiKeyEnv: config.llm.apiKeyEnv,
-      apiKeyPresent: Boolean(env[config.llm.apiKeyEnv])
+      apiKeyPresent: llmApiKeySource !== "missing",
+      apiKeySource: llmApiKeySource
     },
     fishAudio,
     calendar: {
@@ -321,8 +325,23 @@ function formatLlmStatus(llm: StatusReport["llm"]): string {
     llm.provider,
     llm.model,
     llm.baseUrl,
-    `key env ${llm.apiKeyEnv}`
+    `key env ${llm.apiKeyEnv}`,
+    `key source ${formatLlmKeySource(llm.apiKeySource)}`
   ].filter(Boolean).join(", ");
+}
+
+function getLlmApiKeySource(config: PockedioConfig, env: PockedioEnv): StatusReport["llm"]["apiKeySource"] {
+  if (env[config.llm.apiKeyEnv]) {
+    return "env";
+  }
+  if (hasLocalLlmApiKey(config, config.llm.apiKeyEnv)) {
+    return "local_secret";
+  }
+  return "missing";
+}
+
+function formatLlmKeySource(source: StatusReport["llm"]["apiKeySource"]): string {
+  return source === "local_secret" ? "local secret" : source === "env" ? "shell env" : "missing";
 }
 
 export async function printStatus(): Promise<void> {

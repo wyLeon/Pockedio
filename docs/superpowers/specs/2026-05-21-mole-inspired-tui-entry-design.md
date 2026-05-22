@@ -136,17 +136,25 @@ API key         Missing: OPENAI_API_KEY
 Base URL        OpenAI default
 
 Actions:
-> Set API key env name
-  Change model
-  Change base URL
-  Test connection
+> Use OpenAI
+  Use DeepSeek
+  Use OpenRouter
+  Use local vLLM
+  Custom OpenAI-compatible
+  Test current setup
   Back
 ```
 
 Behavior:
 
 - Default to the current config values from `llm.provider`, `llm.model`, `llm.baseUrl`, and `llm.apiKeyEnv`.
-- Do not ask users to paste raw API keys into Pockedio. Ask for the environment variable name and show whether it is present.
+- The top-level LLM setup is provider-first. Selecting a provider opens a focused provider detail surface instead of immediately applying a preset.
+- Hosted provider detail surfaces expose `Paste API key`, `Use shell env`, `Change model`, `Test connection`, and `Back`.
+- Custom OpenAI-compatible detail also exposes `Change base URL` and `Set API key env`.
+- Local vLLM detail exposes `Check server`, `Discover models`, optional key paste, manual model entry, and base URL entry.
+- Users can paste an API key directly in the terminal from the provider detail screen. Pockedio stores it in the local secret file outside the normal config, with owner-only permissions.
+- Runtime key lookup order is shell environment first, local secret second. This keeps advanced shell-based setup working while giving new users a lower-friction path.
+- vLLM discovery queries the OpenAI-compatible `/models` endpoint and can save the first discovered model as the current model.
 - `Test connection` should make the smallest practical LLM call and report configured / missing key / connection failed.
 - Missing LLM configuration should be a readiness warning, not a crash in the hub.
 
@@ -172,6 +180,11 @@ Behavior:
 - On macOS, default to the built-in Siri voice path from the macOS Siri TTS design.
 - Offer the Pockedio-facing voice names: Lumen, Sable, Arden, Vale, Sol.
 - Default to Vale.
+- `Preview voices` should play the currently configured voice with a fixed DJ sample sentence.
+- `Choose built-in voice` should let users select one of the five named macOS voices, play a true preview, and persist `tts.provider = "macos"` plus the chosen voice.
+- `Configure Fish TTS` should let users select Mina or Nova, play the local preview WAV when present, and persist `tts.provider = "fish"` plus the chosen Fish voice.
+- `Use text-only DJ copy` should persist `tts.provider = "text"`.
+- Runtime DJ audio should consume this same `tts` config: macOS selections generate local AIFF files through `say`, Fish selections use the existing FishAudio path, and text-only selections skip synthesis while keeping DJ copy visible.
 - Fish TTS is an advanced path for Mina and Nova, not a first-run requirement.
 - On non-macOS platforms, show text-only as the default and Fish TTS as the optional configured path.
 - Voice setup details and provider behavior are defined in `docs/superpowers/specs/2026-05-22-macos-siri-tts-fallback-design.md`.
@@ -187,22 +200,50 @@ Give users a compact view of personalization inputs without exposing raw private
 ```text
 Taste & Memory
 
-Taste file      Imported, track count if available
+Imported lists  4 playlists, 312 tracks
+Last import     Late Night Piano, today 11:42
+Taste profile   Needs refresh
 Recent signals  Feedback signal count if available
 Session memory  Last updated if available
 Diary           Summary available / not enabled
 
 Actions:
-> Import taste
+> Import playlist or taste file
   Rebuild taste profile
   Show taste summary
+  Start station from latest import
   Back
 ```
 
 ### Behavior
 
-- `Import taste` should route to existing taste import behavior or explain the required file path.
+- `Import playlist or taste file` should accept a normalized taste CSV file, a NetEase playlist link, or a NetEase playlist ID.
+- Import can be run at any time. It should not stop current playback, skip tracks, or replace the current station silently.
+- A new import is a taste signal, not an immediate playback command.
+- Imports should merge into the existing taste surface and preserve user-authored `taste.md` notes.
+- After importing, show a compact result screen:
+
+```text
+Imported playlist
+
+Tracks        42
+Artists       31
+Playlist      Late Night Piano
+Taste file    ~/.pockedio/taste.md
+
+Updated:
+  Imported taste signals
+  Taste memory
+  Taste profile needs refresh
+
+Actions:
+> Rebuild taste profile
+  Start station from this playlist
+  Back to Taste & Memory
+```
+
 - `Rebuild taste profile` should map to the current taste profile update behavior.
+- `Start station from latest import` should open the main DJ session with the playlist context available as the station seed. It should not start automatically right after import.
 - `Show taste summary` should show a compact summary, not raw diary or full transcripts.
 
 ## Entry Point 4: Status
@@ -257,6 +298,7 @@ The implementation should be judged against these goals:
 5. A user who wants Mina or Nova can find Fish TTS setup as an advanced voice path.
 6. The hub does not create fake product modes; station generation, DJ mode, and scheduled DJ remain behaviors inside the session or scheduler.
 7. Non-TTY and existing scriptable commands keep working without the hub interfering.
+8. A user can import a new playlist from Taste & Memory without losing previous imports or user-authored taste notes.
 
 ## Acceptance Checks
 
@@ -265,10 +307,15 @@ After implementation, verify the goals with these checks:
 - Launch `pockedio` in a TTY with a complete config. Expected: MOLE-like hub appears, `Enter DJ Session` is selected, readiness shows Music, LLM, Voice, Taste, and Calendar.
 - Press Enter from the hub. Expected: existing main DJ session opens without extra confirmation.
 - Launch with the configured LLM API key env missing. Expected: readiness shows the missing key and `Configure LLM` is reachable from `Setup & Connections`.
+- Choose an LLM provider, open `Paste API key`, and paste the key from the provider detail screen. Expected: readiness changes to local secret, normal config does not contain the raw key, and the secret file has owner-only permissions.
+- Open local vLLM, run `Discover models` against a running vLLM-compatible server. Expected: Pockedio saves the discovered model and keeps the base URL under the local vLLM provider setup.
 - Run the LLM connection test with a valid key. Expected: setup reports configured and returns to the setup surface.
 - Open `Configure Voice` on macOS. Expected: Lumen, Sable, Arden, Vale, and Sol are available, with Vale as default.
 - Select a built-in voice and request a spoken DJ station. Expected: Pockedio prepares DJ voice without requiring Fish TTS.
 - Select Fish TTS / Mina or Nova. Expected: Pockedio asks for Fish runtime details only in that advanced path.
+- Open `Taste & Memory`, import a NetEase playlist link, and return to the surface. Expected: latest import, imported playlist count, and `Taste profile needs refresh` are visible.
+- Import a second playlist. Expected: previous playlist tracks and user-authored `taste.md` notes are preserved.
+- Import while playback is active. Expected: playback continues and the current queue is not replaced unless the user chooses `Start station from this playlist`.
 - Run a non-TTY command such as `pockedio status` or piped invocation. Expected: plain command behavior, no interactive hub.
 - Run the automated tests covering hub routing, readiness formatting, LLM config detection, voice provider defaults, and non-TTY bypass.
 
@@ -285,6 +332,7 @@ After implementation, verify the goals with these checks:
 1. Add config/readiness helpers for Music, LLM, Voice, Taste, and Calendar.
 2. Add the Welcome Hub renderer and keyboard routing for the four entry points.
 3. Add focused LLM setup and Voice setup surfaces.
-4. Add direct session bypass for non-TTY and explicit session flags.
-5. Add automated tests for routing, readiness, setup surfaces, and non-TTY behavior.
-6. Run the manual acceptance checks listed above.
+4. Add anytime playlist import and post-import actions to Taste & Memory.
+5. Add direct session bypass for non-TTY and explicit session flags.
+6. Add automated tests for routing, readiness, setup surfaces, anytime import, and non-TTY behavior.
+7. Run the manual acceptance checks listed above.

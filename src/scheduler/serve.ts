@@ -16,7 +16,8 @@ import type { MusicProvider } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
 import { generateStation } from "../station/stationGenerator.js";
 import type { GeneratedStation } from "../station/stationTypes.js";
-import { synthesizeFishAudio as synthesizeFishAudioDefault, type FishAudioOptions, type FishAudioResult } from "../tts/fishAudio.js";
+import { synthesizeDjAudio as synthesizeFishAudioDefault, type DjAudioOptions as FishAudioOptions } from "../tts/djAudio.js";
+import type { FishAudioResult } from "../tts/fishAudio.js";
 import {
   formatLocalDateTime,
   getScheduledDjTargetPlayTime,

@@ -438,8 +438,8 @@ describe("runSessionTurn", () => {
     expect(result.station).toBeUndefined();
     expect(started).toEqual([]);
     expect(result.response).toContain("I found a few close matches:");
-    expect(result.response).toContain("1. Intro - The xx");
-    expect(result.response).toContain("Which one?");
+    expect(result.response).toContain("> 1. Intro - The xx");
+    expect(result.response).toContain("↑↓ Select  |  Enter Play");
     expect(playbackState.pendingSingleTrackSelection?.candidates).toHaveLength(3);
   });
 
@@ -1060,6 +1060,71 @@ describe("runSessionTurn", () => {
     expect(stopCalls).toBe(0);
     expect(playbackState.activePlayback).toBeDefined();
     expect(playbackState.activePlaybackPaused).toBe(false);
+  });
+
+  it("keeps a paused station resumable if the player exits while paused", async () => {
+    const config = makeConfig();
+    let pauseCalls = 0;
+    let stopCalls = 0;
+    const playbackState: InteractivePlaybackState = {};
+    const playbackDoneResolvers: Array<(result: { ok: boolean; target: string; exitCode: number; signal: null }) => void> = [];
+    const startedTargets: string[] = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        startedTargets.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => playbackDoneResolvers.push(resolve)),
+          stop: () => {
+            stopCalls += 1;
+          },
+          pause: () => {
+            pauseCalls += 1;
+            return true;
+          }
+        };
+      }
+    });
+
+    await runSessionTurn({
+      input: "pause",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    playbackDoneResolvers[0]?.({ ok: true, target: startedTargets[0]!, exitCode: 0, signal: null });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(playbackState.currentIndex).toBe(0);
+    expect(playbackState.activePlaybackPaused).toBe(true);
+    expect(startedTargets).toHaveLength(1);
+
+    const result = await runSessionTurn({
+      input: "resume",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("resume");
+    expect(result.response).toContain("Resuming from the paused track.");
+    expect(result.response).toContain("Now playing: 1/5");
+    expect(startedTargets).toHaveLength(2);
+    expect(startedTargets[1]).toBe(startedTargets[0]);
+    expect(playbackState.currentIndex).toBe(0);
+    expect(playbackState.activePlaybackPaused).toBe(false);
+    expect(pauseCalls).toBe(1);
+    expect(stopCalls).toBe(0);
   });
 
   it("uses semantic LLM control classification for natural resume wording", async () => {
@@ -2714,6 +2779,69 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain("softer station");
     expect(playedUrls).toEqual([]);
     expect(prompts[0]).toContain("Do not turn a question into playback");
+  });
+
+  it("confirms a queue offer made during artist background conversation", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const provider: MusicProvider = {
+      async search(query: MusicSearchQuery): Promise<MusicTrackCandidate[]> {
+        if (query.keyword === "郭顶") {
+          return [
+            { provider: "netease", providerTrackId: "mercury", title: "水星记", artists: ["郭顶"], album: "飞行器的执行周期" },
+            { provider: "netease", providerTrackId: "flight", title: "飞行器的执行周期", artists: ["郭顶"], album: "飞行器的执行周期" },
+            { provider: "netease", providerTrackId: "thinking", title: "想着你", artists: ["郭顶"], album: "微微" },
+            { provider: "netease", providerTrackId: "baoshui", title: "保留", artists: ["郭顶"], album: "飞行器的执行周期" },
+            { provider: "netease", providerTrackId: "lucky", title: "幸运大门", artists: ["郭顶"], album: "飞行器的执行周期" }
+          ];
+        }
+        return new FakeProvider().search(query, 5);
+      },
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        return {
+          available: true,
+          provider: "netease",
+          providerTrackId: trackId,
+          playableUrl: `https://example.com/${encodeURIComponent(trackId)}.mp3`,
+          urlType: "mp3"
+        };
+      }
+    };
+
+    const setup = await runSessionTurn({
+      input: "Tell me about 郭顶",
+      config,
+      playbackState,
+      provider,
+      llm: conversationalLlm("郭顶 is a Chinese singer-songwriter and producer. Want me to pull something of his into the queue?")
+    });
+
+    expect(setup.intent.type).toBe("conversation");
+    expect(setup.station).toBeUndefined();
+    expect(playbackState.pendingStationRequest).toBe("play songs by 郭顶");
+
+    const result = await runSessionTurn({
+      input: "Sure",
+      config,
+      playbackState,
+      provider,
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("pending_station_confirmation");
+    expect(result.station?.request).toBe("play songs by 郭顶");
+    expect(started).toHaveLength(1);
+    expect(result.response).toContain("Now playing:");
   });
 
   it("answers unsupported fallback actions with available nearby controls", async () => {

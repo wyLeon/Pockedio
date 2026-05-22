@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ensureRuntimeDirs, loadConfig, saveConfig } from "../src/config/load.js";
+import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import { MemoryStore } from "../src/memory/store.js";
@@ -67,6 +68,7 @@ describe("status report", () => {
       apiKeyEnv: "OPENAI_API_KEY",
       apiKeyPresent: false
     });
+    expect(report.llm.apiKeySource).toBe("missing");
     expect(report.taste.present).toBe(true);
     expect(report.personas.present).toBe(true);
     expect(report.latestSessionTimestamp).toEqual(expect.any(String));
@@ -84,6 +86,27 @@ describe("status report", () => {
     expect(text).toContain("- LLM: missing API key");
     expect(text).toContain("- Database: migrated");
     expect(text).toContain("- Last session:");
+  });
+
+  it("reports locally stored LLM API keys", async () => {
+    const home = makeHome();
+    const env = { POCKEDIO_HOME: home };
+    const config = loadConfig(env);
+    ensureRuntimeDirs(config, env);
+    saveConfig(config, env);
+    saveLlmApiKey(config, "OPENAI_API_KEY", "sk-local");
+
+    const report = await getStatusReport({
+      env,
+      fetchImpl: async () => {
+        throw new Error("offline");
+      }
+    });
+
+    expect(report.llm.apiKeyPresent).toBe(true);
+    expect(report.llm.apiKeySource).toBe("local_secret");
+    expect(formatStatusReport(report)).toContain("- LLM: configured");
+    expect(formatStatusReport(report)).toContain("key source local secret");
   });
 
   it("formats status as runtime, integrations, and memory surfaces", () => {
@@ -106,7 +129,8 @@ describe("status report", () => {
         model: "deepseek-chat",
         baseUrl: "https://api.deepseek.com",
         apiKeyEnv: "DEEPSEEK_API_KEY",
-        apiKeyPresent: true
+        apiKeyPresent: true,
+        apiKeySource: "env"
       },
       fishAudio: {
         pythonPath: "/python",
@@ -127,7 +151,7 @@ describe("status report", () => {
     expect(text).toContain("- Scheduled jobs: Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled");
     expect(text).toContain("Integrations");
     expect(text).toContain("- NetEase music: reachable (account-backed, exhigh, http://127.0.0.1:3000)");
-    expect(text).toContain("- LLM: configured (OpenAI-compatible, deepseek-chat, https://api.deepseek.com, key env DEEPSEEK_API_KEY)");
+    expect(text).toContain("- LLM: configured (OpenAI-compatible, deepseek-chat, https://api.deepseek.com, key env DEEPSEEK_API_KEY, key source shell env)");
     expect(text).toContain("- Weather: Shanghai");
     expect(text).toContain("Memory");
     expect(text).toContain("- Last session: 2026-05-19T02:00:00.000Z");

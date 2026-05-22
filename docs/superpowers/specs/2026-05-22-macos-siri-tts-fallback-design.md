@@ -24,13 +24,13 @@ Pockedio should not expose Apple's raw `Voice 1` through `Voice 5` labels as pro
 
 Use these Pockedio-facing names:
 
-| Pockedio name | macOS Siri voice |
+| Pockedio name | macOS preview voice |
 | --- | --- |
-| Lumen | English (United States) Siri Voice 1 |
-| Sable | English (United States) Siri Voice 2 |
-| Arden | English (United States) Siri Voice 3 |
-| Vale | English (United States) Siri Voice 4 |
-| Sol | English (United States) Siri Voice 5 |
+| Lumen | Samantha |
+| Sable | Moira |
+| Arden | Daniel |
+| Vale | Karen |
+| Sol | Tessa |
 
 `Vale` is the default built-in voice.
 
@@ -98,7 +98,9 @@ say -v "Siri Voice 4" "Welcome back."
 
 In local testing, `say -v "Siri Voice N"` produced identical fallback audio even after the Siri voices were downloaded.
 
-The working path was:
+The earlier Siri voice experiment showed that directly targeting `Siri Voice N` can collapse to identical fallback audio. The current CLI setup therefore uses stable named macOS `say` voices for true previews and selection. A later macOS system-voice switcher can revisit the Siri voice path if it can restore global state safely.
+
+The Siri working path was:
 
 1. Download the English (United States) Siri voices through System Settings.
 2. Select the intended Siri voice as the macOS Spoken Content system voice.
@@ -122,7 +124,7 @@ Recommended first setup flow:
 1. Ask whether the user wants to hear built-in DJ voice previews.
 2. Offer the five named macOS voices on macOS: Lumen, Sable, Arden, Vale, Sol.
 3. Default to Vale.
-4. If a selected macOS voice is not installed, show a short instruction to download it in System Settings rather than blocking the rest of setup.
+4. Preview selected voices by running `say -v <voice>` with a fixed DJ sample sentence.
 5. Offer Fish TTS as an advanced/local custom voice option, not as the default path.
 
 Fish setup should be available from a dedicated setup or settings entry:

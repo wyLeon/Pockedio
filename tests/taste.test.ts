@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
 import { withDatabase } from "../src/db/database.js";
 import { parseTasteCsv } from "../src/taste/csv.js";
-import { importTaste } from "../src/taste/importTaste.js";
+import { importTaste, importTasteInput } from "../src/taste/importTaste.js";
 import { extractNetEasePlaylistId, importTasteFromNetEasePlaylist } from "../src/taste/neteasePlaylist.js";
 import { updateTasteProfile } from "../src/taste/profile.js";
 import { generatedTasteProfileEnd, generatedTasteProfileStart, upsertGeneratedTasteProfileSection } from "../src/taste/tasteMarkdown.js";
@@ -71,6 +71,67 @@ describe("taste import", () => {
     expect(row.trackCount).toBe(3);
   });
 
+  it("merges additional imports without losing previous playlist signals or user notes", async () => {
+    const config = makeConfig();
+    importTaste("tests/fixtures/taste-normalized.csv", config);
+    fs.appendFileSync(config.paths.taste, "\nUser note: keep rainy night piano.\n");
+
+    const result = await importTasteInput("https://music.163.com/#/playlist?id=123456", config, async () => {
+      return new Response(JSON.stringify({
+        playlist: { name: "Sunday R&B" },
+        songs: [
+          {
+            name: "Love Is A Verb",
+            ar: [{ name: "John Mayer" }],
+            al: { name: "Born and Raised" }
+          }
+        ]
+      }), { status: 200 });
+    });
+
+    expect(result).toMatchObject({
+      trackCount: 1,
+      playlists: ["Sunday R&B"],
+      profileStatus: "needs_refresh"
+    });
+  });
+
+  it("keeps previous imported tracks and notes after a second playlist import", async () => {
+    const config = makeConfig();
+    importTaste("tests/fixtures/taste-normalized.csv", config);
+    fs.appendFileSync(config.paths.taste, "\nUser note: keep rainy night piano.\n");
+
+    await importTasteInput("https://music.163.com/#/playlist?id=123456", config, async () => {
+      return new Response(JSON.stringify({
+        playlist: { name: "Sunday R&B" },
+        songs: [
+          {
+            name: "Love Is A Verb",
+            ar: [{ name: "John Mayer" }],
+            al: { name: "Born and Raised" }
+          }
+        ]
+      }), { status: 200 });
+    });
+
+    const markdown = fs.readFileSync(config.paths.taste, "utf8");
+    expect(markdown).toContain("User note: keep rainy night piano.");
+    expect(markdown).toContain("- Blue in Green - Miles Davis");
+    expect(markdown).toContain("- Love Is A Verb - John Mayer");
+    expect(markdown).toContain("- late night piano");
+    expect(markdown).toContain("- Sunday R&B");
+
+    const imports = withDatabase(config, (db) => db.prepare(`
+      SELECT source_file as sourceFile, track_count as trackCount
+      FROM taste_imports
+      ORDER BY imported_at
+    `).all()) as Array<{ sourceFile: string; trackCount: number }>;
+    expect(imports).toEqual([
+      { sourceFile: "tests/fixtures/taste-normalized.csv", trackCount: 3 },
+      { sourceFile: "netease:playlist:123456", trackCount: 1 }
+    ]);
+  });
+
   it("extracts NetEase playlist IDs from pasted links", () => {
     expect(extractNetEasePlaylistId("https://music.163.com/#/playlist?id=123456")).toBe("123456");
     expect(extractNetEasePlaylistId("https://music.163.com/playlist?id=987654&userid=1")).toBe("987654");
@@ -119,6 +180,25 @@ describe("taste import", () => {
       sourceFile: "netease:playlist:123456",
       trackCount: 2
     });
+  });
+
+  it("imports either a local taste CSV or a NetEase playlist link from one input helper", async () => {
+    const config = makeConfig();
+    const fileResult = await importTasteInput("tests/fixtures/taste-normalized.csv", config);
+
+    expect(fileResult.trackCount).toBe(3);
+    expect(fileResult.source).toBe("file");
+
+    const playlistResult = await importTasteInput("https://music.163.com/#/playlist?id=999", config, async () => {
+      return new Response(JSON.stringify({
+        playlist: { name: "Morning Air" },
+        songs: [{ name: "First Light", ar: [{ name: "Yiruma" }], al: { name: "Piano" } }]
+      }), { status: 200 });
+    });
+
+    expect(playlistResult.trackCount).toBe(1);
+    expect(playlistResult.source).toBe("netease_playlist");
+    expect(playlistResult.playlists).toEqual(["Morning Air"]);
   });
 
   it("preserves user taste.md notes while replacing the generated profile block", () => {

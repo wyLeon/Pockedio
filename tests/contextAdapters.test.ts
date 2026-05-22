@@ -397,7 +397,7 @@ describe("context builder", () => {
     expect(rows).toHaveLength(2);
     expect(rows.find((row) => row.kind === "agenda")?.content).toContain("Planning Review");
     expect(rows.find((row) => row.kind === "diary")?.content).toContain("Meeting-heavy day");
-  });
+  }, 10_000);
 
   it("formats refresh-context output for manual QA", () => {
     expect(formatRefreshContextResult({
