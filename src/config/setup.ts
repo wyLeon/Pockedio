@@ -306,7 +306,7 @@ export async function runDiarySetup(): Promise<SetupRunResult> {
       "",
       diaryPathCopyHint,
       "",
-      `Current path  ${current.diary.path}`,
+      `Current path  ${formatDiaryPathForSetup(current.diary.path)}`,
       `Status        ${current.diary.enabled ? "Enabled" : "Not enabled"}`,
       "",
       "Actions"
@@ -342,7 +342,6 @@ export async function runDiarySetup(): Promise<SetupRunResult> {
     console.log(diaryPathCopyHint);
     const inputDiaryPath = await promptSetupTextInput({
       message: "Diary path",
-      defaultValue: current.diary.path,
       validate: (value) => value.trim().length > 0 || "Enter a diary folder path."
     });
     if (inputDiaryPath === "back") {
@@ -592,7 +591,7 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
       type: "input",
       name: "diaryPath",
       message: "Diary path",
-      default: current.diary.path,
+      validate: (value) => value.trim().length > 0 || "Paste your diary root directory path.",
       when: (answers) => answers.useDiary
     }
   ]);
@@ -1053,7 +1052,7 @@ export async function promptForAdvancedSetup(current: PockedioConfig): Promise<S
       type: "input",
       name: "diaryPath",
       message: "Context permissions - diary path",
-      default: current.diary.path,
+      validate: (value) => value.trim().length > 0 || "Paste your diary root directory path.",
       when: (answers) => answers.diaryEnabled
     },
     {
@@ -1784,6 +1783,10 @@ function inferCurrentScheduledDjChoice(current: PockedioConfig): ScheduledDjSetu
 function formatSetupMenuEntry(selected: boolean, index: number, name: string): string {
   const line = `${selected ? ">" : " "} ${index}. ${name}`;
   return selected ? `\x1B[7m${line}\x1B[0m` : line;
+}
+
+function formatDiaryPathForSetup(pathValue: string | undefined): string {
+  return pathValue?.trim() || "Not set";
 }
 
 function inferCurrentNetEaseSetupMethod(current: PockedioConfig): NetEaseSetupMethod {

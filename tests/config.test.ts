@@ -71,6 +71,7 @@ describe("config load and save", () => {
     expect(config.weather.location).toBe("Shanghai");
     expect(config.calendar.enabled).toBe(true);
     expect(config.diary.enabled).toBe(false);
+    expect(config.diary.path).toBeUndefined();
     expect(config.memory).toEqual({ dailyHeartbeat: true, heartbeatHistoryLimit: 20 });
     expect(config.personality.mbti).toBeUndefined();
     expect(config.llm.model).toBe("gpt-4.1-mini");

@@ -174,7 +174,7 @@ describe("MOLE-inspired welcome hub", () => {
     const contextConfig = {
       ...config,
       weather: { enabled: true, location: "Guangzhou" },
-      diary: { enabled: false, path: "~/Diary" }
+      diary: { enabled: false, path: undefined }
     };
     const context = renderContextSetupSurface({ config: contextConfig }, { selectedAction: "weather" });
 
@@ -182,6 +182,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(context).toContain("Calendar        Enabled");
     expect(context).toContain("Weather         Guangzhou");
     expect(context).toContain("Diary           Not enabled");
+    expect(context).not.toContain("~/Diary");
     expect(context).toContain("  1. Configure Calendar");
     expect(context).toContain("> 2. Configure Weather");
     expect(context).toContain("3. Configure Diary");
