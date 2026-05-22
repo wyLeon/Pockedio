@@ -12,7 +12,7 @@ The current release target is a working local developer/user setup, not a hosted
 
 ## What It Does
 
-- Opens a MOLE-inspired terminal entry screen.
+- Opens a terminal setup and session entry screen.
 - Lets you configure LLM, voice, NetEase, context, and Schedule DJ from setup screens.
 - Understands natural language playback controls such as play, pause, resume, next, previous, favorite, and questions about the current song.
 - Builds five-track stations from your prompt, taste, context, and memory.
