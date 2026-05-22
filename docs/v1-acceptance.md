@@ -108,6 +108,15 @@ Latest automated pass on 2026-05-22:
   - Contribution and security guidance.
   - `.env.example` with placeholders only.
   - GitHub Actions CI for typecheck, tests, and build.
+- Fresh-clone release smoke passed on 2026-05-22 with Node v24.12.0:
+  - `npm ci`, `npm run typecheck`, `npm test`, and `npm run build` passed from `/tmp/pockedio-release-smoke`.
+  - Node v18.20.8 produced expected engine warnings and failed native install for `better-sqlite3`; the public requirement remains Node 22+.
+  - `node dist/cli.js status` worked with isolated `POCKEDIO_HOME=/tmp/pockedio-release-home`.
+  - Fresh status showed default voice as `Vale, built-in macOS`, not mandatory Fish TTS.
+  - PTY `node dist/cli.js setup` skip path completed all optional setup gates and returned cleanly.
+  - Main hub opened, Setup & Connections opened, Context > Diary opened, `Esc` returned from diary path input, and `B` returned to Setup & Connections.
+  - Fixture taste import wrote `taste.md` and database memory into the isolated local home.
+  - No-key session fallback built a five-track station for `play something soft for piano focus`, resolved NetEase tracks through anonymous playback, retained one unavailable entry, handled playback process exit code 2 without crashing, accepted `stop`, and exited cleanly.
 - Manual PTY smoke checks passed on 2026-05-21:
   - `npm run dev` opens the interactive session and shows startup guidance.
   - 3.14 fallback conversation:
