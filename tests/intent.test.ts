@@ -17,6 +17,18 @@ describe("parseIntent", () => {
     });
   });
 
+  it("routes DJ program requests through station playback instead of standalone voice", async () => {
+    for (const input of [
+      "I want a DJ program.",
+      "I want a DJ program for late night focus."
+    ]) {
+      await expect(parseIntent(input)).resolves.toEqual({
+        type: "playback_request",
+        confidence: "high"
+      });
+    }
+  });
+
   it("keeps ordinary playback as text-only playback intent", async () => {
     const intent = await parseIntent("play some late night jazz");
 
@@ -145,6 +157,13 @@ describe("parseIntent", () => {
     });
     await expect(parseIntent("show queue")).resolves.toEqual({
       type: "playback_status",
+      confidence: "high"
+    });
+  });
+
+  it("classifies next one as a playback skip control", async () => {
+    await expect(parseIntent("next one")).resolves.toEqual({
+      type: "feedback_skip",
       confidence: "high"
     });
   });

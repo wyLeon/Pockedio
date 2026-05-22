@@ -4,6 +4,7 @@ import {
   getConfigPath,
   getDatabasePath,
   getDjAudioDir,
+  getLlmSecretsPath,
   getNetEaseCookiePath,
   getPersonaPath,
   getPockedioHome,
@@ -23,7 +24,8 @@ function defaultConfigInput(env: PockedioEnv): DeepPartial<PockedioConfig> {
       taste: getTastePath(env),
       personas: getPersonaPath(env),
       djAudioDir: getDjAudioDir(env),
-      neteaseCookie: getNetEaseCookiePath(env)
+      neteaseCookie: getNetEaseCookiePath(env),
+      llmSecrets: getLlmSecretsPath(env)
     }
   };
 }
@@ -66,4 +68,5 @@ export function ensureRuntimeDirs(config: PockedioConfig, env: PockedioEnv = pro
   fs.mkdirSync(path.dirname(config.paths.personas), { recursive: true });
   fs.mkdirSync(config.paths.djAudioDir, { recursive: true });
   fs.mkdirSync(path.dirname(config.paths.neteaseCookie), { recursive: true });
+  fs.mkdirSync(path.dirname(config.paths.llmSecrets), { recursive: true });
 }

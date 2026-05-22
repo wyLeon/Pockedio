@@ -1,12 +1,13 @@
 import OpenAI from "openai";
+import { readLlmApiKey } from "../config/llmSecrets.js";
 import type { PockedioConfig } from "../config/schema.js";
 import type { LlmClient, LlmRequestOptions, LlmResult } from "./llmClient.js";
 import { UnavailableLlmClient } from "./llmClient.js";
 
 export function createLlmClient(config: PockedioConfig, env: NodeJS.ProcessEnv = process.env): LlmClient {
-  const apiKey = env[config.llm.apiKeyEnv];
+  const apiKey = env[config.llm.apiKeyEnv] ?? readLlmApiKey(config, config.llm.apiKeyEnv);
   if (!apiKey) {
-    return new UnavailableLlmClient();
+    return new UnavailableLlmClient(config.llm.apiKeyEnv);
   }
 
   return new OpenAiLlmClient(config, apiKey);

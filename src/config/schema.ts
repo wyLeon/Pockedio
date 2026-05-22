@@ -9,6 +9,9 @@ export const mbtiTypes = [
 
 export const djProgramLengths = ["short", "standard", "extended"] as const;
 export const djStyles = ["direct", "warm", "exploratory", "low-talk"] as const;
+export const ttsProviders = ["auto", "macos", "fish", "text"] as const;
+export const macosVoices = ["lumen", "sable", "arden", "vale", "sol"] as const;
+export const fishVoices = ["mina", "nova"] as const;
 export const musicProviders = ["netease"] as const;
 export const neteaseAuthModes = ["anonymous", "account"] as const;
 export const neteaseQualityLevels = ["standard", "higher", "exhigh", "lossless", "hires"] as const;
@@ -48,11 +51,20 @@ export const pockedioConfigSchema = z.object({
   freshness: z.object({
     enabled: z.boolean().default(true)
   }).default({}),
+  memory: z.object({
+    dailyHeartbeat: z.boolean().default(true),
+    heartbeatHistoryLimit: z.number().int().min(0).max(500).default(20)
+  }).default({}),
   llm: z.object({
     provider: z.literal("openai").default("openai"),
     model: z.string().min(1).default("gpt-4.1-mini"),
     baseUrl: z.string().url().optional(),
     apiKeyEnv: z.string().min(1).default("OPENAI_API_KEY")
+  }).default({}),
+  tts: z.object({
+    provider: z.enum(ttsProviders).default("auto"),
+    macosVoice: z.enum(macosVoices).default("vale"),
+    fishVoice: z.enum(fishVoices).default("mina")
   }).default({}),
   dj: z.object({
     personaPreference: z.string().min(1).default("scheduled"),
@@ -77,7 +89,8 @@ export const pockedioConfigSchema = z.object({
     taste: z.string().min(1),
     personas: z.string().min(1),
     djAudioDir: z.string().min(1),
-    neteaseCookie: z.string().min(1)
+    neteaseCookie: z.string().min(1),
+    llmSecrets: z.string().min(1)
   })
 });
 
@@ -85,6 +98,9 @@ export type PockedioConfig = z.infer<typeof pockedioConfigSchema>;
 export type MbtiType = typeof mbtiTypes[number];
 export type DjProgramLength = typeof djProgramLengths[number];
 export type DjStyle = typeof djStyles[number];
+export type TtsProvider = typeof ttsProviders[number];
+export type MacosVoice = typeof macosVoices[number];
+export type FishVoice = typeof fishVoices[number];
 export type ScheduledDjProgramConfig = PockedioConfig["dj"]["schedule"]["morning"];
 export type NetEaseAuthMode = typeof neteaseAuthModes[number];
 export type NetEaseQualityLevel = typeof neteaseQualityLevels[number];

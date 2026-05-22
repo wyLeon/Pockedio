@@ -2,9 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getConfigPath, getDatabasePath, getDjAudioDir, getNetEaseCookiePath, getPockedioHome } from "../src/config/paths.js";
+import { getConfigPath, getDatabasePath, getDjAudioDir, getLlmSecretsPath, getNetEaseCookiePath, getPockedioHome } from "../src/config/paths.js";
 import { ensureRuntimeDirs, loadConfig, saveConfig } from "../src/config/load.js";
 import { normalizeNetEaseCookie, readNetEaseCookie, saveNetEaseCookie } from "../src/config/neteaseAuth.js";
+import { readLlmApiKey, saveLlmApiKey } from "../src/config/llmSecrets.js";
 import {
   __netEaseQrLoginForTests,
   buildConfigFromAnswers,
@@ -52,6 +53,7 @@ describe("config paths", () => {
     expect(getDatabasePath(env)).toBe(path.join(env.POCKEDIO_HOME!, "pockedio.sqlite"));
     expect(getDjAudioDir(env)).toBe(path.join(env.POCKEDIO_HOME!, "audio", "dj"));
     expect(getNetEaseCookiePath(env)).toBe(path.join(env.POCKEDIO_HOME!, "secrets", "netease.cookie"));
+    expect(getLlmSecretsPath(env)).toBe(path.join(env.POCKEDIO_HOME!, "secrets", "llm-api-keys.json"));
   });
 });
 
@@ -64,13 +66,20 @@ describe("config load and save", () => {
     expect(config.netease.authMode).toBe("anonymous");
     expect(config.netease.qualityLevel).toBe("standard");
     expect(config.paths.neteaseCookie).toContain(path.join("secrets", "netease.cookie"));
+    expect(config.paths.llmSecrets).toContain(path.join("secrets", "llm-api-keys.json"));
     expect(config.weather.location).toBe("Shanghai");
     expect(config.calendar.enabled).toBe(true);
     expect(config.diary.enabled).toBe(false);
+    expect(config.memory).toEqual({ dailyHeartbeat: true, heartbeatHistoryLimit: 20 });
     expect(config.personality.mbti).toBeUndefined();
     expect(config.llm.model).toBe("gpt-4.1-mini");
     expect(config.llm.baseUrl).toBeUndefined();
     expect(config.llm.apiKeyEnv).toBe("OPENAI_API_KEY");
+    expect(config.tts).toEqual({
+      provider: "auto",
+      macosVoice: "vale",
+      fishVoice: "mina"
+    });
     expect(config.dj.language).toBe("English");
     expect(config.dj.displayName).toBe("Pockedio");
     expect(config.dj.programLength).toBe("standard");
@@ -137,6 +146,20 @@ describe("config load and save", () => {
 
     expect(readNetEaseCookie(config)).toBe("MUSIC_U=abc123");
     expect(fs.readFileSync(config.paths.neteaseCookie, "utf8")).toContain("MUSIC_U=abc123");
+  });
+
+  it("stores LLM API keys outside normal config with owner-only permissions", () => {
+    const env = makeEnv();
+    const config = loadConfig(env);
+    ensureRuntimeDirs(config, env);
+
+    saveLlmApiKey(config, "OPENAI_API_KEY", "sk-test");
+
+    expect(readLlmApiKey(config, "OPENAI_API_KEY")).toBe("sk-test");
+    expect(fs.readFileSync(config.paths.llmSecrets, "utf8")).toContain("OPENAI_API_KEY");
+    expect(JSON.stringify(loadConfig(env))).not.toContain("sk-test");
+    const mode = fs.statSync(config.paths.llmSecrets).mode & 0o777;
+    expect(mode).toBe(0o600);
   });
 
   it("normalizes pasted NetEase cookies", () => {
@@ -410,17 +433,13 @@ describe("config load and save", () => {
       { name: "Yes, paste MUSIC_U cookie", value: "cookie" },
       { name: "Not now, use anonymous playback", value: "anonymous" }
     ]);
-    expect(getNetEaseQualityMenuChoices().slice(0, 5)).toEqual([
+    expect(getNetEaseQualityMenuChoices()).toEqual([
       { name: "hires - best quality, may be unavailable", value: "hires" },
       { name: "lossless - very high quality, needs support", value: "lossless" },
       { name: "exhigh - best daily default", value: "exhigh" },
       { name: "higher - good fallback", value: "higher" },
       { name: "standard - safest fallback", value: "standard" }
     ]);
-    expect(getNetEaseQualityMenuChoices()).toContainEqual({
-      name: "Back to account options",
-      value: "back"
-    });
   });
 
   it("creates a visible NetEase QR image before polling", async () => {

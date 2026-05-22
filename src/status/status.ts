@@ -2,9 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { loadConfig } from "../config/load.js";
+import { hasLocalLlmApiKey } from "../config/llmSecrets.js";
 import { readNetEaseCookie } from "../config/neteaseAuth.js";
 import { getConfigPath, type PockedioEnv } from "../config/paths.js";
 import type { PockedioConfig } from "../config/schema.js";
+import { getLatestContextRefreshRun, type ContextRefreshRunRecord } from "../context/heartbeat.js";
 import { schemaVersion } from "../db/migrations.js";
 import { NetEaseProvider } from "../providers/netease.js";
 import { resolveRuntimePath } from "../tts/fishAudio.js";
@@ -39,6 +41,7 @@ export type StatusReport = {
     baseUrl?: string;
     apiKeyEnv: string;
     apiKeyPresent: boolean;
+    apiKeySource: "env" | "local_secret" | "missing";
   };
   fishAudio: {
     pythonPath: string;
@@ -63,6 +66,7 @@ export type StatusReport = {
     present: boolean;
   };
   latestSessionTimestamp: string | null;
+  contextHeartbeat: ContextRefreshRunRecord | null;
 };
 
 export type StatusReportOptions = {
@@ -87,6 +91,7 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
     present: fs.existsSync(getConfigPath(env))
   };
   const database = getDatabaseStatus(config);
+  const llmApiKeySource = getLlmApiKeySource(config, env);
   const baseReport = {
     config: configStatus,
     runtime: {
@@ -99,7 +104,8 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
       model: config.llm.model,
       baseUrl: config.llm.baseUrl,
       apiKeyEnv: config.llm.apiKeyEnv,
-      apiKeyPresent: Boolean(env[config.llm.apiKeyEnv])
+      apiKeyPresent: llmApiKeySource !== "missing",
+      apiKeySource: llmApiKeySource
     },
     fishAudio,
     calendar: {
@@ -117,7 +123,8 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
       path: config.paths.personas,
       present: fs.existsSync(config.paths.personas)
     },
-    latestSessionTimestamp: getLatestSessionTimestamp(config)
+    latestSessionTimestamp: getLatestSessionTimestamp(config),
+    contextHeartbeat: getLatestContextRefreshRun(config)
   };
 
   try {
@@ -268,33 +275,29 @@ function formatScheduledProgramStatus(
 
 export function formatStatusReport(report: StatusReport): string {
   const lines = [
-    "Pockedio status",
+    "Pockedio Status",
     "",
     "Runtime",
-    `- Current playback: ${report.runtime.currentPlayback ?? "none"}`,
-    `- Last session: ${report.latestSessionTimestamp ?? "none"}`,
-    `- Scheduled jobs: ${report.runtime.scheduledJobs}`,
+    `Playback   ${report.runtime.currentPlayback ?? "none"}`,
+    `Session    ${report.latestSessionTimestamp ?? "none"}`,
+    `Schedule   ${report.runtime.scheduledJobs}`,
     "",
-    "Integrations",
-    `- NetEase music: ${formatNetEaseStatus(report.netease)}`,
-    `- LLM: ${report.llm.apiKeyPresent ? "configured" : "missing API key"} (${formatLlmStatus(report.llm)})`,
-    `- FishAudio: ${report.fishAudio.pathsPresent ? "paths present" : "missing paths"}`,
-    `- Calendar: ${report.calendar.enabled ? "enabled" : "disabled"}`,
-    `- Weather: ${report.weather.enabled ? report.weather.location : "disabled"}`,
+    "Setup",
+    `Music     ${formatNetEaseStatus(report.netease)}`,
+    `LLM       ${formatLlmStatus(report.llm)}`,
+    `Voice     ${report.fishAudio.pathsPresent ? "Fish TTS ready" : "Fish TTS needs setup"}`,
+    `Context   Calendar ${report.calendar.enabled ? "on" : "off"}, Weather ${report.weather.enabled ? report.weather.location : "off"}`,
     "",
     "Memory",
-    `- Config: ${report.config.present ? "present" : "missing"} (${report.config.path})`,
-    `- Database: ${report.database.migrated ? "migrated" : report.database.present ? "not migrated" : "missing"} (${report.database.path})`,
-    `- taste.md: ${report.taste.present ? "present" : "missing"} (${report.taste.path})`,
-    `- Personas: ${report.personas.present ? "present" : "missing"} (${report.personas.path})`,
+    `Config    ${report.config.present ? "ok" : "missing"}`,
+    `Database  ${report.database.migrated ? "ok" : report.database.present ? "needs migration" : "missing"}`,
+    `Taste     ${report.taste.present ? "ok" : "missing"}`,
+    `Voices    ${report.personas.present ? "ok" : "missing"}`,
+    `Heartbeat ${formatContextHeartbeatStatus(report.contextHeartbeat)}`,
     "",
-    "Data boundary",
-    `- Local home: ${path.dirname(report.config.path)}`,
-    "- Pockedio-owned data: local only",
-    "- Stored locally: config, SQLite memory, taste.md, personas, DJ audio cache",
-    "- External adapters: NetEase music, OpenAI-compatible LLM, Open-Meteo weather",
-    "- Diary summary generation may send the latest diary excerpt to the configured LLM.",
-    "- External adapter data may leave this machine when used; Pockedio does not store it remotely."
+    "Data",
+    `Local     ${path.dirname(report.config.path)}`,
+    "External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used."
   ];
   if (report.database.error) {
     lines.push(`Database detail: ${report.database.error}`);
@@ -309,20 +312,40 @@ export function formatStatusReport(report: StatusReport): string {
   return lines.join("\n");
 }
 
+function formatContextHeartbeatStatus(run: ContextRefreshRunRecord | null): string {
+  if (!run) {
+    return "not run yet";
+  }
+  const finished = run.finishedAt ?? run.startedAt;
+  const calendar = `${run.calendarEventsRead} calendar`;
+  const diary = `${run.diaryFilesScanned} diary, ${run.diarySummariesGenerated} new`;
+  return `${run.status} ${finished} (${calendar}; ${diary})`;
+}
+
 function formatNetEaseStatus(netease: StatusReport["netease"]): string {
   const account = netease.authMode === "account" && netease.cookiePresent
-    ? `account-backed, ${netease.qualityLevel}`
+    ? `account, ${netease.qualityLevel}`
     : "anonymous";
-  return `${netease.reachable ? "reachable" : "unreachable"} (${account}, ${netease.baseUrl})`;
+  return `${netease.reachable ? "NetEase connected" : "NetEase unreachable"} (${account})`;
 }
 
 function formatLlmStatus(llm: StatusReport["llm"]): string {
-  return [
-    llm.provider,
-    llm.model,
-    llm.baseUrl,
-    `key env ${llm.apiKeyEnv}`
-  ].filter(Boolean).join(", ");
+  const keyStatus = llm.apiKeyPresent ? formatLlmKeySource(llm.apiKeySource) : "missing key";
+  return `${llm.model} (${keyStatus})`;
+}
+
+function getLlmApiKeySource(config: PockedioConfig, env: PockedioEnv): StatusReport["llm"]["apiKeySource"] {
+  if (env[config.llm.apiKeyEnv]) {
+    return "env";
+  }
+  if (hasLocalLlmApiKey(config, config.llm.apiKeyEnv)) {
+    return "local_secret";
+  }
+  return "missing";
+}
+
+function formatLlmKeySource(source: StatusReport["llm"]["apiKeySource"]): string {
+  return source === "local_secret" ? "local secret" : source === "env" ? "shell env" : "missing";
 }
 
 export async function printStatus(): Promise<void> {

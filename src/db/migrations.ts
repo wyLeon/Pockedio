@@ -3,7 +3,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import type { PockedioConfig } from "../config/schema.js";
 
-export const schemaVersion = 8;
+export const schemaVersion = 9;
 
 function schemaPath(): string {
   return path.resolve(path.dirname(new URL(import.meta.url).pathname), "schema.sql");

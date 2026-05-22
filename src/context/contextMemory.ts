@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import type { MemoryStore } from "../memory/store.js";
 import type { PockedioContext } from "./contextBuilder.js";
+import { buildDiaryMemoryMetadata, diaryMemorySourceKey, formatDiaryMemoryContent } from "./diary.js";
 
 export type ContextMemoryRefreshResult = {
   calendar: {
@@ -69,19 +69,11 @@ function consolidateDiaryMemory(
     };
   }
 
-  const sourceMtime = context.diary.sourceMtime ?? hashText(context.diary.summary);
-  const sourceKey = `diary:${context.diary.filePath}:${sourceMtime}`;
-  const content = [
-    "Diary memory:",
-    context.diary.summary,
-    `Listening fit: ${context.diary.listeningHint}`
-  ].join(" ");
+  const sourceKey = diaryMemorySourceKey(context.diary);
+  const content = formatDiaryMemoryContent(context.diary);
   store.replaceMemoryItemBySourceKey("diary", sourceKey, content, {
-    source: "diary",
-    sourceFile: context.diary.filePath,
-    sourceMtime,
-    generatedAt: context.now,
-    sensitivity: "summary_only"
+    ...buildDiaryMemoryMetadata(context.diary, context.now, "latest"),
+    sourceKey
   });
 
   return {
@@ -89,8 +81,4 @@ function consolidateDiaryMemory(
     latestFile: context.diary.filePath,
     memoriesUpdated: 1
   };
-}
-
-function hashText(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }

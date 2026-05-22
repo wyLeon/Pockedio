@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ensureRuntimeDirs, loadConfig, saveConfig } from "../src/config/load.js";
+import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import { MemoryStore } from "../src/memory/store.js";
@@ -28,7 +29,7 @@ describe("status report", () => {
     expect(report.taste.present).toBe(false);
     expect(report.personas.present).toBe(false);
     expect(report.netease.reachable).toBe(false);
-    expect(formatStatusReport(report)).toContain("Config: missing");
+    expect(formatStatusReport(report)).toContain("Config    missing");
   });
 
   it("reports a healthy configured home", async () => {
@@ -67,23 +68,43 @@ describe("status report", () => {
       apiKeyEnv: "OPENAI_API_KEY",
       apiKeyPresent: false
     });
+    expect(report.llm.apiKeySource).toBe("missing");
     expect(report.taste.present).toBe(true);
     expect(report.personas.present).toBe(true);
     expect(report.latestSessionTimestamp).toEqual(expect.any(String));
 
     const text = formatStatusReport(report);
     expect(text).toContain("Runtime");
-    expect(text).toContain("Integrations");
+    expect(text).toContain("Setup");
     expect(text).toContain("Memory");
-    expect(text).toContain("Data boundary");
-    expect(text).toContain("- Pockedio-owned data: local only");
-    expect(text).toContain("- External adapters: NetEase music, OpenAI-compatible LLM, Open-Meteo weather");
-    expect(text).toContain("- Current playback:");
-    expect(text).toContain("- Scheduled jobs: Morning DJ weekdays 08:45");
+    expect(text).toContain("Data");
+    expect(text).toContain("External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used.");
+    expect(text).toContain("Playback   none");
+    expect(text).toContain("Schedule   Morning DJ weekdays 08:45");
     expect(text).toContain("prepare 20 min before");
-    expect(text).toContain("- LLM: missing API key");
-    expect(text).toContain("- Database: migrated");
-    expect(text).toContain("- Last session:");
+    expect(text).toContain("LLM       gpt-4.1-mini (missing key)");
+    expect(text).toContain("Database  ok");
+    expect(text).toContain("Session");
+  });
+
+  it("reports locally stored LLM API keys", async () => {
+    const home = makeHome();
+    const env = { POCKEDIO_HOME: home };
+    const config = loadConfig(env);
+    ensureRuntimeDirs(config, env);
+    saveConfig(config, env);
+    saveLlmApiKey(config, "OPENAI_API_KEY", "sk-local");
+
+    const report = await getStatusReport({
+      env,
+      fetchImpl: async () => {
+        throw new Error("offline");
+      }
+    });
+
+    expect(report.llm.apiKeyPresent).toBe(true);
+    expect(report.llm.apiKeySource).toBe("local_secret");
+    expect(formatStatusReport(report)).toContain("LLM       gpt-4.1-mini (local secret)");
   });
 
   it("formats status as runtime, integrations, and memory surfaces", () => {
@@ -106,7 +127,8 @@ describe("status report", () => {
         model: "deepseek-chat",
         baseUrl: "https://api.deepseek.com",
         apiKeyEnv: "DEEPSEEK_API_KEY",
-        apiKeyPresent: true
+        apiKeyPresent: true,
+        apiKeySource: "env"
       },
       fishAudio: {
         pythonPath: "/python",
@@ -119,22 +141,38 @@ describe("status report", () => {
       weather: { enabled: true, location: "Shanghai" },
       taste: { path: "/tmp/taste.md", present: true },
       personas: { path: "/tmp/personas.json", present: true },
-      latestSessionTimestamp: "2026-05-19T02:00:00.000Z"
+      latestSessionTimestamp: "2026-05-19T02:00:00.000Z",
+      contextHeartbeat: {
+        id: "heartbeat-1",
+        startedAt: "2026-05-19T01:00:00.000Z",
+        finishedAt: "2026-05-19T01:00:02.000Z",
+        status: "completed",
+        trigger: "startup_heartbeat",
+        localDay: "2026-05-19",
+        calendarEventsRead: 3,
+        agendaMemoriesUpdated: 1,
+        diaryLatestAvailable: true,
+        diaryLatestFile: "/tmp/diary/entry.md",
+        diaryFilesScanned: 2,
+        diarySummariesGenerated: 1,
+        diarySummariesReused: 1,
+        diaryMemoriesUpdated: 3,
+        error: null
+      }
     });
 
     expect(text).toContain("Runtime");
-    expect(text).toContain("- Current playback: Title - Artist");
-    expect(text).toContain("- Scheduled jobs: Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled");
-    expect(text).toContain("Integrations");
-    expect(text).toContain("- NetEase music: reachable (account-backed, exhigh, http://127.0.0.1:3000)");
-    expect(text).toContain("- LLM: configured (OpenAI-compatible, deepseek-chat, https://api.deepseek.com, key env DEEPSEEK_API_KEY)");
-    expect(text).toContain("- Weather: Shanghai");
+    expect(text).toContain("Playback   Title - Artist");
+    expect(text).toContain("Schedule   Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled");
+    expect(text).toContain("Setup");
+    expect(text).toContain("Music     NetEase connected (account, exhigh)");
+    expect(text).toContain("LLM       deepseek-chat (shell env)");
+    expect(text).toContain("Context   Calendar on, Weather Shanghai");
     expect(text).toContain("Memory");
-    expect(text).toContain("- Last session: 2026-05-19T02:00:00.000Z");
-    expect(text).toContain("Data boundary");
-    expect(text).toContain("- Local home: /tmp");
-    expect(text).toContain("- Pockedio-owned data: local only");
-    expect(text).toContain("- External adapter data may leave this machine when used; Pockedio does not store it remotely.");
-    expect(text).toContain("- Diary summary generation may send the latest diary excerpt to the configured LLM.");
+    expect(text).toContain("Session    2026-05-19T02:00:00.000Z");
+    expect(text).toContain("Heartbeat completed 2026-05-19T01:00:02.000Z (3 calendar; 2 diary, 1 new)");
+    expect(text).toContain("Data");
+    expect(text).toContain("Local     /tmp");
+    expect(text).toContain("External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used.");
   });
 });

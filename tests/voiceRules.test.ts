@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
 import { shouldUseSpokenDjAudio } from "../src/dj/voiceRules.js";
 import { synthesizeFishAudio, type FishAudioProcessRunner } from "../src/tts/fishAudio.js";
+import { synthesizeDjAudio, type DjAudioProcessRunner } from "../src/tts/djAudio.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-voice-test-"));
@@ -111,5 +112,62 @@ describe("FishAudio adapter", () => {
     expect(observedArgs).toContain(referenceAudioPath);
     expect(observedArgs).toContain("--reference-text");
     expect(observedArgs).toContain(config.fishAudio.referenceText);
+  });
+});
+
+describe("DJ audio provider resolution", () => {
+  it("uses text fallback when TTS provider is text", async () => {
+    const config = makeConfig();
+    config.tts.provider = "text";
+
+    const result = await synthesizeDjAudio(config, "Welcome back.");
+
+    expect(result).toEqual({
+      ok: false,
+      latencyMs: expect.any(Number),
+      error: "Text-only DJ copy is selected."
+    });
+  });
+
+  it("uses macOS say when macOS TTS is selected", async () => {
+    const config = makeConfig();
+    config.tts.provider = "macos";
+    config.tts.macosVoice = "sable";
+    let observedCommand = "";
+    let observedArgs: string[] = [];
+    const runner: DjAudioProcessRunner = async (command, args) => {
+      observedCommand = command;
+      observedArgs = args;
+      const output = args[args.indexOf("-o") + 1]!;
+      fs.writeFileSync(output, "aiff");
+      return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const result = await synthesizeDjAudio(config, "Welcome back.", {
+      platform: "darwin",
+      runner
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedCommand).toBe("say");
+    expect(observedArgs).toContain("Moira");
+    expect(observedArgs).toContain("-o");
+  });
+
+  it("uses FishAudio when Fish TTS is selected", async () => {
+    const config = makeConfig();
+    config.tts.provider = "fish";
+    const runner: FishAudioProcessRunner = async (_command, args) => {
+      const output = args[args.indexOf("--output") + 1]!;
+      fs.writeFileSync(output, "wav");
+      return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const result = await synthesizeDjAudio(config, "Welcome back.", { fishRunner: runner });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.audioPath).toMatch(/\.wav$/);
+    }
   });
 });

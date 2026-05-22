@@ -150,7 +150,7 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(what'?s next|what is next|what comes next|up next)\b/.test(text)) {
     return { type: "playback_status", confidence: "high" };
   }
-  if (/^(please\s+)?(skip|skip this|next|next song|next track)(\s+please)?[.!?]*$/.test(text)) {
+  if (/^(please\s+)?(skip|skip this|next|next one|next song|next track)(\s+please)?[.!?]*$/.test(text)) {
     return { type: "feedback_skip", confidence: "high" };
   }
   if (/\b(more like this|similar to this|keep this vibe)\b/.test(text)) {
@@ -244,7 +244,7 @@ function isFavoritePlaybackRequestText(text: string): boolean {
 
 function isDjProgramPlaybackText(text: string): boolean {
   return /\b(dj program|dj version|radio show|radio version|spoken version)\b/.test(text)
-    && /\b(play|start|create|make|build|give me|put on|queue)\b/.test(text);
+    && /\b(play|start|create|make|build|give me|put on|queue|want|would like|need)\b/.test(text);
 }
 
 function isSingleTrackPlaybackText(text: string): boolean {
