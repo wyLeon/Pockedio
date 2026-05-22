@@ -5,7 +5,13 @@ import type { PockedioConfig } from "../config/schema.js";
 import { readNetEaseCookie } from "../config/neteaseAuth.js";
 import { hasLocalLlmApiKey } from "../config/llmSecrets.js";
 import type { TasteImportResult } from "../taste/importTaste.js";
-import { formatFishVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
+import {
+  fishVoiceOptions,
+  formatFishVoiceName,
+  formatMacosVoiceName,
+  macosVoiceOptions,
+  voicePreviewText
+} from "../tts/voiceSetup.js";
 
 export type WelcomeReadinessItem = {
   label: "Music" | "LLM" | "Voice" | "Taste" | "Calendar";
@@ -22,7 +28,15 @@ export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" 
 export type LlmProviderId = "openai" | "deepseek" | "openrouter" | "local_vllm" | "custom";
 export type LlmSetupAction = LlmProviderId | "test_connection" | "back" | "quit";
 export type LlmProviderAction = "paste_key" | "use_shell_env" | "change_model" | "change_base_url" | "change_api_key_env" | "check_server" | "discover_models" | "test_connection" | "back" | "quit";
-export type VoiceSetupAction = "preview" | "choose_builtin" | "fish_tts" | "text_only" | "back" | "quit";
+export type VoiceSetupAction = "choose_voice" | "fish_tts" | "text_only" | "back" | "quit";
+export type DjVoiceChoiceId =
+  | `macos:${PockedioConfig["tts"]["macosVoice"]}`
+  | `fish:${PockedioConfig["tts"]["fishVoice"]}`;
+export type DjVoiceChooserSubmit = "preview" | "save" | "fish_setup" | "back" | "quit";
+export type DjVoiceChooserResult = {
+  selectedVoice: DjVoiceChoiceId;
+  submit?: DjVoiceChooserSubmit;
+};
 export type TasteMemoryAction = "import" | "rebuild_profile" | "show_summary" | "start_station" | "back" | "quit";
 
 export type DefaultEntryMode = "hub" | "session";
@@ -101,8 +115,7 @@ const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string
 ];
 
 const voiceSetupEntries: Array<{ action: VoiceSetupAction; label: string }> = [
-  { action: "preview", label: "Preview voices" },
-  { action: "choose_builtin", label: "Choose built-in voice" },
+  { action: "choose_voice", label: "Choose DJ voice" },
   { action: "fish_tts", label: "Configure Fish TTS" },
   { action: "text_only", label: "Use text-only DJ copy" },
   { action: "back", label: "Back" }
@@ -238,10 +251,10 @@ export function renderVoiceSetupSurface(
   renderOptions: { selectedAction?: VoiceSetupAction } = {}
 ): string {
   const platform = options.platform ?? process.platform;
-  const fishConfigured = Boolean(options.config.fishAudio.referenceAudioPath && fs.existsSync(options.config.fishAudio.referenceAudioPath));
+  const fishConfigured = isFishTtsReady(options.config);
   const provider = formatVoiceProvider(options.config, platform, fishConfigured);
   const voice = formatConfiguredVoice(options.config, platform);
-  const selectedAction = renderOptions.selectedAction ?? "preview";
+  const selectedAction = renderOptions.selectedAction ?? "choose_voice";
   return [
     "Voice",
     "",
@@ -249,13 +262,41 @@ export function renderVoiceSetupSurface(
     formatSetupLine("Voice", fishConfigured ? "Mina or Nova" : voice),
     formatSetupLine("Advanced", fishConfigured ? "Fish TTS configured" : "Fish TTS not configured"),
     "",
-    "Built-in voices:",
-    "  Lumen, Sable, Arden, Vale, Sol",
-    "",
     "Actions:",
     ...voiceSetupEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit"
+    "↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit"
+  ].join("\n");
+}
+
+export function renderDjVoiceChooserSurface(
+  options: Pick<WelcomeReadinessOptions, "config" | "platform">,
+  renderOptions: { selectedVoice?: DjVoiceChoiceId } = {}
+): string {
+  const platform = options.platform ?? process.platform;
+  const fishReady = isFishTtsReady(options.config);
+  const selectedVoice = renderOptions.selectedVoice ?? getCurrentVoiceChoice(options.config, platform, fishReady);
+  return [
+    "Choose DJ voice",
+    "",
+    "Sample",
+    `"${voicePreviewText}"`,
+    "",
+    "Built-in voices",
+    ...macosVoiceOptions.map((voice, index) => {
+      const id: DjVoiceChoiceId = `macos:${voice.id}`;
+      const status = platform === "darwin" ? currentVoiceLabel(id, options.config, "ready") : "unavailable";
+      return formatVoiceChoiceLine(id === selectedVoice, index + 1, voice.label, status, voice.description);
+    }),
+    "",
+    "Advanced Fish voices",
+    ...fishVoiceOptions.map((voice, index) => {
+      const id: DjVoiceChoiceId = `fish:${voice.id}`;
+      const status = fishReady ? currentVoiceLabel(id, options.config, "ready") : "needs Fish TTS setup";
+      return formatVoiceChoiceLine(id === selectedVoice, index + 1 + macosVoiceOptions.length, voice.label, status, voice.description);
+    }),
+    "",
+    "↑↓ Select  |  Enter Preview  |  S Save  |  F Fish setup  |  B Back"
   ].join("\n");
 }
 
@@ -420,8 +461,57 @@ export function inferLlmSetupAction(config: PockedioConfig): LlmSetupAction {
 export async function promptVoiceSetup(options: Pick<WelcomeReadinessOptions, "config" | "platform">): Promise<VoiceSetupAction> {
   return promptNumberedSurface({
     entries: voiceSetupEntries,
-    initialAction: "preview",
+    initialAction: "choose_voice",
     render: (action) => renderVoiceSetupSurface(options, { selectedAction: action })
+  });
+}
+
+export async function promptDjVoiceChooser(
+  options: Pick<WelcomeReadinessOptions, "config" | "platform">,
+  initialVoice?: DjVoiceChoiceId
+): Promise<DjVoiceChooserResult> {
+  return new Promise((resolve) => {
+    const entries = getDjVoiceChoiceEntries();
+    let selectedVoice = initialVoice ?? getCurrentVoiceChoice(
+      options.config,
+      options.platform ?? process.platform,
+      isFishTtsReady(options.config)
+    );
+    const input = process.stdin;
+    const output = process.stdout;
+    const previousRawMode = input.isRaw;
+
+    const render = () => {
+      output.write("\x1B[?25l");
+      output.write("\x1B[H\x1B[2J");
+      output.write(renderDjVoiceChooserSurface(options, { selectedVoice }));
+    };
+    const cleanup = (submit: DjVoiceChooserSubmit) => {
+      input.off("keypress", onKeypress);
+      if (input.isTTY) {
+        input.setRawMode(previousRawMode);
+      }
+      input.pause();
+      output.write("\x1B[?25h\n");
+      resolve({ selectedVoice, submit });
+    };
+    const onKeypress = (_value: string, key: readline.Key) => {
+      const result = applyDjVoiceChooserKey(selectedVoice, key);
+      selectedVoice = result.selectedVoice;
+      if (result.submit) {
+        cleanup(result.submit);
+        return;
+      }
+      render();
+    };
+
+    readline.emitKeypressEvents(input);
+    input.resume();
+    if (input.isTTY) {
+      input.setRawMode(true);
+    }
+    input.on("keypress", onKeypress);
+    render();
   });
 }
 
@@ -471,6 +561,46 @@ export function applyVoiceSetupKey(
     backAction: "back",
     quitAction: "quit"
   });
+}
+
+export function applyDjVoiceChooserKey(
+  selectedVoice: DjVoiceChoiceId,
+  key: SelectableKeyInput
+): DjVoiceChooserResult {
+  const entries = getDjVoiceChoiceEntries();
+  const selectedIndex = Math.max(0, entries.findIndex((entry) => entry === selectedVoice));
+  if (key.name === "up") {
+    return {
+      selectedVoice: entries[(selectedIndex - 1 + entries.length) % entries.length]!
+    };
+  }
+  if (key.name === "down") {
+    return {
+      selectedVoice: entries[(selectedIndex + 1) % entries.length]!
+    };
+  }
+  if (key.name === "return") {
+    return { selectedVoice, submit: "preview" };
+  }
+  const numericIndex = Number(key.name) - 1;
+  if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < entries.length) {
+    return { selectedVoice: entries[numericIndex]!, submit: "preview" };
+  }
+  if (key.name === "s") {
+    return { selectedVoice, submit: "save" };
+  }
+  if (key.name === "f") {
+    return { selectedVoice, submit: "fish_setup" };
+  }
+  if (key.name === "b") {
+    return { selectedVoice, submit: "back" };
+  }
+  if (key.name === "q" || (key.ctrl && key.name === "c")) {
+    return { selectedVoice, submit: "quit" };
+  }
+  return {
+    selectedVoice
+  };
 }
 
 export function applyTasteMemoryKey(
@@ -715,11 +845,8 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction {
   if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < voiceSetupEntries.length) {
     return voiceSetupEntries[numericIndex]!.action;
   }
-  if (normalized === "" || normalized === "enter" || normalized === "preview") {
-    return "preview";
-  }
-  if (normalized === "builtin" || normalized === "choose") {
-    return "choose_builtin";
+  if (normalized === "" || normalized === "enter" || normalized === "choose" || normalized === "voice") {
+    return "choose_voice";
   }
   if (normalized === "fish") {
     return "fish_tts";
@@ -733,7 +860,7 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction {
   if (normalized === "q" || normalized === "quit") {
     return "quit";
   }
-  return "preview";
+  return "choose_voice";
 }
 
 export function resolveTasteMemoryAction(input: string): TasteMemoryAction {
@@ -856,6 +983,16 @@ function formatNumberedAction(selected: boolean, index: number, label: string): 
   return `${selected ? ">" : " "} ${index}. ${label}`;
 }
 
+function formatVoiceChoiceLine(
+  selected: boolean,
+  index: number,
+  label: string,
+  status: string,
+  description: string
+): string {
+  return `${selected ? ">" : " "} ${`${index}. ${label}`.padEnd(12)} ${status.padEnd(23)} ${description}`;
+}
+
 function formatReadinessItem(item: WelcomeReadinessItem): string {
   return `  ${item.label.padEnd(12)} ${item.value}`;
 }
@@ -895,6 +1032,48 @@ function formatConfiguredVoice(config: PockedioConfig, platform: NodeJS.Platform
     return formatMacosVoiceName(config.tts.macosVoice);
   }
   return "None";
+}
+
+export function isFishTtsReady(config: PockedioConfig): boolean {
+  return Boolean(
+    config.fishAudio.referenceAudioPath
+    && fs.existsSync(config.fishAudio.referenceAudioPath)
+    && config.fishAudio.referenceText?.trim()
+  );
+}
+
+function getDjVoiceChoiceEntries(): DjVoiceChoiceId[] {
+  return [
+    ...macosVoiceOptions.map((voice) => `macos:${voice.id}` as const),
+    ...fishVoiceOptions.map((voice) => `fish:${voice.id}` as const)
+  ];
+}
+
+function getCurrentVoiceChoice(
+  config: PockedioConfig,
+  platform: NodeJS.Platform,
+  fishReady: boolean
+): DjVoiceChoiceId {
+  if (config.tts.provider === "fish" && fishReady) {
+    return `fish:${config.tts.fishVoice}`;
+  }
+  if ((config.tts.provider === "macos" || config.tts.provider === "auto") && platform === "darwin") {
+    return `macos:${config.tts.macosVoice}`;
+  }
+  return platform === "darwin" ? `macos:${config.tts.macosVoice}` : "fish:mina";
+}
+
+function currentVoiceLabel(
+  id: DjVoiceChoiceId,
+  config: PockedioConfig,
+  status: string
+): string {
+  const isCurrent = (id.startsWith("macos:")
+    && config.tts.provider !== "fish"
+    && config.tts.provider !== "text"
+    && id === `macos:${config.tts.macosVoice}`)
+    || (id.startsWith("fish:") && config.tts.provider === "fish" && id === `fish:${config.tts.fishVoice}`);
+  return isCurrent ? `${status}, current` : status;
 }
 
 function formatTasteLine(label: string, value: string, width: number): string {

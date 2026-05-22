@@ -25,8 +25,11 @@ import {
   macosVoiceOptions,
   voicePreviewText
 } from "./tts/voiceSetup.js";
+import { synthesizeFishAudio } from "./tts/fishAudio.js";
 import {
   buildWelcomeReadiness,
+  isFishTtsReady,
+  promptDjVoiceChooser,
   promptLlmProvider,
   promptLlmSetup,
   promptSetupConnections,
@@ -37,6 +40,7 @@ import {
   renderTasteMemorySurface,
   renderVoiceSetupSurface,
   resolveDefaultEntryMode,
+  type DjVoiceChoiceId,
   type LlmProviderAction,
   type LlmProviderId,
   type LlmSetupAction,
@@ -202,16 +206,11 @@ async function runVoiceSetupLoop(): Promise<void> {
 }
 
 async function runVoiceSetupAction(action: VoiceSetupAction): Promise<VoiceSetupOutcome> {
-  if (action === "preview") {
-    await previewConfiguredVoice();
-    return "continue";
-  }
-  if (action === "choose_builtin") {
-    await chooseMacosVoice();
-    return "continue";
+  if (action === "choose_voice") {
+    return chooseDjVoice();
   }
   if (action === "fish_tts") {
-    await chooseFishVoice();
+    await configureFishTts();
     return "continue";
   }
   if (action === "text_only") {
@@ -225,59 +224,147 @@ async function runVoiceSetupAction(action: VoiceSetupAction): Promise<VoiceSetup
   return "quit";
 }
 
-async function previewConfiguredVoice(): Promise<void> {
-  const config = loadConfig();
-  if (config.tts.provider === "text") {
-    await pauseWithMessage(`Text-only mode is selected. Preview copy:\n${voicePreviewText}`);
-    return;
+async function chooseDjVoice(initialVoice?: DjVoiceChoiceId): Promise<VoiceSetupOutcome> {
+  let selectedVoice = initialVoice;
+  while (true) {
+    const result = await promptDjVoiceChooser({ config: loadConfig(), platform: process.platform }, selectedVoice);
+    selectedVoice = result.selectedVoice;
+    if (result.submit === "preview") {
+      await previewDjVoiceChoice(result.selectedVoice);
+      continue;
+    }
+    if (result.submit === "save") {
+      await saveDjVoiceChoice(result.selectedVoice);
+      return "continue";
+    }
+    if (result.submit === "fish_setup") {
+      await configureFishTts();
+      continue;
+    }
+    if (result.submit === "back") {
+      return "continue";
+    }
+    if (result.submit === "quit") {
+      return "quit";
+    }
   }
-  if (config.tts.provider === "fish") {
-    await previewFishVoice(config.tts.fishVoice);
-    return;
-  }
-  if (process.platform !== "darwin") {
-    await pauseWithMessage("Built-in macOS voice preview is only available on macOS. Use text-only or configure Fish TTS.");
-    return;
-  }
-  await previewMacosVoice(config.tts.macosVoice);
 }
 
-async function chooseMacosVoice(): Promise<void> {
-  if (process.platform !== "darwin") {
-    await pauseWithMessage("Built-in macOS voice selection is only available on macOS. Use text-only or configure Fish TTS.");
+async function previewDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
+  const parsed = parseDjVoiceChoice(choice);
+  if (parsed.provider === "macos") {
+    if (process.platform !== "darwin") {
+      await pauseWithMessage("Built-in voice previews require macOS. Configure Fish TTS or use text-only DJ copy on this platform.");
+      return;
+    }
+    await previewMacosVoice(parsed.voice);
     return;
   }
-  console.log("Built-in macOS voices");
-  for (const [index, voice] of macosVoiceOptions.entries()) {
-    console.log(`${index + 1}. ${voice.label} - ${voice.description}`);
+  if (!isFishTtsReady(loadConfig())) {
+    await pauseWithMessage(formatFishTtsMissingMessage());
+    return;
   }
-  const current = loadConfig().tts.macosVoice;
-  const answer = (await askLine(`Choose voice 1-${macosVoiceOptions.length} (${current}): `)).trim();
-  const selected = macosVoiceOptions[Number(answer) - 1]?.id ?? current;
-  await previewMacosVoice(selected);
-  saveTtsConfig({ provider: "macos", macosVoice: selected });
-  await pauseWithMessage(`Saved built-in voice: ${macosVoiceOptions.find((voice) => voice.id === selected)?.label ?? selected}`);
+  await previewFishVoice(parsed.voice);
 }
 
-async function chooseFishVoice(): Promise<void> {
-  console.log("Fish TTS voices");
-  for (const [index, voice] of fishVoiceOptions.entries()) {
-    console.log(`${index + 1}. ${voice.label} - ${voice.description}`);
+async function saveDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
+  const parsed = parseDjVoiceChoice(choice);
+  if (parsed.provider === "macos") {
+    if (process.platform !== "darwin") {
+      await pauseWithMessage("Cannot save a built-in macOS voice on this platform. Configure Fish TTS or use text-only DJ copy.");
+      return;
+    }
+    saveTtsConfig({ provider: "macos", macosVoice: parsed.voice });
+    await pauseWithMessage(`Saved built-in voice: ${macosVoiceOptions.find((voice) => voice.id === parsed.voice)?.label ?? parsed.voice}`);
+    return;
   }
-  const current = loadConfig().tts.fishVoice;
-  const answer = (await askLine(`Choose Fish voice 1-${fishVoiceOptions.length} (${current}): `)).trim();
-  const selected = fishVoiceOptions[Number(answer) - 1]?.id ?? current;
-  await previewFishVoice(selected);
-  const preview = buildFishVoicePreview(selected, getPockedioHome());
+  if (!isFishTtsReady(loadConfig())) {
+    await pauseWithMessage([
+      "Configure Fish TTS before saving Mina or Nova.",
+      "",
+      formatFishTtsMissingMessage()
+    ].join("\n"));
+    return;
+  }
+  const preview = buildFishVoicePreview(parsed.voice, getPockedioHome());
   saveTtsConfig({
     provider: "fish",
-    fishVoice: selected,
+    fishVoice: parsed.voice,
     fishReferenceAudioPath: preview.args[0],
-    fishReferenceText: selected === "mina"
-      ? "Mina is here. Soft lights, warm songs, and a little room to breathe."
-      : "Nova here. Bright rhythm, clean motion, and just enough spark to move."
+    fishReferenceText: fishReferenceText(parsed.voice)
   });
-  await pauseWithMessage(`Saved Fish voice: ${fishVoiceOptions.find((voice) => voice.id === selected)?.label ?? selected}`);
+  await pauseWithMessage(`Saved Fish voice: ${fishVoiceOptions.find((voice) => voice.id === parsed.voice)?.label ?? parsed.voice}`);
+}
+
+async function configureFishTts(): Promise<void> {
+  while (true) {
+    const config = loadConfig();
+    console.log(renderFishTtsSetupSurface(config));
+    const answer = (await askLine("Choose 1-7: ")).trim().toLowerCase();
+    if (answer === "1") {
+      saveFishAudioConfig({ pythonPath: await askLine(`Python path (${config.fishAudio.pythonPath}): `) || config.fishAudio.pythonPath });
+      continue;
+    }
+    if (answer === "2") {
+      saveFishAudioConfig({ scriptPath: await askLine(`Fish script path (${config.fishAudio.scriptPath}): `) || config.fishAudio.scriptPath });
+      continue;
+    }
+    if (answer === "3") {
+      saveFishAudioConfig({ modelDir: await askLine(`Model directory (${config.fishAudio.modelDir}): `) || config.fishAudio.modelDir });
+      continue;
+    }
+    if (answer === "4") {
+      saveFishReference("mina");
+      await pauseWithMessage("Saved Mina as the Fish reference voice.");
+      continue;
+    }
+    if (answer === "5") {
+      saveFishReference("nova");
+      await pauseWithMessage("Saved Nova as the Fish reference voice.");
+      continue;
+    }
+    if (answer === "6" || answer === "test") {
+      const next = await testFishTtsSetup();
+      if (next === "choose") {
+        await chooseDjVoice(`fish:${loadConfig().tts.fishVoice}`);
+      }
+      return;
+    }
+    if (answer === "7" || answer === "b" || answer === "back" || answer === "") {
+      return;
+    }
+  }
+}
+
+async function testFishTtsSetup(): Promise<"choose" | "return" | "keep"> {
+  const config = loadConfig();
+  if (!isFishTtsReady(config)) {
+    await pauseWithMessage(formatFishTtsMissingMessage());
+    return "return";
+  }
+  console.log("Testing Fish TTS...");
+  const result = await synthesizeFishAudio(config, voicePreviewText, { timeoutMs: 120_000 });
+  if (!result.ok) {
+    await pauseWithMessage(`Fish TTS test failed:\n${result.error}`);
+    return "return";
+  }
+  await previewGeneratedFishAudio(result.audioPath);
+  console.log([
+    "Fish TTS test passed.",
+    "",
+    "What next?",
+    "> 1. Choose Mina or Nova",
+    "  2. Return to Voice Setup",
+    "  3. Keep current voice"
+  ].join("\n"));
+  const answer = (await askLine("Choose 1-3: ")).trim();
+  if (answer === "1") {
+    return "choose";
+  }
+  if (answer === "3") {
+    return "keep";
+  }
+  return "return";
 }
 
 async function previewMacosVoice(voiceId: ReturnType<typeof loadConfig>["tts"]["macosVoice"]): Promise<void> {
@@ -304,6 +391,105 @@ async function previewFishVoice(voiceId: ReturnType<typeof loadConfig>["tts"]["f
   if (!result.ok) {
     await pauseWithMessage(`Fish voice preview failed: ${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
   }
+}
+
+async function previewGeneratedFishAudio(audioPath: string): Promise<void> {
+  const result = await runProcess("afplay", [audioPath], 12_000);
+  if (!result.ok) {
+    await pauseWithMessage(`Fish TTS generated audio, but preview playback failed: ${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
+  }
+}
+
+function parseDjVoiceChoice(choice: DjVoiceChoiceId):
+  | { provider: "macos"; voice: ReturnType<typeof loadConfig>["tts"]["macosVoice"] }
+  | { provider: "fish"; voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"] } {
+  const [provider, voice] = choice.split(":") as ["macos" | "fish", string];
+  if (provider === "fish") {
+    return { provider, voice: voice as ReturnType<typeof loadConfig>["tts"]["fishVoice"] };
+  }
+  return { provider, voice: voice as ReturnType<typeof loadConfig>["tts"]["macosVoice"] };
+}
+
+function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>): string {
+  const minaPreview = buildFishVoicePreview("mina", getPockedioHome()).args[0]!;
+  const novaPreview = buildFishVoicePreview("nova", getPockedioHome()).args[0]!;
+  return [
+    "Configure Fish TTS",
+    "",
+    `Status          ${isFishTtsReady(config) ? "Ready" : "Not configured"}`,
+    "",
+    "Runtime",
+    `1. Python path       ${config.fishAudio.pythonPath}`,
+    `2. Fish script path  ${config.fishAudio.scriptPath}`,
+    `3. Model directory   ${config.fishAudio.modelDir}`,
+    "",
+    "References",
+    `4. Mina reference    ${fs.existsSync(minaPreview) ? "Available" : "Missing"}`,
+    `5. Nova reference    ${fs.existsSync(novaPreview) ? "Available" : "Missing"}`,
+    "",
+    "Actions",
+    "6. Test Fish TTS",
+    "7. Back"
+  ].join("\n");
+}
+
+function formatFishTtsMissingMessage(): string {
+  const config = loadConfig();
+  const missing: string[] = [];
+  if (!config.fishAudio.pythonPath.trim()) {
+    missing.push("Python path is empty.");
+  }
+  if (!config.fishAudio.scriptPath.trim()) {
+    missing.push("Fish script path is empty.");
+  }
+  if (!config.fishAudio.modelDir.trim()) {
+    missing.push("Model directory is empty.");
+  }
+  if (!config.fishAudio.referenceAudioPath || !fs.existsSync(config.fishAudio.referenceAudioPath)) {
+    missing.push(`Reference audio is missing: ${config.fishAudio.referenceAudioPath || "not set"}`);
+  }
+  if (!config.fishAudio.referenceText?.trim()) {
+    missing.push("Reference text is missing.");
+  }
+  return [
+    "Fish TTS is not ready.",
+    ...missing.map((item) => `- ${item}`),
+    "",
+    "Open Configure Fish TTS and complete the missing items first."
+  ].join("\n");
+}
+
+function saveFishReference(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): void {
+  const preview = buildFishVoicePreview(voice, getPockedioHome());
+  saveTtsConfig({
+    provider: loadConfig().tts.provider,
+    fishVoice: voice,
+    fishReferenceAudioPath: preview.args[0],
+    fishReferenceText: fishReferenceText(voice)
+  });
+}
+
+function fishReferenceText(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): string {
+  return voice === "mina"
+    ? "Mina is here. Soft lights, warm songs, and a little room to breathe."
+    : "Nova here. Bright rhythm, clean motion, and just enough spark to move.";
+}
+
+function saveFishAudioConfig(input: {
+  pythonPath?: string;
+  scriptPath?: string;
+  modelDir?: string;
+}): void {
+  const config = loadConfig();
+  saveConfig({
+    ...config,
+    fishAudio: {
+      ...config.fishAudio,
+      pythonPath: input.pythonPath?.trim() || config.fishAudio.pythonPath,
+      scriptPath: input.scriptPath?.trim() || config.fishAudio.scriptPath,
+      modelDir: input.modelDir?.trim() || config.fishAudio.modelDir
+    }
+  });
 }
 
 function saveTtsConfig(input: {

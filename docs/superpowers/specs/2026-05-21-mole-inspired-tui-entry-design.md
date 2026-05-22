@@ -168,8 +168,7 @@ Voice           Vale
 Advanced        Fish TTS not configured
 
 Actions:
-> Preview voices
-  Choose built-in voice
+> Choose DJ voice
   Configure Fish TTS
   Use text-only DJ copy
   Back
@@ -180,14 +179,99 @@ Behavior:
 - On macOS, default to the built-in Siri voice path from the macOS Siri TTS design.
 - Offer the Pockedio-facing voice names: Lumen, Sable, Arden, Vale, Sol.
 - Default to Vale.
-- `Preview voices` should play the currently configured voice with a fixed DJ sample sentence.
-- `Choose built-in voice` should let users select one of the five named macOS voices, play a true preview, and persist `tts.provider = "macos"` plus the chosen voice.
-- `Configure Fish TTS` should let users select Mina or Nova, play the local preview WAV when present, and persist `tts.provider = "fish"` plus the chosen Fish voice.
+- `Choose DJ voice` combines preview and selection. Moving the cursor changes only the highlighted row. `Enter` previews, `S` saves, and `B` returns without saving.
+- Built-in voices can be previewed and saved immediately on macOS. Saving one persists `tts.provider = "macos"` plus the selected `tts.macosVoice`.
+- Fish voices appear in the chooser as advanced voices. If Fish TTS is not ready, Mina and Nova are visible but marked as needing Fish TTS setup.
+- Fish voices can be previewed and saved only after Fish runtime setup is valid. Saving one persists `tts.provider = "fish"` plus the selected `tts.fishVoice`.
+- `Configure Fish TTS` configures the local runtime and references; it does not automatically switch the current voice.
 - `Use text-only DJ copy` should persist `tts.provider = "text"`.
 - Runtime DJ audio should consume this same `tts` config: macOS selections generate local AIFF files through `say`, Fish selections use the existing FishAudio path, and text-only selections skip synthesis while keeping DJ copy visible.
 - Fish TTS is an advanced path for Mina and Nova, not a first-run requirement.
 - On non-macOS platforms, show text-only as the default and Fish TTS as the optional configured path.
 - Voice setup details and provider behavior are defined in `docs/superpowers/specs/2026-05-22-macos-siri-tts-fallback-design.md`.
+
+#### Voice Setup Decision Tree
+
+```text
+Voice Setup
+|
+|-- Status
+|   |-- Current provider: auto / macOS / Fish / text-only
+|   |-- Current voice: Vale / Lumen / Sable / Arden / Sol / Mina / Nova
+|   |-- Fish TTS: ready / not configured / invalid
+|
+|-- 1. Choose DJ voice
+|   |
+|   |-- Platform is macOS?
+|   |   |-- Yes: show built-in voices as ready
+|   |   |-- No: show built-in voices as unavailable or hide them
+|   |
+|   |-- Show Advanced Fish voices
+|   |   |-- Fish runtime ready: Mina and Nova are ready
+|   |   |-- Fish runtime not ready: Mina and Nova need Fish TTS setup
+|   |
+|   |-- User presses Enter
+|   |   |-- Built-in voice + macOS: preview with `say -v <mapped voice>`
+|   |   |-- Built-in voice + non-macOS: show unavailable reason
+|   |   |-- Fish voice + Fish ready: play Mina/Nova preview using the canonical sample
+|   |   |-- Fish voice + Fish not ready: show missing setup items and Fish setup shortcut
+|   |
+|   |-- User presses S Save
+|   |   |-- Built-in voice + macOS: save `tts.provider = "macos"` and `tts.macosVoice`
+|   |   |-- Built-in voice + non-macOS: block save
+|   |   |-- Fish voice + Fish ready: save `tts.provider = "fish"` and `tts.fishVoice`
+|   |   |-- Fish voice + Fish not ready: block save and show "Configure Fish TTS first"
+|   |
+|   |-- User presses F: open Configure Fish TTS
+|   |-- User presses B: return to Voice Setup
+|
+|-- 2. Configure Fish TTS
+|   |
+|   |-- Show readiness
+|   |   |-- Python path
+|   |   |-- Fish script path
+|   |   |-- Model directory
+|   |   |-- Mina reference audio/text
+|   |   |-- Nova reference audio/text
+|   |
+|   |-- User edits runtime paths: save Fish runtime config
+|   |
+|   |-- User tests Fish TTS
+|   |   |-- Success: mark Fish ready, then offer Choose Mina or Nova / Return to Voice Setup / Keep current voice
+|   |   |-- Failure: show exact failing item, stay on Configure Fish TTS, do not change current voice
+|   |
+|   |-- Back: return to Voice Setup
+|
+|-- 3. Use text-only DJ copy
+|   |-- Save `tts.provider = "text"`
+|   |-- Spoken DJ audio is disabled
+|   |-- DJ copy still appears as text
+|
+|-- 4. Back
+    |-- Return to Setup & Connections
+```
+
+```text
+Choose DJ voice
+
+Sample
+"Welcome back. I picked a warmer five-track set for this station."
+
+Built-in voices
+> 1. Lumen   ready                  clear, familiar
+  2. Sable   ready                  soft, intimate
+  3. Arden   ready                  steady, radio-like
+  4. Vale    ready, current         warm, neutral
+  5. Sol     ready                  bright, relaxed
+
+Advanced Fish voices
+  6. Mina    needs Fish TTS setup   warm, personal
+  7. Nova    needs Fish TTS setup   clean, broadcast
+
+↑↓ Select  |  Enter Preview  |  S Save  |  F Fish setup  |  B Back
+```
+
+Fish setup success does not automatically switch the user to Mina or Nova. It only unlocks them. After a successful Fish test, Pockedio should ask whether the user wants to choose Mina/Nova now, return to Voice Setup, or keep the current voice.
 
 ## Entry Point 3: Taste & Memory
 

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ensureRuntimeDirs, loadConfig } from "../src/config/load.js";
 import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { importTaste } from "../src/taste/importTaste.js";
-import { applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
+import { applyDjVoiceChooserKey, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderDjVoiceChooserSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-tui-test-"));
@@ -144,8 +144,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(voice).toContain("Voice");
     expect(voice).toContain("Provider        Built-in macOS voice");
     expect(voice).toContain("Voice           Vale");
-    expect(voice).toContain("> 1. Preview voices");
-    expect(voice).toContain("Lumen, Sable, Arden, Vale, Sol");
+    expect(voice).toContain("> 1. Choose DJ voice");
     expect(voice).toContain("Configure Fish TTS");
   });
 
@@ -303,19 +302,35 @@ describe("MOLE-inspired welcome hub", () => {
     const { config } = makeConfig();
     const voice = renderVoiceSetupSurface({ config, platform: "darwin" }, { selectedAction: "fish_tts" });
 
-    expect(voice).toContain("  1. Preview voices");
-    expect(voice).toContain("> 3. Configure Fish TTS");
-    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit");
-    expect(resolveVoiceSetupAction("1")).toBe("preview");
-    expect(resolveVoiceSetupAction("2")).toBe("choose_builtin");
-    expect(resolveVoiceSetupAction("3")).toBe("fish_tts");
-    expect(resolveVoiceSetupAction("4")).toBe("text_only");
-    expect(resolveVoiceSetupAction("5")).toBe("back");
-    expect(applyVoiceSetupKey("preview", { name: "down" })).toEqual({ selectedAction: "choose_builtin" });
-    expect(applyVoiceSetupKey("choose_builtin", { name: "return" })).toEqual({
-      selectedAction: "choose_builtin",
-      submittedAction: "choose_builtin"
+    expect(voice).toContain("  1. Choose DJ voice");
+    expect(voice).toContain("> 2. Configure Fish TTS");
+    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit");
+    expect(resolveVoiceSetupAction("1")).toBe("choose_voice");
+    expect(resolveVoiceSetupAction("2")).toBe("fish_tts");
+    expect(resolveVoiceSetupAction("3")).toBe("text_only");
+    expect(resolveVoiceSetupAction("4")).toBe("back");
+    expect(applyVoiceSetupKey("choose_voice", { name: "down" })).toEqual({ selectedAction: "fish_tts" });
+    expect(applyVoiceSetupKey("fish_tts", { name: "return" })).toEqual({
+      selectedAction: "fish_tts",
+      submittedAction: "fish_tts"
     });
+  });
+
+  it("renders the combined DJ voice chooser and routes preview/save keys", () => {
+    const { config } = makeConfig();
+    const chooser = renderDjVoiceChooserSurface({ config, platform: "darwin" }, { selectedVoice: "fish:mina" });
+
+    expect(chooser).toContain("Choose DJ voice");
+    expect(chooser).toContain("Sample");
+    expect(chooser).toContain("Built-in voices");
+    expect(chooser).toContain("  4. Vale      ready, current");
+    expect(chooser).toContain("Advanced Fish voices");
+    expect(chooser).toContain("> 6. Mina      needs Fish TTS setup");
+    expect(chooser).toContain("Enter Preview  |  S Save  |  F Fish setup  |  B Back");
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "down" })).toEqual({ selectedVoice: "macos:sol" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "return" })).toEqual({ selectedVoice: "macos:vale", submit: "preview" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "s" })).toEqual({ selectedVoice: "macos:vale", submit: "save" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "f" })).toEqual({ selectedVoice: "macos:vale", submit: "fish_setup" });
   });
 
   it("renders selected voice provider and voice from TTS config", () => {
