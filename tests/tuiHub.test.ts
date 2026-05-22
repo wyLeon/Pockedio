@@ -326,10 +326,11 @@ describe("MOLE-inspired welcome hub", () => {
     expect(chooser).toContain("  4. Vale      ready, current");
     expect(chooser).toContain("Advanced Fish voices");
     expect(chooser).toContain("> 6. Mina      needs Fish TTS setup");
-    expect(chooser).toContain("Enter Preview  |  S Save  |  F Fish setup  |  B Back");
+    expect(chooser).toContain("Space Preview  |  Enter Save  |  F Fish setup  |  B Back");
     expect(applyDjVoiceChooserKey("macos:vale", { name: "down" })).toEqual({ selectedVoice: "macos:sol" });
-    expect(applyDjVoiceChooserKey("macos:vale", { name: "return" })).toEqual({ selectedVoice: "macos:vale", submit: "preview" });
-    expect(applyDjVoiceChooserKey("macos:vale", { name: "s" })).toEqual({ selectedVoice: "macos:vale", submit: "save" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "space" })).toEqual({ selectedVoice: "macos:vale", submit: "preview" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "return" })).toEqual({ selectedVoice: "macos:vale", submit: "save" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "7" })).toEqual({ selectedVoice: "fish:nova" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "f" })).toEqual({ selectedVoice: "macos:vale", submit: "fish_setup" });
   });
 

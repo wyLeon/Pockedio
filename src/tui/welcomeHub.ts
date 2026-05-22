@@ -296,7 +296,7 @@ export function renderDjVoiceChooserSurface(
       return formatVoiceChoiceLine(id === selectedVoice, index + 1 + macosVoiceOptions.length, voice.label, status, voice.description);
     }),
     "",
-    "↑↓ Select  |  Enter Preview  |  S Save  |  F Fish setup  |  B Back"
+    "↑↓ Select  |  Space Preview  |  Enter Save  |  F Fish setup  |  B Back"
   ].join("\n");
 }
 
@@ -579,15 +579,15 @@ export function applyDjVoiceChooserKey(
       selectedVoice: entries[(selectedIndex + 1) % entries.length]!
     };
   }
-  if (key.name === "return") {
+  if (key.name === "space") {
     return { selectedVoice, submit: "preview" };
+  }
+  if (key.name === "return") {
+    return { selectedVoice, submit: "save" };
   }
   const numericIndex = Number(key.name) - 1;
   if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < entries.length) {
-    return { selectedVoice: entries[numericIndex]!, submit: "preview" };
-  }
-  if (key.name === "s") {
-    return { selectedVoice, submit: "save" };
+    return { selectedVoice: entries[numericIndex]! };
   }
   if (key.name === "f") {
     return { selectedVoice, submit: "fish_setup" };

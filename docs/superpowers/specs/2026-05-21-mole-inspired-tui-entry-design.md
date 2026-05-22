@@ -210,13 +210,13 @@ Voice Setup
 |   |   |-- Fish runtime ready: Mina and Nova are ready
 |   |   |-- Fish runtime not ready: Mina and Nova need Fish TTS setup
 |   |
-|   |-- User presses Enter
+|   |-- User presses Space
 |   |   |-- Built-in voice + macOS: preview with `say -v <mapped voice>`
 |   |   |-- Built-in voice + non-macOS: show unavailable reason
 |   |   |-- Fish voice + Fish ready: play Mina/Nova preview using the canonical sample
 |   |   |-- Fish voice + Fish not ready: show missing setup items and Fish setup shortcut
 |   |
-|   |-- User presses S Save
+|   |-- User presses Enter
 |   |   |-- Built-in voice + macOS: save `tts.provider = "macos"` and `tts.macosVoice`
 |   |   |-- Built-in voice + non-macOS: block save
 |   |   |-- Fish voice + Fish ready: save `tts.provider = "fish"` and `tts.fishVoice`
@@ -268,7 +268,7 @@ Advanced Fish voices
   6. Mina    needs Fish TTS setup   warm, personal
   7. Nova    needs Fish TTS setup   clean, broadcast
 
-↑↓ Select  |  Enter Preview  |  S Save  |  F Fish setup  |  B Back
+↑↓ Select  |  Space Preview  |  Enter Save  |  F Fish setup  |  B Back
 ```
 
 Fish setup success does not automatically switch the user to Mina or Nova. It only unlocks them. After a successful Fish test, Pockedio should ask whether the user wants to choose Mina/Nova now, return to Voice Setup, or keep the current voice.
