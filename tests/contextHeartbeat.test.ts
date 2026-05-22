@@ -13,6 +13,7 @@ function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-heartbeat-test-"));
   tempDirs.push(home);
   const config = loadConfig({ POCKEDIO_HOME: home });
+  config.calendar.enabled = true;
   saveConfig(config, { POCKEDIO_HOME: home });
   return config;
 }

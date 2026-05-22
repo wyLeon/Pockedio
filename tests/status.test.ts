@@ -59,8 +59,8 @@ describe("status report", () => {
     expect(report.config.present).toBe(true);
     expect(report.database).toMatchObject({ present: true, migrated: true });
     expect(report.netease.reachable).toBe(true);
-    expect(report.calendar.enabled).toBe(true);
-    expect(report.weather.enabled).toBe(true);
+    expect(report.calendar.enabled).toBe(false);
+    expect(report.weather.enabled).toBe(false);
     expect(report.weather.location).toBe("Shanghai");
     expect(report.llm).toMatchObject({
       provider: "OpenAI-compatible",
@@ -84,6 +84,7 @@ describe("status report", () => {
     expect(text).toContain("prepare 20 min before");
     expect(text).toContain("LLM       gpt-4.1-mini (missing key)");
     expect(text).toContain("Music     NetEase API reachable (anonymous playback, not logged in)");
+    expect(text).toContain("Context   Calendar off, Weather off");
     expect(text).not.toContain("Music     NetEase connected (anonymous)");
     expect(text).toContain(process.platform === "darwin"
       ? "Voice     Vale, built-in macOS"

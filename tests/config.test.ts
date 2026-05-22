@@ -69,7 +69,8 @@ describe("config load and save", () => {
     expect(config.paths.neteaseCookie).toContain(path.join("secrets", "netease.cookie"));
     expect(config.paths.llmSecrets).toContain(path.join("secrets", "llm-api-keys.json"));
     expect(config.weather.location).toBe("Shanghai");
-    expect(config.calendar.enabled).toBe(true);
+    expect(config.weather.enabled).toBe(false);
+    expect(config.calendar.enabled).toBe(false);
     expect(config.diary.enabled).toBe(false);
     expect(config.diary.path).toBeUndefined();
     expect(config.memory).toEqual({ dailyHeartbeat: true, heartbeatHistoryLimit: 20 });

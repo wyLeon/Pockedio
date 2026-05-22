@@ -203,15 +203,14 @@ export async function runCalendarSetup(): Promise<SetupRunResult> {
     return calendarAction;
   }
 
-  const config = pockedioConfigSchema.parse({
-    ...current,
-    calendar: { enabled: calendarAction === "enable" }
-  });
-  ensureRuntimeDirs(config);
-  saveConfig(config);
-  runMigrations(config);
-
   if (calendarAction === "disable") {
+    const config = pockedioConfigSchema.parse({
+      ...current,
+      calendar: { enabled: false }
+    });
+    ensureRuntimeDirs(config);
+    saveConfig(config);
+    runMigrations(config);
     console.log("");
     console.log("Saved");
     console.log("  Calendar          disabled");
@@ -220,7 +219,13 @@ export async function runCalendarSetup(): Promise<SetupRunResult> {
 
   console.log("");
   console.log("If macOS asks for Calendar permission, choose Allow.");
-  const calendar = await withSetupStatus("Checking calendar...", () => setupCalendarContext(config));
+  const config = pockedioConfigSchema.parse({
+    ...current,
+    calendar: { enabled: true }
+  });
+  ensureRuntimeDirs(config);
+  runMigrations(config);
+  const calendar = await withSetupStatus("Checking Calendar permission and reading recent events...", () => setupCalendarContext(config));
 
   console.log("");
   console.log(formatCalendarSetupSummary(calendar));
@@ -1673,6 +1678,7 @@ async function setupCalendarContext(config: PockedioConfig): Promise<CalendarCon
 
   const calendar = await readCalendarContext(true, 60_000, undefined, "last7Days");
   if (calendar.available) {
+    saveConfig(config);
     const store = new MemoryStore(config);
     try {
       const readAt = new Date().toISOString();

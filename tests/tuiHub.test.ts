@@ -37,7 +37,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(readiness.items.find((item) => item.label === "LLM")?.value).toBe("Configured: shell env");
     expect(readiness.items.find((item) => item.label === "Voice")?.value).toBe("Vale, built-in macOS");
     expect(readiness.items.find((item) => item.label === "Taste")?.value).toBe("Imported");
-    expect(readiness.items.find((item) => item.label === "Calendar")?.value).toBe("Enabled");
+    expect(readiness.items.find((item) => item.label === "Calendar")?.value).toBe("Disabled");
     expect(readiness.items.some((item) => item.label === "Freshness")).toBe(false);
   });
 
@@ -179,7 +179,7 @@ describe("MOLE-inspired welcome hub", () => {
     const context = renderContextSetupSurface({ config: contextConfig }, { selectedAction: "weather" });
 
     expect(context).toContain("Context");
-    expect(context).toContain("Calendar        Enabled");
+    expect(context).toContain("Calendar        Not enabled");
     expect(context).toContain("Weather         Guangzhou");
     expect(context).toContain("Diary           Not enabled");
     expect(context).not.toContain("~/Diary");

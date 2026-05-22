@@ -384,7 +384,7 @@ describe("diary adapter", () => {
 
 describe("context builder", () => {
   it("includes MBTI personality context when configured", async () => {
-    const config = makeConfig({ personality: { mbti: "INTJ" } });
+    const config = makeConfig({ personality: { mbti: "INTJ" }, calendar: { enabled: true } });
     const context = await buildContext(config, {
       now: new Date("2026-05-17T09:00:00+08:00"),
       calendarRunner: async () => ({
