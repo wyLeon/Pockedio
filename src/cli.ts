@@ -358,8 +358,7 @@ async function installFishTtsLocally(): Promise<void> {
     if (command.command === "git" && command.args[0] === "clone" && fs.existsSync(command.args[2]!)) {
       continue;
     }
-    console.log(`Running: ${command.label}`);
-    const result = await runProcess(command.command, command.args, 600_000);
+    const result = await withCliProgress(`Running ${command.label}...`, () => runProcess(command.command, command.args, 600_000));
     if (!result.ok) {
       await pauseWithMessage(`Fish install failed during "${command.label}".\n${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
       return;
@@ -379,7 +378,7 @@ async function installFishTtsLocally(): Promise<void> {
 
 async function useExistingFishTtsInstall(): Promise<void> {
   while (true) {
-    const detection = detectFishTtsInstall(loadConfig(), getPockedioHome());
+    const detection = await withCliProgress("Searching Fish TTS install...", async () => detectFishTtsInstall(loadConfig(), getPockedioHome()));
     const answer = await promptFishNumberedSurface(4, (selected) => renderUseExistingFishTtsSurface(detection, selected));
     if (answer === 1) {
       if (detection.missing.length > 0) {
@@ -391,7 +390,7 @@ async function useExistingFishTtsInstall(): Promise<void> {
         ].join("\n"));
         continue;
       }
-      saveDetectedFishSetup(detection);
+      await withCliProgress("Saving detected Fish TTS setup...", async () => saveDetectedFishSetup(detection));
       await pauseWithMessage("Saved detected Fish TTS setup. Run Test Fish TTS next.");
       return;
     }
@@ -450,8 +449,7 @@ async function testFishTtsSetup(): Promise<"choose" | "return" | "keep"> {
     await pauseWithMessage(formatFishTtsMissingMessage());
     return "return";
   }
-  console.log("Testing Fish TTS...");
-  const result = await synthesizeFishAudio(config, voicePreviewText, { timeoutMs: 120_000 });
+  const result = await withCliProgress("Testing Fish TTS...", () => synthesizeFishAudio(config, voicePreviewText, { timeoutMs: 120_000 }));
   if (!result.ok) {
     await pauseWithMessage(`Fish TTS test failed:\n${result.error}`);
     return "return";
@@ -1042,6 +1040,28 @@ async function askLine(message: string): Promise<string> {
   } finally {
     rl.close();
   }
+}
+
+async function withCliProgress<T>(message: string, action: () => Promise<T>): Promise<T> {
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let index = 0;
+  const write = () => {
+    clearCurrentLine();
+    defaultOutput.write(`${frames[index % frames.length]} ${message}`);
+    index += 1;
+  };
+  write();
+  const timer = setInterval(write, 120);
+  try {
+    return await action();
+  } finally {
+    clearInterval(timer);
+    clearCurrentLine();
+  }
+}
+
+function clearCurrentLine(): void {
+  defaultOutput.write("\r\x1B[2K");
 }
 
 function promptFishNumberedSurface(max: number, renderSurface: (selected: number) => string): Promise<number> {
