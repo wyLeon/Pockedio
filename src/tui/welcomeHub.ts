@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
 import type { PockedioEnv } from "../config/paths.js";
 import type { PockedioConfig } from "../config/schema.js";
@@ -1035,11 +1036,27 @@ function formatConfiguredVoice(config: PockedioConfig, platform: NodeJS.Platform
 }
 
 export function isFishTtsReady(config: PockedioConfig): boolean {
+  const pythonPath = resolveLocalPath(config.fishAudio.pythonPath);
+  const scriptPath = resolveLocalPath(config.fishAudio.scriptPath);
+  const modelDir = resolveLocalPath(config.fishAudio.modelDir);
+  const referenceAudioPath = config.fishAudio.referenceAudioPath
+    ? resolveLocalPath(config.fishAudio.referenceAudioPath)
+    : undefined;
   return Boolean(
-    config.fishAudio.referenceAudioPath
-    && fs.existsSync(config.fishAudio.referenceAudioPath)
+    pythonPath
+    && fs.existsSync(pythonPath)
+    && scriptPath
+    && fs.existsSync(scriptPath)
+    && modelDir
+    && fs.existsSync(modelDir)
+    && referenceAudioPath
+    && fs.existsSync(referenceAudioPath)
     && config.fishAudio.referenceText?.trim()
   );
+}
+
+function resolveLocalPath(value: string): string {
+  return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
 }
 
 function getDjVoiceChoiceEntries(): DjVoiceChoiceId[] {

@@ -27,6 +27,12 @@ import {
 } from "./tts/voiceSetup.js";
 import { synthesizeFishAudio } from "./tts/fishAudio.js";
 import {
+  buildFishSetupInstallCommands,
+  detectFishTtsInstall,
+  formatDetectedFishSetup,
+  type FishSetupDetection
+} from "./tts/fishSetup.js";
+import {
   buildWelcomeReadiness,
   isFishTtsReady,
   promptDjVoiceChooser,
@@ -300,6 +306,126 @@ async function configureFishTts(): Promise<void> {
   while (true) {
     const config = loadConfig();
     console.log(renderFishTtsSetupSurface(config));
+    const answer = (await askLine("Choose 1-5: ")).trim().toLowerCase();
+    if (answer === "1") {
+      await installFishTtsLocally();
+      continue;
+    }
+    if (answer === "2") {
+      await useExistingFishTtsInstall();
+      continue;
+    }
+    if (answer === "3") {
+      await editFishTtsPathsManually();
+      continue;
+    }
+    if (answer === "4" || answer === "test") {
+      const next = await testFishTtsSetup();
+      if (next === "choose") {
+        await chooseDjVoice(`fish:${loadConfig().tts.fishVoice}`);
+      }
+      return;
+    }
+    if (answer === "5" || answer === "b" || answer === "back" || answer === "") {
+      return;
+    }
+  }
+}
+
+async function installFishTtsLocally(): Promise<void> {
+  const commands = buildFishSetupInstallCommands();
+  console.log([
+    "Install Fish TTS locally",
+    "",
+    "This is optional. Built-in voices work without Fish TTS.",
+    "",
+    "Requirements:",
+    "- Apple Silicon Mac recommended",
+    "- Python 3.13 available through uv",
+    "- Network access for GitHub and Hugging Face",
+    "- Several GB of disk space for the model",
+    "",
+    "Commands:",
+    ...commands.map((command) => `- ${formatCommand(command.command, command.args)}`)
+  ].join("\n"));
+  const confirm = (await askLine("Run these commands now? [y/N] ")).trim().toLowerCase();
+  if (confirm !== "y" && confirm !== "yes") {
+    await pauseWithMessage("Fish install was not started. You can run the shown commands yourself, then choose Use existing Fish TTS install.");
+    return;
+  }
+
+  for (const command of commands) {
+    if (command.command === "git" && command.args[0] === "clone" && fs.existsSync(command.args[2]!)) {
+      continue;
+    }
+    console.log(`Running: ${command.label}`);
+    const result = await runProcess(command.command, command.args, 600_000);
+    if (!result.ok) {
+      await pauseWithMessage(`Fish install failed during "${command.label}".\n${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
+      return;
+    }
+  }
+
+  const detection = detectFishTtsInstall(loadConfig(), getPockedioHome());
+  saveDetectedFishSetup(detection);
+  await pauseWithMessage([
+    "Fish TTS install completed.",
+    "",
+    formatDetectedFishSetup(detection),
+    "",
+    "Run Test Fish TTS next to verify synthesis."
+  ].join("\n"));
+}
+
+async function useExistingFishTtsInstall(): Promise<void> {
+  while (true) {
+    const detection = detectFishTtsInstall(loadConfig(), getPockedioHome());
+    console.log([
+      "Use existing Fish TTS install",
+      "",
+      "Searching common locations...",
+      "",
+      "Found:",
+      formatDetectedFishSetup(detection),
+      "",
+      "Actions",
+      "1. Use detected setup",
+      "2. Edit paths",
+      "3. Search again",
+      "4. Back"
+    ].join("\n"));
+    const answer = (await askLine("Choose 1-4: ")).trim().toLowerCase();
+    if (answer === "1") {
+      if (detection.missing.length > 0) {
+        await pauseWithMessage([
+          "Detected setup is incomplete.",
+          ...detection.missing.map((item) => `- Missing: ${item}`),
+          "",
+          "Choose Edit paths, Install Fish TTS locally, or add the missing files and search again."
+        ].join("\n"));
+        continue;
+      }
+      saveDetectedFishSetup(detection);
+      await pauseWithMessage("Saved detected Fish TTS setup. Run Test Fish TTS next.");
+      return;
+    }
+    if (answer === "2") {
+      await editFishTtsPathsManually();
+      return;
+    }
+    if (answer === "3") {
+      continue;
+    }
+    if (answer === "4" || answer === "b" || answer === "back" || answer === "") {
+      return;
+    }
+  }
+}
+
+async function editFishTtsPathsManually(): Promise<void> {
+  while (true) {
+    const config = loadConfig();
+    console.log(renderFishTtsManualPathSurface(config));
     const answer = (await askLine("Choose 1-7: ")).trim().toLowerCase();
     if (answer === "1") {
       saveFishAudioConfig({ pythonPath: await askLine(`Python path (${config.fishAudio.pythonPath}): `) || config.fishAudio.pythonPath });
@@ -324,10 +450,7 @@ async function configureFishTts(): Promise<void> {
       continue;
     }
     if (answer === "6" || answer === "test") {
-      const next = await testFishTtsSetup();
-      if (next === "choose") {
-        await chooseDjVoice(`fish:${loadConfig().tts.fishVoice}`);
-      }
+      await testFishTtsSetup();
       return;
     }
     if (answer === "7" || answer === "b" || answer === "back" || answer === "") {
@@ -411,12 +534,31 @@ function parseDjVoiceChoice(choice: DjVoiceChoiceId):
 }
 
 function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>): string {
-  const minaPreview = buildFishVoicePreview("mina", getPockedioHome()).args[0]!;
-  const novaPreview = buildFishVoicePreview("nova", getPockedioHome()).args[0]!;
+  const detection = detectFishTtsInstall(config, getPockedioHome());
   return [
     "Configure Fish TTS",
     "",
-    `Status          ${isFishTtsReady(config) ? "Ready" : "Not configured"}`,
+    "Fish TTS unlocks Mina and Nova.",
+    "This is optional. Built-in voices work without it.",
+    "",
+    "Status",
+    `  Runtime     ${detection.pythonPath && detection.scriptPath ? "Found" : "Missing"}`,
+    `  Model       ${detection.modelDir ? "Found" : "Missing"}`,
+    `  References  ${fs.existsSync(detection.minaReferencePath) ? "Mina ready" : "Mina missing"}, ${fs.existsSync(detection.novaReferencePath) ? "Nova ready" : "Nova missing"}`,
+    "",
+    "Actions",
+    "1. Install Fish TTS locally",
+    "2. Use existing Fish TTS install",
+    "3. Edit paths manually",
+    "4. Test Fish TTS",
+    "5. Back"
+  ].join("\n");
+}
+
+function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>): string {
+  const detection = detectFishTtsInstall(config, getPockedioHome());
+  return [
+    "Edit Fish TTS paths manually",
     "",
     "Runtime",
     `1. Python path       ${config.fishAudio.pythonPath}`,
@@ -424,8 +566,8 @@ function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>): strin
     `3. Model directory   ${config.fishAudio.modelDir}`,
     "",
     "References",
-    `4. Mina reference    ${fs.existsSync(minaPreview) ? "Available" : "Missing"}`,
-    `5. Nova reference    ${fs.existsSync(novaPreview) ? "Available" : "Missing"}`,
+    `4. Mina reference    ${fs.existsSync(detection.minaReferencePath) ? "Available" : "Missing"}`,
+    `5. Nova reference    ${fs.existsSync(detection.novaReferencePath) ? "Available" : "Missing"}`,
     "",
     "Actions",
     "6. Test Fish TTS",
@@ -435,15 +577,16 @@ function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>): strin
 
 function formatFishTtsMissingMessage(): string {
   const config = loadConfig();
+  const detection = detectFishTtsInstall(config, getPockedioHome());
   const missing: string[] = [];
-  if (!config.fishAudio.pythonPath.trim()) {
-    missing.push("Python path is empty.");
+  if (!detection.pythonPath) {
+    missing.push(`Python runtime was not found. Current path: ${config.fishAudio.pythonPath}`);
   }
-  if (!config.fishAudio.scriptPath.trim()) {
-    missing.push("Fish script path is empty.");
+  if (!detection.scriptPath) {
+    missing.push(`Fish script was not found. Current path: ${config.fishAudio.scriptPath}`);
   }
-  if (!config.fishAudio.modelDir.trim()) {
-    missing.push("Model directory is empty.");
+  if (!detection.modelDir) {
+    missing.push(`Model directory was not found. Current path: ${config.fishAudio.modelDir}`);
   }
   if (!config.fishAudio.referenceAudioPath || !fs.existsSync(config.fishAudio.referenceAudioPath)) {
     missing.push(`Reference audio is missing: ${config.fishAudio.referenceAudioPath || "not set"}`);
@@ -455,8 +598,25 @@ function formatFishTtsMissingMessage(): string {
     "Fish TTS is not ready.",
     ...missing.map((item) => `- ${item}`),
     "",
-    "Open Configure Fish TTS and complete the missing items first."
+    "Open Configure Fish TTS and choose Install, Use existing install, or Edit paths manually."
   ].join("\n");
+}
+
+function saveDetectedFishSetup(detection: FishSetupDetection): void {
+  saveFishAudioConfig({
+    pythonPath: detection.pythonPath,
+    scriptPath: detection.scriptPath,
+    modelDir: detection.modelDir
+  });
+  if (fs.existsSync(detection.minaReferencePath)) {
+    saveFishReference("mina");
+  } else if (fs.existsSync(detection.novaReferencePath)) {
+    saveFishReference("nova");
+  }
+}
+
+function formatCommand(command: string, args: string[]): string {
+  return [command, ...args.map((arg) => /\s/.test(arg) ? JSON.stringify(arg) : arg)].join(" ");
 }
 
 function saveFishReference(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): void {

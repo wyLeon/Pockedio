@@ -227,14 +227,25 @@ Voice Setup
 |
 |-- 2. Configure Fish TTS
 |   |
-|   |-- Show readiness
-|   |   |-- Python path
-|   |   |-- Fish script path
-|   |   |-- Model directory
-|   |   |-- Mina reference audio/text
-|   |   |-- Nova reference audio/text
+|   |-- Explain Fish is optional and only unlocks Mina/Nova
 |   |
-|   |-- User edits runtime paths: save Fish runtime config
+|   |-- Show readiness
+|   |   |-- Runtime: found / missing
+|   |   |-- Model: found / missing
+|   |   |-- References: Mina ready/missing, Nova ready/missing
+|   |
+|   |-- User chooses Install Fish TTS locally
+|   |   |-- Show Apple Silicon, Python 3.13, network, and disk requirements
+|   |   |-- Ask for explicit confirmation before running git/uv/huggingface commands
+|   |   |-- Save detected runtime paths after install
+|   |
+|   |-- User chooses Use existing Fish TTS install
+|   |   |-- Auto-detect Python, Fish script, model directory, and references
+|   |   |-- If complete: let user save detected setup
+|   |   |-- If partial: show found/missing and offer edit/search/back
+|   |
+|   |-- User chooses Edit paths manually
+|   |   |-- Expert path editor for Python path, Fish script path, model directory, Mina reference, Nova reference
 |   |
 |   |-- User tests Fish TTS
 |   |   |-- Success: mark Fish ready, then offer Choose Mina or Nova / Return to Voice Setup / Keep current voice
