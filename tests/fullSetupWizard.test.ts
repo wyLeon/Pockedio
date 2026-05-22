@@ -58,4 +58,27 @@ describe("runFullSetupWizard", () => {
     expect(visited).toEqual(["llm", "voice", "netease", "playlist", "context"]);
     expect(sessionStarted).toBe(true);
   });
+
+  it("does not advance to the next step when the current step returns back", async () => {
+    const visited: FullSetupStepId[] = [];
+    const outcomes: Partial<Record<FullSetupStepId, Array<"done" | "back">>> = {
+      llm: ["done"],
+      voice: ["back", "done"],
+      netease: ["done"],
+      playlist: ["done"],
+      context: ["done"]
+    };
+
+    await runFullSetupWizard({
+      runStep: async (step) => {
+        visited.push(step);
+        return outcomes[step]?.shift() ?? "done";
+      },
+      confirmOptionalStep: async () => false,
+      pause: async () => undefined,
+      enterSession: async () => undefined
+    });
+
+    expect(visited.slice(0, 3)).toEqual(["llm", "voice", "llm"]);
+  });
 });

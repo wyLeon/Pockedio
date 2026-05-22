@@ -83,6 +83,8 @@ describe("status report", () => {
     expect(text).toContain("Schedule   Morning DJ weekdays 08:45");
     expect(text).toContain("prepare 20 min before");
     expect(text).toContain("LLM       gpt-4.1-mini (missing key)");
+    expect(text).toContain("Music     NetEase API reachable (anonymous playback, not logged in)");
+    expect(text).not.toContain("Music     NetEase connected (anonymous)");
     expect(text).toContain(process.platform === "darwin"
       ? "Voice     Vale, built-in macOS"
       : "Voice     Text-only DJ copy; configure voice for spoken DJ audio");
@@ -172,7 +174,7 @@ describe("status report", () => {
     expect(text).toContain("Playback   Title - Artist");
     expect(text).toContain("Schedule   Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled");
     expect(text).toContain("Setup");
-    expect(text).toContain("Music     NetEase connected (account, exhigh)");
+    expect(text).toContain("Music     NetEase account connected (exhigh)");
     expect(text).toContain("LLM       deepseek-chat (shell env)");
     expect(text).toContain("Voice     Mina, Fish TTS ready");
     expect(text).toContain("Context   Calendar on, Weather Shanghai");

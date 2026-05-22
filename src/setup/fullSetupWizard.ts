@@ -13,18 +13,26 @@ export type FullSetupWizardDependencies = {
 const requiredSteps: FullSetupStepId[] = ["llm", "voice", "netease", "playlist", "context"];
 
 export async function runFullSetupWizard(deps: FullSetupWizardDependencies): Promise<FullSetupWizardOutcome> {
-  for (const step of requiredSteps) {
+  const steps = [...requiredSteps];
+  if (await deps.confirmOptionalStep("scheduler")) {
+    steps.push("scheduler");
+  }
+
+  let stepIndex = 0;
+  while (stepIndex < steps.length) {
+    const step = steps[stepIndex]!;
     const outcome = await deps.runStep(step);
     if (outcome === "quit") {
       return "quit";
     }
-  }
-
-  if (await deps.confirmOptionalStep("scheduler")) {
-    const outcome = await deps.runStep("scheduler");
-    if (outcome === "quit") {
-      return "quit";
+    if (outcome === "back") {
+      if (stepIndex === 0) {
+        return "done";
+      }
+      stepIndex -= 1;
+      continue;
     }
+    stepIndex += 1;
   }
 
   await deps.pause("Full setup finished. You can reopen any section from Setup & Connections.");

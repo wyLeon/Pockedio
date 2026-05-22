@@ -358,10 +358,10 @@ function formatContextHeartbeatStatus(run: ContextRefreshRunRecord | null): stri
 }
 
 function formatNetEaseStatus(netease: StatusReport["netease"]): string {
-  const account = netease.authMode === "account" && netease.cookiePresent
-    ? `account, ${netease.qualityLevel}`
-    : "anonymous";
-  return `${netease.reachable ? "NetEase connected" : "NetEase unreachable"} (${account})`;
+  if (netease.authMode === "account" && netease.cookiePresent) {
+    return `${netease.reachable ? "NetEase account connected" : "NetEase API unreachable"} (${netease.qualityLevel})`;
+  }
+  return `${netease.reachable ? "NetEase API reachable" : "NetEase API unreachable"} (anonymous playback, not logged in)`;
 }
 
 function formatLlmStatus(llm: StatusReport["llm"]): string {

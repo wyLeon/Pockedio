@@ -276,8 +276,7 @@ async function runFullSetupStep(step: FullSetupStepId): Promise<"done" | "back" 
     return normalizeSetupOutcome(await runNetEaseSetup());
   }
   if (step === "playlist") {
-    await importNetEasePlaylistFromSetup();
-    return "done";
+    return await importNetEasePlaylistFromSetup();
   }
   if (step === "context") {
     console.log("Configure any context sources you want, then press B to continue full setup.");
@@ -317,19 +316,20 @@ async function confirmFullSetupOptionalStep(label: string, defaultYes: boolean):
   return answer === "y" || answer === "yes";
 }
 
-async function importNetEasePlaylistFromSetup(): Promise<void> {
+async function importNetEasePlaylistFromSetup(): Promise<"done" | "back"> {
   const input = await askLineWithBack("NetEase playlist link or ID");
   if (input === "back") {
-    return;
+    return "back";
   }
   if (!input.trim()) {
     await pauseWithMessage("Skipped playlist import.");
-    return;
+    return "done";
   }
   const result = await withCliProgress("Importing NetEase playlist...", () =>
     importTasteFromNetEasePlaylist(input.trim(), loadConfig())
   );
   await pauseWithMessage(renderTasteImportResultSurface(result));
+  return "done";
 }
 
 type ContextSetupOutcome = "continue" | "back" | "quit";
