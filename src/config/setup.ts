@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
-import { emitKeypressEvents, type Key } from "node:readline";
+import { createInterface, emitKeypressEvents, type Key } from "node:readline";
 import { pathToFileURL } from "node:url";
 import inquirer from "inquirer";
 import { runMigrations } from "../db/migrations.js";
@@ -40,7 +40,10 @@ const neteaseSetupMethods = ["qr", "cookie", "anonymous"] as const;
 type NetEaseSetupMethod = typeof neteaseSetupMethods[number];
 type NetEaseSetupMenuValue = NetEaseSetupMethod;
 type NetEaseQualityMenuValue = NetEaseQualityLevel;
-type SetupRunResult = "done" | "back" | "quit";
+export type SetupRunResult = "done" | "back" | "quit";
+type ScheduledDjKind = "morning" | "evening";
+type SchedulerSetupAction = ScheduledDjKind | "disable_all";
+type ScheduledDjProgramAction = "enable" | "disable" | "change_time";
 type SetupTasteImportStatus = "imported" | "failed" | "skipped";
 
 type SetupAnswers = {
@@ -69,6 +72,14 @@ type SetupAnswers = {
   eveningDjPlayTime: string;
   eveningDjPrepareMinutesBefore: number;
 };
+
+const diaryPathCopyHint = [
+  "Tip",
+  "  Open your journal root directory in Finder.",
+  "  Press Option + Command + C to copy its path.",
+  "  Paste that path here when asked for the diary path."
+].join("\n");
+const textInputEscapeHint = "Esc to back";
 
 export type FirstSetupAnswers = {
   musicProvider?: MusicProviderName;
@@ -256,16 +267,15 @@ export async function runWeatherSetup(): Promise<SetupRunResult> {
 
   let location = current.weather.location;
   if (weatherAction === "change_location" || weatherAction === "enable") {
-    const answer = await inquirer.prompt<{ weatherLocation: string }>([
-      {
-        type: "input",
-        name: "weatherLocation",
-        message: "Weather city",
-        default: current.weather.location,
-        validate: (value) => value.trim().length > 0 || "Enter a city or location."
-      }
-    ]);
-    location = answer.weatherLocation.trim();
+    const weatherLocation = await promptSetupTextInput({
+      message: "Weather city",
+      defaultValue: current.weather.location,
+      validate: (value) => value.trim().length > 0 || "Enter a city or location."
+    });
+    if (weatherLocation === "back") {
+      return "back";
+    }
+    location = weatherLocation.trim();
   }
 
   const config = pockedioConfigSchema.parse({
@@ -293,6 +303,8 @@ export async function runDiarySetup(): Promise<SetupRunResult> {
       "",
       "Diary access is explicit and local-first.",
       "If your LLM is remote, summary generation may send a diary excerpt.",
+      "",
+      diaryPathCopyHint,
       "",
       `Current path  ${current.diary.path}`,
       `Status        ${current.diary.enabled ? "Enabled" : "Not enabled"}`,
@@ -326,16 +338,17 @@ export async function runDiarySetup(): Promise<SetupRunResult> {
 
   let diaryPath = current.diary.path;
   if (diaryAction === "change_path" || diaryAction === "enable") {
-    const answer = await inquirer.prompt<{ diaryPath: string }>([
-      {
-        type: "input",
-        name: "diaryPath",
-        message: "Diary path",
-        default: current.diary.path,
-        validate: (value) => value.trim().length > 0 || "Enter a diary folder path."
-      }
-    ]);
-    diaryPath = answer.diaryPath.trim();
+    console.log("");
+    console.log(diaryPathCopyHint);
+    const inputDiaryPath = await promptSetupTextInput({
+      message: "Diary path",
+      defaultValue: current.diary.path,
+      validate: (value) => value.trim().length > 0 || "Enter a diary folder path."
+    });
+    if (inputDiaryPath === "back") {
+      return "back";
+    }
+    diaryPath = inputDiaryPath.trim();
   }
 
   const config = pockedioConfigSchema.parse({
@@ -352,6 +365,85 @@ export async function runDiarySetup(): Promise<SetupRunResult> {
   const diary = await withSetupStatus("Checking diary...", () => setupDiaryContext(config));
   console.log("");
   console.log(formatDiarySetupSummary(diary));
+  return "done";
+}
+
+export async function runSchedulerSetup(): Promise<SetupRunResult> {
+  const current = loadConfig();
+  const schedulerAction = await promptSetupMenu<SchedulerSetupAction>({
+    title: [
+      "Schedule DJ",
+      "",
+      "Optional weekday DJ programs can be prepared before the time you choose.",
+      "",
+      "Current",
+      `  Morning           ${formatScheduledDjProgramSummary("morning", current)}`,
+      `  Evening           ${formatScheduledDjProgramSummary("evening", current)}`,
+      "",
+      "Actions"
+    ].join("\n"),
+    entries: [
+      { name: "Configure Morning DJ", value: "morning" },
+      { name: "Configure Evening DJ", value: "evening" },
+      { name: "Disable scheduled DJ", value: "disable_all" }
+    ],
+    defaultValue: current.dj.schedule.morning.enabled ? "morning" : current.dj.schedule.evening.enabled ? "evening" : "morning"
+  });
+  if (schedulerAction === "back" || schedulerAction === "quit") {
+    return schedulerAction;
+  }
+
+  if (schedulerAction === "disable_all") {
+    const config = buildConfigFromSchedulerSetupAction(current, "disable_all");
+    ensureRuntimeDirs(config);
+    saveConfig(config);
+    console.log("");
+    console.log("Saved");
+    console.log(`  Scheduled DJ      ${formatScheduledDjSetupSummary(config)}`);
+    return "done";
+  }
+
+  const programAction = await promptSetupMenu<ScheduledDjProgramAction>({
+    title: [
+      `${formatScheduledDjKind(schedulerAction)} DJ`,
+      "",
+      `Current           ${formatScheduledDjProgramSummary(schedulerAction, current)}`,
+      "",
+      "Actions"
+    ].join("\n"),
+    entries: [
+      { name: `Enable ${formatScheduledDjKind(schedulerAction)} DJ`, value: "enable" },
+      { name: `Disable ${formatScheduledDjKind(schedulerAction)} DJ`, value: "disable" },
+      { name: `Change ${formatScheduledDjKind(schedulerAction)} ready time`, value: "change_time" }
+    ],
+    defaultValue: current.dj.schedule[schedulerAction].enabled ? "change_time" : "enable"
+  });
+  if (programAction === "back" || programAction === "quit") {
+    return programAction;
+  }
+
+  let playTime: string | undefined;
+  if (programAction === "change_time" || programAction === "enable") {
+    const inputPlayTime = await promptSetupTextInput({
+      message: `${formatScheduledDjKind(schedulerAction)} DJ ready time (HH:mm)`,
+      defaultValue: current.dj.schedule[schedulerAction].playTime,
+      validate: validateTimeOfDay
+    });
+    if (inputPlayTime === "back") {
+      return "back";
+    }
+    playTime = inputPlayTime.trim();
+  }
+
+  const config = buildConfigFromSchedulerSetupAction(current, schedulerAction, {
+    action: programAction,
+    playTime
+  });
+  ensureRuntimeDirs(config);
+  saveConfig(config);
+  console.log("");
+  console.log("Saved");
+  console.log(`  Scheduled DJ      ${formatScheduledDjSetupSummary(config)}`);
   return "done";
 }
 
@@ -488,6 +580,7 @@ export async function promptForSetup(current: PockedioConfig): Promise<FirstSetu
 
   console.log("");
   console.log("Diary summaries are stored locally. If your LLM is remote, summary generation may send a diary excerpt.");
+  console.log(diaryPathCopyHint);
   const diaryGate = await inquirer.prompt<Pick<FirstSetupAnswers, "useDiary" | "diaryPath">>([
     {
       type: "confirm",
@@ -693,17 +786,18 @@ async function promptForNetEaseSetup(current: PockedioConfig): Promise<Pick<Firs
       }
     ]);
 
-    const cookieAnswer = methodAnswer.neteaseSetupMethod === "cookie"
-      ? await inquirer.prompt<Pick<FirstSetupAnswers, "neteaseCookie">>([
-        {
-          type: "password",
-          name: "neteaseCookie",
-          message: "Paste MUSIC_U cookie",
-          mask: "*",
-          validate: (value) => value.trim().length > 0 || "Paste MUSIC_U=... or the MUSIC_U value."
-        }
-      ])
-      : {};
+    const cookieAnswer: Pick<FirstSetupAnswers, "neteaseCookie"> = {};
+    if (methodAnswer.neteaseSetupMethod === "cookie") {
+      const neteaseCookie = await promptSetupTextInput({
+        message: "Paste MUSIC_U cookie",
+        mask: true,
+        validate: (value) => value.trim().length > 0 || "Paste MUSIC_U=... or the MUSIC_U value."
+      });
+      if (neteaseCookie === "back") {
+        continue;
+      }
+      cookieAnswer.neteaseCookie = neteaseCookie;
+    }
 
     return {
       ...methodAnswer,
@@ -748,17 +842,18 @@ async function promptForStandaloneNetEaseSetup(
       return "quit";
     }
 
-    const cookieAnswer = neteaseSetupMethod === "cookie"
-      ? await inquirer.prompt<Pick<FirstSetupAnswers, "neteaseCookie">>([
-        {
-          type: "password",
-          name: "neteaseCookie",
-          message: "Paste MUSIC_U cookie",
-          mask: "*",
-          validate: (value) => value.trim().length > 0 || "Paste MUSIC_U=... or the MUSIC_U value."
-        }
-      ])
-      : {};
+    const cookieAnswer: Pick<FirstSetupAnswers, "neteaseCookie"> = {};
+    if (neteaseSetupMethod === "cookie") {
+      const neteaseCookie = await promptSetupTextInput({
+        message: "Paste MUSIC_U cookie",
+        mask: true,
+        validate: (value) => value.trim().length > 0 || "Paste MUSIC_U=... or the MUSIC_U value."
+      });
+      if (neteaseCookie === "back") {
+        continue;
+      }
+      cookieAnswer.neteaseCookie = neteaseCookie;
+    }
 
     return {
       neteaseSetupMethod,
@@ -839,7 +934,89 @@ function promptSetupMenu<TValue extends string>(options: {
   });
 }
 
+function promptSetupTextInput(options: {
+  message: string;
+  defaultValue?: string;
+  mask?: boolean;
+  validate?: (value: string) => true | string;
+}): Promise<string | "back"> {
+  const promptLabel = `${options.message}${options.defaultValue ? ` (${options.defaultValue})` : ""} [${textInputEscapeHint}]: `;
+  if (!defaultInput.isTTY) {
+    const rl = createInterface({ input: defaultInput, output: defaultOutput });
+    return new Promise((resolve) => {
+      rl.question(promptLabel, (answer) => {
+        rl.close();
+        resolve(isBackInput(answer) ? "back" : answer.trim() || options.defaultValue || "");
+      });
+    });
+  }
+
+  return new Promise((resolve) => {
+    let value = "";
+    const previousRawMode = defaultInput.isRaw;
+
+    const render = (error?: string) => {
+      if (error) {
+        defaultOutput.write(`\n${error}\n`);
+      }
+      const shownValue = options.mask ? "*".repeat(value.length) : value;
+      defaultOutput.write(`\r\x1B[2K${promptLabel}${shownValue}`);
+    };
+    const cleanup = (result: string | "back") => {
+      defaultInput.off("data", onData);
+      if (defaultInput.isTTY) {
+        defaultInput.setRawMode(previousRawMode);
+      }
+      defaultInput.pause();
+      defaultOutput.write("\n");
+      resolve(result);
+    };
+    const submit = () => {
+      const result = value.trim() || options.defaultValue || "";
+      if (isBackInput(result)) {
+        cleanup("back");
+        return;
+      }
+      const validation = options.validate?.(result) ?? true;
+      if (validation !== true) {
+        render(validation);
+        return;
+      }
+      cleanup(result);
+    };
+    const onData = (chunk: Buffer) => {
+      for (const char of chunk.toString("utf8")) {
+        if (char === "\u001b") {
+          cleanup("back");
+          return;
+        }
+        if (char === "\u0003") {
+          cleanup("back");
+          return;
+        }
+        if (char === "\r" || char === "\n") {
+          submit();
+          return;
+        }
+        if (char === "\u007f" || char === "\b") {
+          value = value.slice(0, -1);
+          render();
+          continue;
+        }
+        value += char;
+        render();
+      }
+    };
+
+    defaultInput.resume();
+    defaultInput.setRawMode(true);
+    defaultInput.on("data", onData);
+    render();
+  });
+}
+
 export async function promptForAdvancedSetup(current: PockedioConfig): Promise<SetupAnswers> {
+  console.log(diaryPathCopyHint);
   return inquirer.prompt<SetupAnswers>([
     {
       type: "input",
@@ -1070,6 +1247,48 @@ export function buildConfigFromNetEaseSetupAnswers(
   });
 }
 
+export function buildConfigFromSchedulerSetupAction(
+  current: PockedioConfig,
+  target: SchedulerSetupAction,
+  options: { action?: ScheduledDjProgramAction; playTime?: string } = {}
+): PockedioConfig {
+  if (target === "disable_all") {
+    return pockedioConfigSchema.parse({
+      ...current,
+      dj: {
+        ...current.dj,
+        schedule: {
+          morning: {
+            ...current.dj.schedule.morning,
+            enabled: false
+          },
+          evening: {
+            ...current.dj.schedule.evening,
+            enabled: false
+          }
+        }
+      }
+    });
+  }
+
+  const action = options.action ?? "enable";
+  const nextProgram = {
+    ...current.dj.schedule[target],
+    enabled: action === "disable" ? false : true,
+    playTime: options.playTime?.trim() || current.dj.schedule[target].playTime
+  };
+  return pockedioConfigSchema.parse({
+    ...current,
+    dj: {
+      ...current.dj,
+      schedule: {
+        ...current.dj.schedule,
+        [target]: nextProgram
+      }
+    }
+  });
+}
+
 export function buildConfigFromAnswers(current: PockedioConfig, answers: SetupAnswers): PockedioConfig {
   return pockedioConfigSchema.parse({
     ...current,
@@ -1259,6 +1478,17 @@ export function formatScheduledDjSetupSummary(config: PockedioConfig): string {
     parts.push(`Evening weekdays ${evening.playTime}`);
   }
   return parts.join("; ");
+}
+
+function formatScheduledDjProgramSummary(kind: ScheduledDjKind, config: PockedioConfig): string {
+  const program = config.dj.schedule[kind];
+  return program.enabled
+    ? `Enabled, weekdays ${program.playTime}`
+    : `Disabled, saved time ${program.playTime}`;
+}
+
+function formatScheduledDjKind(kind: ScheduledDjKind): string {
+  return kind === "morning" ? "Morning" : "Evening";
 }
 
 export function formatNetEaseSetupSummary(config: PockedioConfig): string {
@@ -1559,6 +1789,11 @@ function validateTimeOfDay(value: string): true | string {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
     ? true
     : "Time must use HH:mm, for example 08:45.";
+}
+
+function isBackInput(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "b" || normalized === "back";
 }
 
 async function playDjPreview(choice: DjChoice | undefined): Promise<void> {

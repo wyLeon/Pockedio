@@ -156,13 +156,15 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(setup).toContain("  1. Run full setup");
     expect(setup).toContain("> 3. Configure Voice");
-    expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit");
+    expect(setup).toContain("  6. Configure Scheduler");
+    expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
     expect(resolveSetupConnectionsAction("1")).toBe("full_setup");
     expect(resolveSetupConnectionsAction("2")).toBe("llm_setup");
     expect(resolveSetupConnectionsAction("3")).toBe("voice_setup");
     expect(resolveSetupConnectionsAction("4")).toBe("netease_setup");
     expect(resolveSetupConnectionsAction("5")).toBe("context_setup");
-    expect(resolveSetupConnectionsAction("6")).toBeUndefined();
+    expect(resolveSetupConnectionsAction("6")).toBe("scheduler_setup");
+    expect(resolveSetupConnectionsAction("schedule")).toBe("scheduler_setup");
     expect(resolveSetupConnectionsAction("b")).toBe("back");
   });
 
@@ -171,7 +173,7 @@ describe("MOLE-inspired welcome hub", () => {
     const contextConfig = {
       ...config,
       weather: { enabled: true, location: "Guangzhou" },
-      diary: { enabled: false, path: "/Users/leonw/Diary" }
+      diary: { enabled: false, path: "~/Diary" }
     };
     const context = renderContextSetupSurface({ config: contextConfig }, { selectedAction: "weather" });
 

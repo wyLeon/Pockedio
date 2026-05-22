@@ -24,7 +24,7 @@ The automated tests now cover DJ mode handoff and prepared transition usage, but
 
 Manual checks:
 
-- Setup is using the selected DJ preview file as the FishAudio reference. Verified on 2026-05-21 for Mina with `/Users/leonw/.pockedio/audio/previews/mina.wav`.
+- Setup is using the selected DJ preview file as the FishAudio reference. Verified on 2026-05-21 for Mina with `~/.pockedio/audio/previews/mina.wav`.
 - DJ station opening voice is audible before track 1. Verified objectively on 2026-05-21 with real FishAudio/`afplay` playback and SQLite `played` status.
 - Standard DJ mode intentionally keeps the first transition quiet; a middle transition voice appears only when selected by the pacing rules and ready in time. Verified in controlled harness on 2026-05-21; transition file was generated and played before track 3.
 - Opening voice and transition voice sound like the same DJ. Needs user subjective confirmation; objective evidence shows both used the same Mina reference.

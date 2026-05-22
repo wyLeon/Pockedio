@@ -439,7 +439,7 @@ If the user chooses QR setup:
 
 ```text
 Waiting for NetEase QR login...
-Open and scan this QR image with NetEase Cloud Music: /Users/leonw/.pockedio/secrets/netease-login-qr.png
+Open and scan this QR image with NetEase Cloud Music: ~/.pockedio/secrets/netease-login-qr.png
 The QR code is valid for about 90 seconds.
 Waiting for NetEase QR confirmation...
 
@@ -508,7 +508,7 @@ Imported
   Tracks            128
   Artists           42 detected
   Playlists         1 imported
-  taste.md          /Users/leonw/.pockedio/taste.md
+  taste.md          ~/.pockedio/taste.md
 
 taste.md will grow as we talk and listen, so Pockedio can understand you better.
 ```
@@ -585,12 +585,12 @@ If yes:
 
 ```text
 Diary path
-> /Users/leonw/Diary
+> ~/Diary
 
 Checking diary...
 
 Diary ready
-  Path              /Users/leonw/Diary
+  Path              ~/Diary
   Latest entry      2026-05-18.md
 
 Pockedio will use diary context lightly and locally.
@@ -707,8 +707,8 @@ after complete            -> suggest pockedio
 Voice preview paths:
 
 ```text
-Mina preview       /Users/leonw/.pockedio/audio/previews/mina.wav
-Nova preview       /Users/leonw/.pockedio/audio/previews/nova.wav
+Mina preview       ~/.pockedio/audio/previews/mina.wav
+Nova preview       ~/.pockedio/audio/previews/nova.wav
 ```
 
 Preview fallback:
@@ -801,7 +801,7 @@ This is not a setup subsection, but it is the current standalone import command.
 ```text
 $ pockedio import-taste spikes/fixtures/taste-normalized.csv
 
-Imported 128 tracks into /Users/leonw/.pockedio/taste.md.
+Imported 128 tracks into ~/.pockedio/taste.md.
 Artists: Ryuichi Sakamoto, ...
 Playlists: Deep Work, ...
 ```
@@ -827,7 +827,7 @@ Diary
   Latest file       2026-05-21.md
   Diary memories    1 updated
 
-taste.md           /Users/leonw/.pockedio/taste.md
+taste.md           ~/.pockedio/taste.md
 
 Context memory is ready for future stations.
 ```
@@ -1788,7 +1788,7 @@ Output:
 ```text
 Updated your taste profile.
 Signals reviewed: 12
-taste.md: /Users/leonw/.pockedio/taste.md
+taste.md: ~/.pockedio/taste.md
 ```
 
 Rules:

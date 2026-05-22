@@ -25,7 +25,7 @@ export type WelcomeReadiness = {
 };
 
 export type WelcomeHubAction = "session" | "setup" | "llm_setup" | "voice_setup" | "taste" | "status" | "quit";
-export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" | "netease_setup" | "context_setup" | "back" | "quit";
+export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" | "netease_setup" | "context_setup" | "scheduler_setup" | "back" | "quit";
 export type LlmProviderId = "openai" | "deepseek" | "openrouter" | "local_vllm" | "custom";
 export type LlmSetupAction = LlmProviderId | "test_connection" | "back" | "quit";
 export type LlmProviderAction = "paste_key" | "use_shell_env" | "change_model" | "change_base_url" | "change_api_key_env" | "check_server" | "discover_models" | "test_connection" | "back" | "quit";
@@ -75,7 +75,8 @@ const setupConnectionsEntries: Array<{ action: SetupConnectionsAction; label: st
   { action: "llm_setup", label: "Configure LLM" },
   { action: "voice_setup", label: "Configure Voice" },
   { action: "netease_setup", label: "Configure NetEase" },
-  { action: "context_setup", label: "Configure Context" }
+  { action: "context_setup", label: "Configure Context" },
+  { action: "scheduler_setup", label: "Configure Scheduler" }
 ];
 
 const llmSetupEntries: Array<{ action: LlmSetupAction; label: string; description: string }> = [
@@ -828,6 +829,9 @@ export function resolveSetupConnectionsAction(input: string): SetupConnectionsAc
   }
   if (normalized === "c" || normalized === "context" || normalized === "calendar") {
     return "context_setup";
+  }
+  if (normalized === "s" || normalized === "scheduler" || normalized === "schedule") {
+    return "scheduler_setup";
   }
   if (normalized === "b" || normalized === "back") {
     return "back";

@@ -46,7 +46,7 @@ Session memory summaries should feed recommendation context, but they should not
 
 ## Source 3: Diary Context
 
-The user's diary under `/Users/leonw/openclaw/area/diary` may be an important source for understanding emotional context, recurring life patterns, work intensity, projects, and personal seasons.
+The user's diary under `~/openclaw/area/diary` may be an important source for understanding emotional context, recurring life patterns, work intensity, projects, and personal seasons.
 
 Diary data should be used carefully. It is not music taste by itself, but it can help Pockedio understand when certain music is appropriate. For example, it may help distinguish:
 

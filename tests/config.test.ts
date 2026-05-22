@@ -10,6 +10,7 @@ import {
   __netEaseQrLoginForTests,
   buildConfigFromAnswers,
   buildConfigFromFirstSetupAnswers,
+  buildConfigFromSchedulerSetupAction,
   formatCalendarSetupSummary,
   formatDiarySetupSummary,
   formatScheduledDjSetupSummary,
@@ -261,6 +262,7 @@ describe("config load and save", () => {
     current.llm.model = "deepseek-chat";
     current.llm.baseUrl = "https://api.deepseek.com";
     current.llm.apiKeyEnv = "DEEPSEEK_API_KEY";
+    const diaryPath = path.join(os.homedir(), "Diary");
     const config = buildConfigFromFirstSetupAnswers(current, {
       djChoice: "Nova",
       listenToDjTrial: true,
@@ -269,7 +271,7 @@ describe("config load and save", () => {
       weatherLocation: "Guangzhou",
       useCalendar: false,
       useDiary: true,
-      diaryPath: "/Users/leonw/Diary"
+      diaryPath
     });
 
     expect(config.netease.baseUrl).toBe("http://localhost:3000");
@@ -292,7 +294,7 @@ describe("config load and save", () => {
     expect(config.weather.enabled).toBe(true);
     expect(config.weather.location).toBe("Guangzhou");
     expect(config.calendar.enabled).toBe(false);
-    expect(config.diary).toEqual({ enabled: true, path: "/Users/leonw/Diary" });
+    expect(config.diary).toEqual({ enabled: true, path: diaryPath });
   });
 
   it("disables weather from first setup when user skips weather context", () => {
@@ -414,9 +416,42 @@ describe("config load and save", () => {
     expect(formatScheduledDjSetupSummary(config)).toBe("skipped");
   });
 
+  it("configures scheduler setup without resetting the other scheduled program", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+    current.dj.schedule.morning.prepareMinutesBefore = 12;
+    current.dj.schedule.evening.enabled = true;
+    current.dj.schedule.evening.playTime = "18:30";
+    current.dj.schedule.evening.prepareMinutesBefore = 20;
+
+    const config = buildConfigFromSchedulerSetupAction(current, "morning", {
+      action: "change_time",
+      playTime: "08:10"
+    });
+
+    expect(config.dj.schedule).toMatchObject({
+      morning: { enabled: true, playTime: "08:10", prepareMinutesBefore: 12 },
+      evening: { enabled: true, playTime: "18:30", prepareMinutesBefore: 20 }
+    });
+    expect(formatScheduledDjSetupSummary(config)).toBe("Morning weekdays 08:10; Evening weekdays 18:30");
+  });
+
+  it("disables all scheduled DJ programs from scheduler setup", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+    current.dj.schedule.morning.enabled = true;
+    current.dj.schedule.evening.enabled = true;
+
+    const config = buildConfigFromSchedulerSetupAction(current, "disable_all");
+
+    expect(config.dj.schedule.morning.enabled).toBe(false);
+    expect(config.dj.schedule.evening.enabled).toBe(false);
+    expect(formatScheduledDjSetupSummary(config)).toBe("skipped");
+  });
+
   it("uses accepted setup trial audio paths for Mina and Nova", () => {
-    expect(getDjPreviewPath("Mina")).toBe("/Users/leonw/.pockedio/audio/previews/mina.wav");
-    expect(getDjPreviewPath("Nova")).toBe("/Users/leonw/.pockedio/audio/previews/nova.wav");
+    expect(getDjPreviewPath("Mina")).toBe(path.join(os.homedir(), ".pockedio", "audio", "previews", "mina.wav"));
+    expect(getDjPreviewPath("Nova")).toBe(path.join(os.homedir(), ".pockedio", "audio", "previews", "nova.wav"));
   });
 
   it("lets first setup hear multiple DJ trials before choosing", () => {
@@ -573,13 +608,15 @@ describe("config load and save", () => {
   });
 
   it("formats diary setup checks", () => {
+    const diaryFile = path.join(os.homedir(), "Diary", "2026-05-18.md");
+    const diaryDir = path.dirname(diaryFile);
     expect(formatDiarySetupSummary({
-      filePath: "/Users/leonw/Diary/2026-05-18.md",
+      filePath: diaryFile,
       summary: "Latest diary file: 2026-05-18.md, modified 2026-05-18T10:00:00.000Z.",
       listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
     })).toBe([
       "Diary ready",
-      "  Path              /Users/leonw/Diary",
+      `  Path              ${diaryDir}`,
       "  Latest entry      2026-05-18.md",
       "",
       "Pockedio will use diary context lightly and locally."

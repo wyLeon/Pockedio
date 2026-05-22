@@ -22,8 +22,7 @@ const scheduledDjProgramSchema = z.object({
   prepareMinutesBefore: z.number().int().min(0).max(120).default(20)
 });
 
-export const fishAudioModelDir =
-  "/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e";
+export const fishAudioModelDir = ".cache/fishaudio-s2-pro-8bit-mlx";
 
 export const pockedioConfigSchema = z.object({
   netease: z.object({

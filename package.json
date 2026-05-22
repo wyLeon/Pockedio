@@ -2,9 +2,31 @@
   "name": "pockedio",
   "version": "0.1.0",
   "private": true,
+  "description": "CLI-first personal AI DJ for context-aware listening.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "pockedio": "dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wyLeon/Pockedio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wyLeon/Pockedio/issues"
+  },
+  "homepage": "https://github.com/wyLeon/Pockedio#readme",
+  "keywords": [
+    "cli",
+    "ai",
+    "music",
+    "dj",
+    "radio",
+    "netease",
+    "tts"
+  ],
+  "engines": {
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/db/schema.sql dist/db/schema.sql",

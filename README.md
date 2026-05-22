@@ -1,22 +1,192 @@
 # Pockedio
 
-Pockedio is a CLI-first, LLM-powered personal DJ. The main interface is conversational: run `pockedio`, talk naturally, and let the app decide whether to discuss, generate a five-song station, start playback, store feedback, or create explicit DJ audio.
+Pockedio is a CLI-first personal AI DJ. It helps you talk naturally about what you want to hear, builds a short station, plays music through NetEase Cloud Music, and can optionally add spoken DJ program audio.
 
-V1 is local-first and single-user. Pockedio-owned data stays on this machine under `~/.pockedio/`. It uses NetEase Cloud Music for real music search/playback, local FishAudio S2 Pro MLX for spoken DJ audio, Apple Calendar and weather for context, SQLite for durable memory, and editable `taste.md` as a human-readable taste surface.
+Pockedio is local-first and single-user. Its own config, memory, taste profile, and generated audio live under `~/.pockedio/`. External services are used only when you enable or configure them.
 
-## Command Surface
+## Status
 
-Only these user-facing commands are part of v1:
+Pockedio is an early open-source release. Install from source for now. The npm package is not published yet.
+
+The current release target is a working local developer/user setup, not a hosted service.
+
+## What It Does
+
+- Opens a MOLE-inspired terminal entry screen.
+- Lets you configure LLM, voice, NetEase, context, and Schedule DJ from setup screens.
+- Understands natural language playback controls such as play, pause, resume, next, previous, favorite, and questions about the current song.
+- Builds five-track stations from your prompt, taste, context, and memory.
+- Imports NetEase playlists into a local taste profile.
+- Supports built-in macOS voices with no model install.
+- Supports optional Fish TTS for Mina/Nova DJ voices if you already use or install Fish locally.
+- Stores local memory in SQLite and a human-editable `taste.md`.
+
+## Requirements
+
+Required:
+
+- Node.js 22 or newer.
+- A terminal with interactive input support.
+- An OpenAI-compatible LLM provider for full station planning and conversational behavior.
+- NetEase Cloud Music API adapter for real playback.
+
+Optional:
+
+- macOS for built-in `say` voices and Apple Calendar context.
+- `mpv` for stronger pause/resume control. Pockedio falls back to macOS `afplay` where available.
+- Fish TTS for local Mina/Nova voice synthesis.
+- Apple Calendar permission.
+- Diary folder access.
+- Weather lookup through Open-Meteo.
+
+## Install From Source
+
+```bash
+git clone https://github.com/wyLeon/Pockedio.git
+cd Pockedio
+npm install
+npm run build
+```
+
+Run from source:
+
+```bash
+npm run dev
+```
+
+Or link the built CLI locally:
+
+```bash
+npm link
+pockedio
+```
+
+## Start The NetEase Adapter
+
+Pockedio expects a local NetEase Cloud Music API adapter for search and playable URL lookup.
+
+In a separate terminal:
+
+```bash
+spikes/scripts/run_netease_api.sh
+```
+
+By default this starts the adapter at `http://127.0.0.1:3000`.
+
+## Configure Pockedio
+
+Run:
+
+```bash
+pockedio setup
+```
+
+The setup hub guides you through:
+
+- LLM provider and API key.
+- Voice selection.
+- Optional Fish TTS.
+- NetEase account or anonymous playback.
+- Calendar, weather, and diary context.
+- Optional Schedule DJ.
+
+Use `Esc` to go back from nested text/password prompts. Use `B` to go back on selectable setup screens.
+
+### LLM Providers
+
+Pockedio supports OpenAI-compatible providers. The setup flow currently includes:
+
+- OpenAI
+- DeepSeek
+- OpenRouter
+- local vLLM
+- custom OpenAI-compatible endpoint
+
+You can paste a key during setup or use a shell environment variable.
+
+Example environment variables:
+
+```bash
+export OPENAI_API_KEY="..."
+export DEEPSEEK_API_KEY="..."
+export OPENROUTER_API_KEY="..."
+```
+
+Do not commit API keys. `.env` and `.env.*` are ignored by git. Use `.env.example` only as a template.
+
+### Voice
+
+The lowest-friction path is the built-in macOS voice option. It needs no model download.
+
+Fish TTS is optional. Use it if you want the local Mina/Nova voice path and are comfortable installing the local runtime and model. Pockedio can help detect an existing Fish install or guide a local install.
+
+### Diary Path Tip
+
+When configuring Diary context on macOS:
+
+1. Open your journal root directory in Finder.
+2. Press `Option + Command + C` to copy its path.
+3. Paste that path into Pockedio.
+
+Diary is opt-in. If your configured LLM is remote, diary summary generation may send a diary excerpt to that LLM.
+
+## Import Taste
+
+Import a NetEase playlist:
+
+```bash
+pockedio import-taste "https://music.163.com/#/playlist?id=..."
+```
+
+The importer updates:
+
+```text
+~/.pockedio/taste.md
+~/.pockedio/pockedio.sqlite
+```
+
+`taste.md` is intentionally editable. It is the human-readable taste surface.
+
+## Use It
+
+Start the CLI:
 
 ```bash
 pockedio
-pockedio setup
-pockedio import-taste <file>
-pockedio serve
-pockedio status
 ```
 
-Development-only `serve` flags are available for smoke checks:
+Example prompts:
+
+```text
+play something soft for late-night focus
+who is the singer?
+favorite this
+next one
+pause
+resume
+make it warmer and more acoustic
+```
+
+When Pockedio suggests a station, press Enter to play it, type `dj` for a spoken DJ version, or describe how to adjust it.
+
+## Commands
+
+```bash
+pockedio
+pockedio --session
+pockedio setup
+pockedio setup llm
+pockedio setup voice
+pockedio setup netease
+pockedio setup context
+pockedio setup scheduler
+pockedio import-taste <netease-playlist-link-or-id>
+pockedio refresh-context
+pockedio status
+pockedio serve
+```
+
+Development smoke commands:
 
 ```bash
 pockedio serve --run-once morning
@@ -24,47 +194,9 @@ pockedio serve --run-once evening
 pockedio serve --run-once mood-check
 ```
 
-## Local Setup
+## Local Data
 
-Install dependencies and build:
-
-```bash
-npm install
-npm run build
-```
-
-Run from source during development:
-
-```bash
-npm run dev
-```
-
-Or link the built CLI:
-
-```bash
-npm link
-pockedio status
-```
-
-Start the local NetEase Cloud Music adapter before real playback checks:
-
-```bash
-spikes/scripts/run_netease_api.sh
-```
-
-For a detached local dev session:
-
-```bash
-screen -dmS pockedio-netease bash -lc 'cd /Users/leonw/repos/Pockedio && exec spikes/scripts/run_netease_api.sh > .cache/netease-api.log 2>&1'
-```
-
-Configure local runtime data:
-
-```bash
-npm run dev -- setup
-```
-
-Setup writes local files under `~/.pockedio/`:
+Pockedio-owned data stays local by default:
 
 ```text
 ~/.pockedio/
@@ -72,102 +204,22 @@ Setup writes local files under `~/.pockedio/`:
   pockedio.sqlite
   taste.md
   personas.json
+  secrets/
   audio/
-    dj/
 ```
 
-Import normalized taste data:
+The `secrets/` directory is for local credentials such as pasted LLM keys or NetEase cookies. Do not commit it.
 
-```bash
-npm run dev -- import-taste spikes/fixtures/taste-normalized.csv
-```
+External services may receive data when enabled:
 
-`import-taste` expects a normalized CSV export, not a direct NetEase account login. The importer writes `~/.pockedio/taste.md` and durable taste memories into SQLite. Keep `taste.md` editable; it is the human-readable preference surface Pockedio reads when planning stations.
+- LLM provider: conversation, station-planning, and DJ-copy prompts.
+- NetEase adapter: music search and playable URL requests.
+- Open-Meteo: configured city/location.
+- Fish TTS: local text/audio synthesis only when configured locally.
 
-Check health:
+Pockedio does not run a hosted backend, create user accounts, or store your memory remotely.
 
-```bash
-npm run dev -- status
-```
-
-Enter the conversational DJ session:
-
-```bash
-npm run dev
-```
-
-Run scheduled DJ jobs and mood checks:
-
-```bash
-npm run dev -- serve
-```
-
-## Runtime Dependencies
-
-- NetEaseCloudMusicApi local adapter on `http://127.0.0.1:3000` for real music search and playable URL retrieval.
-- FishAudio S2 Pro MLX model and Python entrypoint configured through `pockedio setup`.
-- `mpv` for controllable pause/resume playback when available; Pockedio falls back to macOS `afplay` for basic playback.
-- Apple Calendar permission when Calendar context is enabled.
-- Open-Meteo network access for weather context.
-- `OPENAI_API_KEY` for full LLM station planning and DJ copy. Without it, Pockedio uses deterministic fallback paths where available.
-- OpenAI-compatible LLMs can be used by setting `llm.baseUrl` and `llm.apiKeyEnv` in `~/.pockedio/config.json`, for example DeepSeek with `baseUrl: "https://api.deepseek.com"` and `apiKeyEnv: "DEEPSEEK_API_KEY"`.
-
-## Data Boundary
-
-Pockedio-owned data is local only:
-
-- Config: `~/.pockedio/config.json`
-- Durable memory: `~/.pockedio/pockedio.sqlite`
-- Human-editable taste: `~/.pockedio/taste.md`
-- DJ personas: `~/.pockedio/personas.json`
-- DJ audio cache: `~/.pockedio/audio/`
-
-External adapters may send request data outside the machine when used:
-
-- NetEase music adapter: search terms and track lookup requests.
-- OpenAI-compatible LLM: prompts used for conversation, station planning, and DJ copy.
-- Open-Meteo weather: configured city/location lookup.
-
-Pockedio does not run a hosted backend, create user accounts, or store user memory remotely.
-
-## Setup Surfaces
-
-`pockedio setup` runs the first setup flow:
-
-- DJ choice: Mina or Nova, with optional local trial audio.
-- Taste import: optional NetEase playlist link.
-- Weather context: optional city lookup for lighter DJ context.
-- Other context: optional Apple Calendar access and diary path; both stay local, and setup checks show spinner-style feedback while reading.
-- Scheduled DJ programs: optional weekday Morning DJ, Evening DJ, both, or neither. Setup asks for the ready time for each enabled program; Pockedio prepares audio before that time.
-
-Advanced preference surfaces are still evolving:
-
-- Calendar context can also be revisited with `pockedio setup calendar`.
-- Diary context is optional. Pockedio generates and stores a local summary for the latest diary file; if the configured LLM is remote, summary generation may send a diary excerpt to that LLM.
-- Developer/runtime config: NetEase music adapter base URL and OpenAI-compatible LLM settings.
-- Personal profile: MBTI.
-- DJ preference: language, style, persona preference, and program length.
-- Scheduled DJ: Morning DJ and Evening DJ can be revisited later; the user-facing setting is ready time, while the preparation offset stays internal by default.
-
-DJ persona schedules are stored in `~/.pockedio/personas.json`. The setup prompt controls the preferred persona direction; the personas file controls the actual weekly persona rotation.
-
-## V1 Behavior
-
-- Ordinary user-active playback creates a five-song station and attempts real playback through NetEase.
-- Ordinary user-active playback does not synthesize spoken DJ voice.
-- Spoken DJ audio is limited to enabled weekday Morning/Evening DJ programs and explicit user requests for DJ-like audio.
-- FishAudio output is played directly; it is not presented for review first.
-- Normal conversations can read today's Calendar context when enabled; scheduled DJ reads the last 7 days plus today.
-- `pockedio serve` runs scheduled DJ jobs and hourly mood-check prompts.
-- Mood checks are app prompts with options and require confirmation before playback.
-- Apple Calendar, weather, diary summaries, taste, personality, mood, feedback, and playback context are stored locally when used.
-- Diary summaries are cached in SQLite and reused until the source diary file changes.
-- Every user and Pockedio message in a session is stored in SQLite.
-- `taste.md` is editable, but durable memory also lives in the database.
-
-## Verification
-
-Automated checks:
+## Development
 
 ```bash
 npm run typecheck
@@ -175,70 +227,36 @@ npm test
 npm run build
 ```
 
-Manual smoke checks:
+Fresh local smoke test:
 
 ```bash
-spikes/scripts/run_netease_api.sh
-npm run dev -- setup
-npm run dev -- import-taste spikes/fixtures/taste-normalized.csv
-npm run dev -- status
-npm run dev
-```
-
-If your local shell picks up a different Node.js version, run CLI smoke checks with Node v24 first on `PATH`:
-
-```bash
-PATH=/Users/leonw/.nvm/versions/node/v24.12.0/bin:$PATH npm run dev -- status
-PATH=/Users/leonw/.nvm/versions/node/v24.12.0/bin:$PATH npm run dev -- setup
-PATH=/Users/leonw/.nvm/versions/node/v24.12.0/bin:$PATH npm run dev
-```
-
-In the session:
-
-```text
-I'm exhausted now, want some relaxation.
-yes, play it
-This reminds me of winter evenings in university.
-Why did you pick this track?
-what's playing?
-next
-```
-
-Then verify implicit mood requests answer first and ask before playback, confirmation starts the pending station, playback requests show progress statuses, a five-song station is generated when requested, playback starts or unavailable tracks are handled gracefully, the transcript is stored, and no spoken DJ audio plays unless explicitly requested.
-
-Explicit DJ audio smoke:
-
-```bash
-npm run dev
-```
-
-```text
-make me a short DJ intro for tonight
-```
-
-Expected: FishAudio generates and plays audio directly, with DJ audio metadata stored locally.
-
-Scheduled job smoke:
-
-```bash
-npm run dev -- serve --run-once morning
-npm run dev -- serve --run-once evening
-npm run dev -- serve --run-once mood-check
-```
-
-Built CLI smoke:
-
-```bash
-PATH=/Users/leonw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH npm run build
+npm ci
+npm run build
 node dist/cli.js status
+node dist/cli.js setup
 node dist/cli.js
 ```
 
-## Project Docs
+## Release Readiness
 
-- Product requirements: `docs/product-requirements.md`
-- Product route: `docs/product-route.md`
-- Taste intelligence: `docs/taste-intelligence.md`
-- V1 design spec: `docs/superpowers/specs/2026-05-17-pockedio-v1-design.md`
-- Technical spike results: `spikes/results.md`
-- V1 acceptance checklist: `docs/v1-acceptance.md`
+Before a public tag:
+
+- Run automated checks.
+- Run a fresh-clone setup.
+- Confirm setup back paths work, especially `Esc` from nested prompts.
+- Confirm no real API keys, cookies, local config, or `.env` files are tracked.
+- Confirm README setup matches the current CLI behavior.
+
+See [docs/open-source-release-checklist.md](docs/open-source-release-checklist.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

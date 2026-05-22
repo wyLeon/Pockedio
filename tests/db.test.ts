@@ -348,23 +348,23 @@ describe("database migrations", () => {
       const store = new MemoryStore(db);
 
       store.upsertDiarySummary({
-        sourceFile: "/Users/leonw/Diary/2026-05-18.md",
+        sourceFile: "~/Diary/2026-05-18.md",
         sourceMtime: "2026-05-18T10:00:00.000Z",
         summary: "A quiet but demanding workday. Good fit: calm recovery music.",
         generatedAt: "2026-05-19T00:00:00.000Z"
       });
 
       expect(store.getDiarySummary(
-        "/Users/leonw/Diary/2026-05-18.md",
+        "~/Diary/2026-05-18.md",
         "2026-05-18T10:00:00.000Z"
       )).toEqual({
-        sourceFile: "/Users/leonw/Diary/2026-05-18.md",
+        sourceFile: "~/Diary/2026-05-18.md",
         sourceMtime: "2026-05-18T10:00:00.000Z",
         summary: "A quiet but demanding workday. Good fit: calm recovery music.",
         generatedAt: "2026-05-19T00:00:00.000Z"
       });
       expect(store.getDiarySummary(
-        "/Users/leonw/Diary/2026-05-18.md",
+        "~/Diary/2026-05-18.md",
         "2026-05-18T11:00:00.000Z"
       )).toBeNull();
     });

@@ -7,7 +7,7 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import { getPockedioHome } from "./config/paths.js";
 import { loadConfig, saveConfig } from "./config/load.js";
 import { hasLocalLlmApiKey, saveLlmApiKey } from "./config/llmSecrets.js";
-import { runCalendarSetup, runDiarySetup, runNetEaseSetup, runSetup, runWeatherSetup } from "./config/setup.js";
+import { runCalendarSetup, runDiarySetup, runNetEaseSetup, runSchedulerSetup, runWeatherSetup } from "./config/setup.js";
 import { startDailyContextHeartbeat } from "./context/heartbeat.js";
 import { runRefreshContext } from "./context/refreshContext.js";
 import { pockedioVersion } from "./index.js";
@@ -118,10 +118,14 @@ program
       await runVoiceSetupLoop();
       return;
     }
+    if (section === "scheduler" || section === "schedule") {
+      await runSchedulerSetup();
+      return;
+    }
     if (section) {
       throw new Error(`Unknown setup section: ${section}`);
     }
-    await runSetup();
+    await runFullSetup();
   });
 
 program
@@ -212,7 +216,7 @@ async function runSetupConnectionsLoop(): Promise<void> {
 
 async function runSetupConnectionsAction(action: SetupConnectionsAction): Promise<SetupConnectionsOutcome> {
   if (action === "full_setup") {
-    await runSetup();
+    await runFullSetup();
     return "continue";
   }
   if (action === "llm_setup") {
@@ -231,10 +235,75 @@ async function runSetupConnectionsAction(action: SetupConnectionsAction): Promis
     const outcome = await runContextSetupLoop();
     return outcome === "quit" ? "quit" : "continue";
   }
+  if (action === "scheduler_setup") {
+    const outcome = await runSchedulerSetup();
+    return outcome === "quit" ? "quit" : "continue";
+  }
   if (action === "back") {
     return "back";
   }
   return "quit";
+}
+
+async function runFullSetup(): Promise<void> {
+  console.log("Pockedio full setup");
+  console.log("");
+  console.log("Every step is optional. Skipping a step keeps your current setting.");
+  console.log("");
+
+  if (await confirmFullSetupStep("Configure LLM", true)) {
+    await runLlmSetupLoop();
+  }
+  if (await confirmFullSetupStep("Configure voice", true)) {
+    await runVoiceSetupLoop();
+  }
+  if (await confirmFullSetupStep("Configure NetEase playback", true)) {
+    const outcome = await runNetEaseSetup();
+    if (outcome === "quit") {
+      return;
+    }
+  }
+  if (await confirmFullSetupStep("Import a NetEase playlist", false)) {
+    await importNetEasePlaylistFromSetup();
+  }
+  if (await confirmFullSetupStep("Configure context", true)) {
+    const outcome = await runContextSetupLoop();
+    if (outcome === "quit") {
+      return;
+    }
+  }
+  if (await confirmFullSetupStep("Configure Schedule DJ", false)) {
+    const outcome = await runSchedulerSetup();
+    if (outcome === "quit") {
+      return;
+    }
+  }
+
+  await pauseWithMessage("Full setup finished. You can reopen any section from Setup & Connections.");
+}
+
+async function confirmFullSetupStep(label: string, defaultYes: boolean): Promise<boolean> {
+  const suffix = defaultYes ? "[Y/n]" : "[y/N]";
+  const answer = (await askLine(`${label}? ${suffix} `)).trim().toLowerCase();
+  if (!answer) {
+    return defaultYes;
+  }
+  return answer === "y" || answer === "yes";
+}
+
+async function importNetEasePlaylistFromSetup(): Promise<void> {
+  const input = await askLineWithBack("NetEase playlist link or ID");
+  if (input === "back") {
+    return;
+  }
+  if (!input.trim()) {
+    await pauseWithMessage("Skipped playlist import.");
+    return;
+  }
+  const result = await withCliProgress("Importing NetEase playlist...", () =>
+    importTasteFromNetEasePlaylist(input.trim(), loadConfig())
+  );
+  await pauseWithMessage(renderTasteImportResultSurface(result));
 }
 
 type ContextSetupOutcome = "continue" | "back" | "quit";
@@ -487,15 +556,24 @@ async function editFishTtsPathsManually(): Promise<void> {
       return;
     }
     if (answer === 1) {
-      saveFishAudioConfig({ pythonPath: await askLine(`Python path (${config.fishAudio.pythonPath}): `) || config.fishAudio.pythonPath });
+      const pythonPath = await askLineWithBack("Python path", config.fishAudio.pythonPath);
+      if (pythonPath !== "back") {
+        saveFishAudioConfig({ pythonPath: pythonPath || config.fishAudio.pythonPath });
+      }
       continue;
     }
     if (answer === 2) {
-      saveFishAudioConfig({ scriptPath: await askLine(`Fish script path (${config.fishAudio.scriptPath}): `) || config.fishAudio.scriptPath });
+      const scriptPath = await askLineWithBack("Fish script path", config.fishAudio.scriptPath);
+      if (scriptPath !== "back") {
+        saveFishAudioConfig({ scriptPath: scriptPath || config.fishAudio.scriptPath });
+      }
       continue;
     }
     if (answer === 3) {
-      saveFishAudioConfig({ modelDir: await askLine(`Model directory (${config.fishAudio.modelDir}): `) || config.fishAudio.modelDir });
+      const modelDir = await askLineWithBack("Model directory", config.fishAudio.modelDir);
+      if (modelDir !== "back") {
+        saveFishAudioConfig({ modelDir: modelDir || config.fishAudio.modelDir });
+      }
       continue;
     }
     if (answer === 4) {
@@ -785,7 +863,10 @@ async function runTasteMemoryLoop(): Promise<void> {
 
 async function runTasteMemoryAction(action: TasteMemoryAction): Promise<TasteMemoryOutcome> {
   if (action === "import") {
-    const input = await askLine("NetEase playlist link or ID: ");
+    const input = await askLineWithBack("NetEase playlist link or ID");
+    if (input === "back") {
+      return "continue";
+    }
     if (input.trim()) {
       const result = await withCliProgress("Importing NetEase playlist...", () => importTasteFromNetEasePlaylist(input.trim(), loadConfig()));
       await pauseWithMessage(renderTasteImportResultSurface(result));
@@ -899,14 +980,22 @@ async function applyLlmPresetWithConfirmation(
   llm: LlmPresetConfig
 ): Promise<LlmSetupOutcome> {
   console.log(formatLlmPresetPreview(label, llm));
-  const answer = (await askLine("Apply this preset? [y/N] ")).trim().toLowerCase();
-  if (answer !== "y" && answer !== "yes") {
+  const answer = await askLineWithBack("Apply this preset? [y/N]");
+  if (answer === "back") {
+    return "back";
+  }
+  const normalizedAnswer = answer.trim().toLowerCase();
+  if (normalizedAnswer !== "y" && normalizedAnswer !== "yes") {
     return "continue";
   }
   saveLlmConfig(llm);
   if (!process.env[llm.apiKeyEnv]) {
-    const answer = (await askLine(`Paste ${llm.apiKeyEnv} now? [y/N] `)).trim().toLowerCase();
-    if (answer === "y" || answer === "yes") {
+    const pasteAnswer = await askLineWithBack(`Paste ${llm.apiKeyEnv} now? [y/N]`);
+    if (pasteAnswer === "back") {
+      return "back";
+    }
+    const normalizedPasteAnswer = pasteAnswer.trim().toLowerCase();
+    if (normalizedPasteAnswer === "y" || normalizedPasteAnswer === "yes") {
       await pasteLlmApiKey(llm.apiKeyEnv);
       return "continue";
     }
@@ -1001,7 +1090,11 @@ function printSavedLlm(label: string): void {
 
 async function changeLlmProviderModel(providerId: LlmProviderId): Promise<void> {
   const preset = getLlmPreset(providerId);
-  const model = (await askLine(`Model (${preset.model}): `)).trim() || preset.model;
+  const modelInput = await askLineWithBack("Model", preset.model);
+  if (modelInput === "back") {
+    return;
+  }
+  const model = modelInput.trim() || preset.model;
   saveLlmConfig({ ...preset, model });
   await pauseWithMessage(`Saved ${getLlmProviderLabel(providerId)} model: ${model}`);
 }
@@ -1009,7 +1102,11 @@ async function changeLlmProviderModel(providerId: LlmProviderId): Promise<void> 
 async function changeLlmProviderBaseUrl(providerId: LlmProviderId): Promise<void> {
   const preset = getLlmPreset(providerId);
   const currentBaseUrl = preset.baseUrl ?? "OpenAI default";
-  const baseUrlInput = (await askLine(`Base URL (${currentBaseUrl}): `)).trim();
+  const rawBaseUrlInput = await askLineWithBack("Base URL", currentBaseUrl);
+  if (rawBaseUrlInput === "back") {
+    return;
+  }
+  const baseUrlInput = rawBaseUrlInput.trim();
   saveLlmConfig({
     ...preset,
     baseUrl: baseUrlInput || preset.baseUrl
@@ -1019,7 +1116,11 @@ async function changeLlmProviderBaseUrl(providerId: LlmProviderId): Promise<void
 
 async function changeLlmProviderApiKeyEnv(providerId: LlmProviderId): Promise<void> {
   const preset = getLlmPreset(providerId);
-  const apiKeyEnv = (await askLine(`API key env (${preset.apiKeyEnv}): `)).trim() || preset.apiKeyEnv;
+  const apiKeyEnvInput = await askLineWithBack("API key env", preset.apiKeyEnv);
+  if (apiKeyEnvInput === "back") {
+    return;
+  }
+  const apiKeyEnv = apiKeyEnvInput.trim() || preset.apiKeyEnv;
   saveLlmConfig({ ...preset, apiKeyEnv });
   await pauseWithMessage(`Saved ${getLlmProviderLabel(providerId)} API key env: ${apiKeyEnv}`);
 }
@@ -1100,6 +1201,61 @@ async function askLine(message: string): Promise<string> {
   } finally {
     rl.close();
   }
+}
+
+async function askLineWithBack(message: string, defaultValue?: string): Promise<string | "back"> {
+  const promptLabel = `${message}${defaultValue ? ` (${defaultValue})` : ""} [Esc to back]: `;
+  if (!defaultInput.isTTY) {
+    const answer = await askLine(promptLabel);
+    return isBackInput(answer) ? "back" : answer.trim() || defaultValue || "";
+  }
+
+  return new Promise((resolve) => {
+    let value = "";
+    const previousRawMode = defaultInput.isRaw;
+    const render = () => {
+      defaultOutput.write(`\r\x1B[2K${promptLabel}${value}`);
+    };
+    const cleanup = (result: string | "back") => {
+      defaultInput.off("data", onData);
+      defaultInput.setRawMode(previousRawMode);
+      defaultInput.pause();
+      defaultOutput.write("\n");
+      resolve(result);
+    };
+    const submit = () => {
+      const result = value.trim() || defaultValue || "";
+      cleanup(isBackInput(result) ? "back" : result);
+    };
+    const onData = (chunk: Buffer) => {
+      for (const char of chunk.toString("utf8")) {
+        if (char === "\u001b" || char === "\u0003") {
+          cleanup("back");
+          return;
+        }
+        if (char === "\r" || char === "\n") {
+          submit();
+          return;
+        }
+        if (char === "\u007f" || char === "\b") {
+          value = value.slice(0, -1);
+          render();
+          continue;
+        }
+        value += char;
+        render();
+      }
+    };
+    defaultInput.resume();
+    defaultInput.setRawMode(true);
+    defaultInput.on("data", onData);
+    render();
+  });
+}
+
+function isBackInput(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "b" || normalized === "back";
 }
 
 async function withCliProgress<T>(message: string, action: () => Promise<T>): Promise<T> {
@@ -1184,7 +1340,10 @@ function promptFishNumberedSurface(max: number, renderSurface: (selected: number
 
 async function pasteLlmApiKey(apiKeyEnv = loadConfig().llm.apiKeyEnv): Promise<void> {
   const config = loadConfig();
-  const apiKey = (await askHiddenLine(`Paste API key for ${apiKeyEnv}: `)).trim();
+  const apiKey = (await askHiddenLine(`Paste API key for ${apiKeyEnv} [Esc to back]: `)).trim();
+  if (isBackInput(apiKey)) {
+    return;
+  }
   if (!apiKey) {
     await pauseWithMessage("No API key saved.");
     return;
@@ -1213,7 +1372,12 @@ async function askHiddenLine(message: string): Promise<string> {
     const onData = (chunk: Buffer) => {
       for (const char of chunk.toString("utf8")) {
         if (char === "\u0003") {
-          value = "";
+          value = "back";
+          finish();
+          return;
+        }
+        if (char === "\u001b") {
+          value = "back";
           finish();
           return;
         }

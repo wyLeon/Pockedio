@@ -8,13 +8,23 @@ This checklist maps the approved v1 design criteria to implementation and verifi
 - [x] `npm test`
 - [x] `npm run build`
 
+Latest automated pass on 2026-05-22:
+
+- `npm test`: 302 tests passed.
+- `npm run build`: passed.
+
 ## Manual Setup
 
 - [ ] Start NetEase API with `spikes/scripts/run_netease_api.sh`.
 - [ ] Run `npm run dev -- setup`.
-- [ ] Run `npm run dev -- import-taste spikes/fixtures/taste-normalized.csv`.
+- [ ] Confirm setup hub exposes LLM, Voice, NetEase, Context, and Scheduler.
+- [ ] Confirm selectable setup pages support `B Back`.
+- [ ] Confirm nested text/password prompts support `Esc to back`.
+- [ ] Confirm built-in macOS voice setup works without Fish TTS.
+- [ ] Confirm Fish TTS remains optional.
+- [ ] Run `npm run dev -- import-taste <netease-playlist-link-or-id>`.
 - [ ] Run `npm run dev -- status`.
-- [ ] Confirm status reports NetEase, FishAudio, database, taste, personas, Calendar, weather, and latest session fields.
+- [ ] Confirm status reports NetEase, voice/TTS, database, taste, personas, Calendar, weather, scheduler, and latest session fields.
 
 ## Conversational Session
 
@@ -81,16 +91,23 @@ This checklist maps the approved v1 design criteria to implementation and verifi
 
 ## Command Surface
 
-- [ ] Public commands remain limited to `pockedio`, `pockedio setup`, `pockedio import-taste <file>`, `pockedio serve`, and `pockedio status`.
+- [ ] Public commands remain centered on `pockedio`, `pockedio setup`, `pockedio import-taste <playlist-link-or-id>`, `pockedio refresh-context`, `pockedio serve`, and `pockedio status`.
+- [ ] Setup section commands remain repair paths, not separate product modes: `setup llm`, `setup voice`, `setup netease`, `setup context`, and `setup scheduler`.
 - [ ] Playback, mood, and feedback are natural-language intents inside the session, not extra public commands.
 
 ## Current Evidence
 
-- Automated verification passed on 2026-05-21:
-  - `npm test`: 203 tests passed.
-  - `npm run typecheck`: passed.
+- Automated verification passed on 2026-05-22:
+  - `npm test`: 302 tests passed.
   - `npm run build`: passed.
+  - `npm run typecheck`: passed.
 - Automated coverage includes config, database, personas, taste import, provider adapters, context adapters, voice rules, intent parsing, station generation, session runner, scheduler, and status command tests.
+- Open-source release docs were added on 2026-05-22:
+  - Source-install README.
+  - MIT license.
+  - Contribution and security guidance.
+  - `.env.example` with placeholders only.
+  - GitHub Actions CI for typecheck, tests, and build.
 - Manual PTY smoke checks passed on 2026-05-21:
   - `npm run dev` opens the interactive session and shows startup guidance.
   - 3.14 fallback conversation:
@@ -129,11 +146,11 @@ This checklist maps the approved v1 design criteria to implementation and verifi
   - Public CLI command `play 江南 by 林俊杰` started the full `04:27` track, then `stop` marked the interactive playback row as `skipped`.
   - `exit` closed the interactive session cleanly and no playback/audio child processes remained.
 - FishAudio DJ audio QA on 2026-05-21:
-  - Confirmed configured DJ reference: Mina, English, standard program, reference WAV `/Users/leonw/.pockedio/audio/previews/mina.wav`, `6.22s`, mono 44.1kHz Int16.
+  - Confirmed configured DJ reference: Mina, English, standard program, reference WAV `~/.pockedio/audio/previews/mina.wav`, `6.22s`, mono 44.1kHz Int16.
   - Real CLI DJ attempt reached pending `dj`, but live station generation stayed on `Building a station...` for more than a minute and required Ctrl+C cancellation; this should be tracked as a station-generation/LLM timeout issue, separate from FishAudio.
-  - Controlled FishAudio/`afplay` harness played a real opening WAV: `/Users/leonw/.pockedio/audio/dj/1779343963684-d53e8bf0-3f24-4653-9ccf-59177382b771.wav`, `12.03s`, recorded `played`.
-  - Controlled harness waited for and played a real mid-program transition WAV: `/Users/leonw/.pockedio/audio/dj/1779344050688-293eb4b2-a9b1-4f6b-a9fd-ee49e11bef5b.wav`, `10.36s`, recorded `played`.
-  - Closing-focused harness played a real opening WAV and generated/played a real closing WAV: `/Users/leonw/.pockedio/audio/dj/1779344246545-6558f28b-23f6-4cac-a2b9-da4b9670505e.wav`, `7.76s`, recorded `played`.
+  - Controlled FishAudio/`afplay` harness played a real opening WAV: `~/.pockedio/audio/dj/1779343963684-d53e8bf0-3f24-4653-9ccf-59177382b771.wav`, `12.03s`, recorded `played`.
+  - Controlled harness waited for and played a real mid-program transition WAV: `~/.pockedio/audio/dj/1779344050688-293eb4b2-a9b1-4f6b-a9fd-ee49e11bef5b.wav`, `10.36s`, recorded `played`.
+  - Closing-focused harness played a real opening WAV and generated/played a real closing WAV: `~/.pockedio/audio/dj/1779344246545-6558f28b-23f6-4cac-a2b9-da4b9670505e.wav`, `7.76s`, recorded `played`.
   - Final closing surface appeared before the station-complete prompt: `That station’s done. Press Enter to continue this vibe, or tell me where to take it next.`
   - No `afplay`, FishAudio, MLX, or CLI child processes remained after the harnesses.
 - Scheduled DJ consent behavior added on 2026-05-21:

@@ -1,73 +1,73 @@
-/Users/leonw/.config/fish
-/Users/leonw/.config/fish/conf.d/uv.env.fish
-/Users/leonw/repos/PocketStart/venv/bin/edge-tts
-/Users/leonw/repos/PocketStart/venv/bin/activate.fish
-/Users/leonw/repos/Pockedio/spikes/fish-tts-entrypoints.txt
-/Users/leonw/repos/Pockedio/spikes/fish-tts-candidates.txt
-/Users/leonw/repos/PocketSay/.venv/bin/edge-tts
-/Users/leonw/repos/PocketSay/.venv/bin/activate.fish
-/Users/leonw/repos/PocketSay/tts_server.py
-/Users/leonw/.gemini/antigravity-browser-profile/WasmTtsEngine
-/Users/leonw/.gemini/antigravity-browser-profile/WasmTtsEngine/20260407.1/wasm_tts_manifest_v3.json
-/Users/leonw/.gemini/antigravity-browser-profile/WasmTtsEngine/20260305.1/wasm_tts_manifest_v3.json
-/Users/leonw/.local/bin/env.fish
-/Users/leonw/Library/Application Support/Google/Chrome/WasmTtsEngine
-/Users/leonw/Library/Application Scripts/com.apple.ax.KonaTTSSupport.KonaSynthesizer
-/Users/leonw/Library/Application Scripts/com.apple.siri.SiriTTSService.synthesizer
-/Users/leonw/Library/Application Scripts/com.apple.siri.SiriTTSService.STSDiagnostic
-/Users/leonw/Library/Application Scripts/group.com.apple.SiriTTS
-/Users/leonw/Library/Application Scripts/com.apple.ax.MauiTTSSupport.MauiAUSP
-/Users/leonw/Library/Python/3.9/bin/edge-tts
-/Users/leonw/Library/Logs/SiriTTSService
-/Users/leonw/Library/Logs/CoreSimulator/8B8B168B-E222-40DC-9EAE-720007AD1ECC/SiriTTSService
-/Users/leonw/Library/Group Containers/group.com.apple.SiriTTS
-/Users/leonw/Library/Containers/com.apple.ax.KonaTTSSupport.KonaSynthesizer
-/Users/leonw/Library/Containers/com.apple.siri.SiriTTSService.synthesizer
-/Users/leonw/Library/Containers/com.apple.siri.SiriTTSService.STSDiagnostic
-/Users/leonw/Library/Containers/com.apple.ax.MauiTTSSupport.MauiAUSP
-/Users/leonw/Library/Caches/com.apple.sirittsd
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/runtime-config-collectors-tts-C2s4ytdQ.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts.runtime-BMIhYQ_V.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-config-DC5syTRv.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-1SCfMOSi.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-70Dz1-CU.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-VTd__uez.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/channel-secret-tts-runtime-DMPxS1Lb.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts.runtime.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-Bxl4R3Ic.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/dispatch-acp-tts.runtime.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-9Gz_1KIi.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/dispatch-acp-tts.runtime-BVI8XetE.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-sl32_oWm.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-auto-mode-TQ1RcRY-.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts.runtime-g1C-VIwY.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-BV-5XkAc.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-DPrY9Wxk.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/node_modules/node-edge-tts
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/runtime-config-collectors-tts-C2s4ytdQ.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts.runtime-BMIhYQ_V.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-config-DC5syTRv.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-1SCfMOSi.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-70Dz1-CU.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-VTd__uez.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/channel-secret-tts-runtime-DMPxS1Lb.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts.runtime.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-Bxl4R3Ic.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/dispatch-acp-tts.runtime.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-9Gz_1KIi.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/dispatch-acp-tts.runtime-BVI8XetE.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-sl32_oWm.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-auto-mode-TQ1RcRY-.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts.runtime-g1C-VIwY.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-BV-5XkAc.js
-/Users/leonw/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-DPrY9Wxk.js
-/Users/leonw/.openclaw/skills/frontend-dev/references/minimax-tts-guide.md
-/Users/leonw/.openclaw/skills/frontend-dev/scripts/minimax_tts.py
-/Users/leonw/Movies/CapCut/User Data/Cache/ttsTemp
-/Users/leonw/Movies/CapCut/User Data/Cache/tts
-/Users/leonw/safe_venv/bin/activate.fish
-/Users/leonw/chrome-debug-profile/WasmTtsEngine
-/Users/leonw/chrome-debug-profile/WasmTtsEngine/20260415.1/wasm_tts_manifest_v3.json
-/Users/leonw/chrome-debug-profile/Default/IndexedDB/https_www.goofish.com_0.indexeddb.leveldb
-/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx
-/Users/leonw/.cache/huggingface/hub/.locks/models--appautomaton--fishaudio-s2-pro-8bit-mlx
+~/.config/fish
+~/.config/fish/conf.d/uv.env.fish
+~/repos/PocketStart/venv/bin/edge-tts
+~/repos/PocketStart/venv/bin/activate.fish
+~/repos/Pockedio/spikes/fish-tts-entrypoints.txt
+~/repos/Pockedio/spikes/fish-tts-candidates.txt
+~/repos/PocketSay/.venv/bin/edge-tts
+~/repos/PocketSay/.venv/bin/activate.fish
+~/repos/PocketSay/tts_server.py
+~/.gemini/antigravity-browser-profile/WasmTtsEngine
+~/.gemini/antigravity-browser-profile/WasmTtsEngine/20260407.1/wasm_tts_manifest_v3.json
+~/.gemini/antigravity-browser-profile/WasmTtsEngine/20260305.1/wasm_tts_manifest_v3.json
+~/.local/bin/env.fish
+~/Library/Application Support/Google/Chrome/WasmTtsEngine
+~/Library/Application Scripts/com.apple.ax.KonaTTSSupport.KonaSynthesizer
+~/Library/Application Scripts/com.apple.siri.SiriTTSService.synthesizer
+~/Library/Application Scripts/com.apple.siri.SiriTTSService.STSDiagnostic
+~/Library/Application Scripts/group.com.apple.SiriTTS
+~/Library/Application Scripts/com.apple.ax.MauiTTSSupport.MauiAUSP
+~/Library/Python/3.9/bin/edge-tts
+~/Library/Logs/SiriTTSService
+~/Library/Logs/CoreSimulator/8B8B168B-E222-40DC-9EAE-720007AD1ECC/SiriTTSService
+~/Library/Group Containers/group.com.apple.SiriTTS
+~/Library/Containers/com.apple.ax.KonaTTSSupport.KonaSynthesizer
+~/Library/Containers/com.apple.siri.SiriTTSService.synthesizer
+~/Library/Containers/com.apple.siri.SiriTTSService.STSDiagnostic
+~/Library/Containers/com.apple.ax.MauiTTSSupport.MauiAUSP
+~/Library/Caches/com.apple.sirittsd
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/runtime-config-collectors-tts-C2s4ytdQ.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts.runtime-BMIhYQ_V.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-config-DC5syTRv.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-1SCfMOSi.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-70Dz1-CU.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-VTd__uez.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/channel-secret-tts-runtime-DMPxS1Lb.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts.runtime.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-Bxl4R3Ic.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/dispatch-acp-tts.runtime.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-9Gz_1KIi.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/dispatch-acp-tts.runtime-BVI8XetE.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-sl32_oWm.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-auto-mode-TQ1RcRY-.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts.runtime-g1C-VIwY.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-BV-5XkAc.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/dist/tts-DPrY9Wxk.js
+~/.openclaw/plugin-runtime-deps/openclaw-2026.4.24-177583c52659/node_modules/node-edge-tts
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/runtime-config-collectors-tts-C2s4ytdQ.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts.runtime-BMIhYQ_V.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-config-DC5syTRv.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-1SCfMOSi.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-70Dz1-CU.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-VTd__uez.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/channel-secret-tts-runtime-DMPxS1Lb.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts.runtime.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-Bxl4R3Ic.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/dispatch-acp-tts.runtime.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-9Gz_1KIi.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/dispatch-acp-tts.runtime-BVI8XetE.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-sl32_oWm.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-auto-mode-TQ1RcRY-.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts.runtime-g1C-VIwY.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-BV-5XkAc.js
+~/.openclaw/plugin-runtime-deps/openclaw-unknown-7c9ca05613bb/dist/tts-DPrY9Wxk.js
+~/.openclaw/skills/frontend-dev/references/minimax-tts-guide.md
+~/.openclaw/skills/frontend-dev/scripts/minimax_tts.py
+~/Movies/CapCut/User Data/Cache/ttsTemp
+~/Movies/CapCut/User Data/Cache/tts
+~/safe_venv/bin/activate.fish
+~/chrome-debug-profile/WasmTtsEngine
+~/chrome-debug-profile/WasmTtsEngine/20260415.1/wasm_tts_manifest_v3.json
+~/chrome-debug-profile/Default/IndexedDB/https_www.goofish.com_0.indexeddb.leveldb
+~/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx
+~/.cache/huggingface/hub/.locks/models--appautomaton--fishaudio-s2-pro-8bit-mlx

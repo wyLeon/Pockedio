@@ -34,7 +34,7 @@ Out of scope:
 ## Current Evidence
 
 - NetEase search and URL retrieval passed, but `npx NeteaseCloudMusicApi@latest` initially failed because `~/.npm` contains root-owned files. It worked with `npm_config_cache=/tmp/pockedio-npm-cache`.
-- FishAudio S2 Pro MLX model exists at `/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`.
+- FishAudio S2 Pro MLX model exists at `~/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`.
 - The user confirmed the model was downloaded by Claude Code, but no `fish-server.py` was written and prior TTS usage went through edge-tts.
 - The AppAutomaton model card says the MLX model is intended for `mlx-speech` and shows `scripts/generate/fish_s2_pro.py` with `--model-dir` and `--output`.
 - Apple's Calendar scripting guide confirms Calendar supports AppleScript/JXA scripting.
@@ -266,7 +266,7 @@ Append:
 FishAudio S2 Pro MLX runtime candidate:
 - Runtime: .cache/mlx-speech
 - Entrypoint: .cache/mlx-speech/scripts/generate/fish_s2_pro.py
-- Model: /Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e
+- Model: ~/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e
 - Output: spikes/fish-tts-sample.wav
 ```
 
@@ -278,7 +278,7 @@ If the probe and `afplay` succeeded, use:
 ## Fish TTS
 
 - Local command or Python entrypoint: `.cache/mlx-speech-venv/bin/python .cache/mlx-speech/scripts/generate/fish_s2_pro.py`
-- Model path/name: `/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`
+- Model path/name: `~/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`
 - Output format: wav
 - Generation latency: measured in `spikes/fish-tts-latency.txt`
 - Playback command: `afplay spikes/fish-tts-sample.wav`
@@ -291,7 +291,7 @@ If the probe failed, use:
 ## Fish TTS
 
 - Local command or Python entrypoint: attempted `.cache/mlx-speech-venv/bin/python .cache/mlx-speech/scripts/generate/fish_s2_pro.py`
-- Model path/name: `/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`
+- Model path/name: `~/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`
 - Output format: not validated
 - Generation latency: failed probe recorded in `spikes/fish-tts-latency.txt`
 - Playback command: not validated

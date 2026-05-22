@@ -19,7 +19,7 @@
 ## Fish TTS
 
 - Local command or Python entrypoint: `.cache/mlx-speech-venv/bin/python .cache/mlx-speech/scripts/generate/fish_s2_pro.py`
-- Model path/name: local candidate found at `/Users/leonw/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`
+- Model path/name: local candidate found at `~/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e`
 - Output format: wav, 44100 Hz mono PCM
 - Generation latency: 17.075 seconds for `Pockedio is on air.` on the first validated generation; measured in `spikes/fish-tts-latency.txt`
 - Playback command: `afplay spikes/fish-tts-sample.wav`
