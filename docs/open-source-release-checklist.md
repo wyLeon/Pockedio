@@ -20,8 +20,9 @@ Not in scope for the first public release:
 - [ ] `npm run typecheck` passes.
 - [ ] `npm test` passes.
 - [ ] `npm run build` passes.
-- [ ] `node dist/cli.js status` runs.
-- [ ] `node dist/cli.js setup` can configure LLM, voice, NetEase, context, and scheduler.
+- [ ] Fresh-clone manual smoke uses a disposable home, for example `POCKEDIO_HOME=/tmp/pockedio-clean-test`.
+- [ ] `POCKEDIO_HOME=/tmp/pockedio-clean-test node dist/cli.js status` runs and shows `Local     /tmp/pockedio-clean-test`.
+- [ ] `POCKEDIO_HOME=/tmp/pockedio-clean-test node dist/cli.js setup` can configure LLM, voice, NetEase, context, and scheduler.
 - [ ] Selectable setup screens support `B Back`.
 - [ ] Nested text/password setup prompts support `Esc to back`.
 - [ ] Built-in macOS voice path works without Fish TTS on macOS.
@@ -39,6 +40,7 @@ Not in scope for the first public release:
 - [ ] No local `~/.pockedio/` files are copied into the repo.
 - [ ] No personal absolute paths are required for setup.
 - [ ] README examples use placeholders only.
+- [ ] Clean-release test output does not list real favorites, diary context, imported taste, or prior sessions from the user's normal `~/.pockedio`.
 
 Suggested local scan:
 

@@ -230,6 +230,8 @@ npm run build
 Fresh local smoke test:
 
 ```bash
+export POCKEDIO_HOME=/tmp/pockedio-clean-test
+rm -rf "$POCKEDIO_HOME"
 npm ci
 npm run build
 node dist/cli.js status
@@ -237,12 +239,14 @@ node dist/cli.js setup
 node dist/cli.js
 ```
 
+Keep `POCKEDIO_HOME` set for the whole smoke test. Otherwise Pockedio will use your real `~/.pockedio` memory, favorites, taste, secrets, and config, which is useful for personal use but not a clean release test.
+
 ## Release Readiness
 
 Before a public tag:
 
 - Run automated checks.
-- Run a fresh-clone setup.
+- Run a fresh-clone setup with a disposable `POCKEDIO_HOME`.
 - Confirm setup back paths work, especially `Esc` from nested prompts.
 - Confirm no real API keys, cookies, local config, or `.env` files are tracked.
 - Confirm README setup matches the current CLI behavior.
