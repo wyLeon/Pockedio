@@ -2672,6 +2672,56 @@ describe("runSessionTurn", () => {
     expect(playbackState.currentTrackId).toBe(currentTrackId);
   });
 
+  it("keeps pronoun artist biography follow-ups grounded without LLM instead of storing personal context", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    const currentIndex = playbackState.currentIndex;
+    const currentTrackId = playbackState.currentTrackId;
+    const result = await runSessionTurn({
+      input: "When did she born?",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.station).toBeUndefined();
+    expect(result.response).toContain("Test Artist");
+    expect(result.response).toContain("verified");
+    expect(result.response).not.toContain("personal context");
+    expect(started).toHaveLength(1);
+    expect(playbackState.currentIndex).toBe(currentIndex);
+    expect(playbackState.currentTrackId).toBe(currentTrackId);
+  });
+
   it("keeps English LLM music background answers that preserve CJK artist names", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};

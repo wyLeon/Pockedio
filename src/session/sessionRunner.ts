@@ -365,9 +365,12 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       : input.playbackState?.pendingStationRequest && isPendingStationDecline(userText)
         ? { type: "pending_station_decline" as const, confidence: "high" as const }
         : await resolveIntent(userText, llm, writeStatus, signal);
-    if (((input.playbackState?.currentTrackId && isCurrentTrackQuestion(userText)) || isMusicKnowledgeQuestion(userText))
+    const groundedPlaybackKnowledgeQuestion = (input.playbackState?.currentTrackId
+      && (isCurrentTrackQuestion(userText) || isCurrentArtistBiographicalFollowupQuestion(userText)))
+      || isMusicKnowledgeQuestion(userText);
+    if (groundedPlaybackKnowledgeQuestion
       && !hasExplicitPlaybackCommand(userText)
-      && !isProtectedOperationalIntent(intent.type)) {
+      && (!isProtectedOperationalIntent(intent.type) || isCurrentArtistBiographicalFollowupQuestion(userText))) {
       intent = { type: "conversation", confidence: "high" };
     }
     if (input.playbackState?.currentTrackId && isPositiveCurrentArtistPreference(userText)) {
@@ -1784,6 +1787,13 @@ function isCurrentTrackQuestion(text: string): boolean {
     || /\b(tell me|what do you know)\b.*\b(this song|this track|current song|current track)\b/.test(normalized);
 }
 
+function isCurrentArtistBiographicalFollowupQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  const hasCurrentArtistReference = /\b(she|he|they|her|him|them|his|their|this artist|that artist|the artist|this singer|that singer|the singer|this vocalist|that vocalist|the vocalist)\b/.test(normalized);
+  const hasBiographicalCue = /\b(when|where|how old|born|birthday|birthplace|from|age|alive|dead|died|passed away|band|group)\b/.test(normalized);
+  return hasCurrentArtistReference && hasBiographicalCue;
+}
+
 function isMusicKnowledgeQuestion(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return /^(tell me about|can you tell me about|what do you know about|give me background on|what'?s the story behind|who is|who was)\b/.test(normalized)
@@ -2093,7 +2103,7 @@ function formatConversationPrompt(
     "The user may be sharing a personal memory, listening insight, mood, taste signal, or a question about the current music.",
     "Reply like a radio DJ who is listening carefully: acknowledge the user, connect it to music when useful, and stay brief.",
     "Normal conversation is the default. Do not turn a question into playback unless the user explicitly asks you to play, start, queue, skip, pause, resume, or stop.",
-    "For current-track questions, resolve references like 'the singer', 'this artist', 'this song', and 'this track' from the Current playback facts below.",
+    "For current-track questions, resolve references like 'the singer', 'this artist', 'she', 'he', 'they', 'this song', and 'this track' from the Current playback facts below.",
     "For artist or song background questions, answer from the current metadata and your general music knowledge. If you are not sure, say what is known from the listed metadata instead of inventing details.",
     config ? formatLanguageInstruction(config) : "Reply in English by default, even if the user writes in another language. Preserve song titles and artist names as written.",
     "Do not act as a therapist, diagnose the user, or give life advice.",
@@ -2180,8 +2190,8 @@ function formatConversationFallback(userText: string, playbackState: Interactive
     if (isCurrentTrackQuestion(userText)) {
       return `${current.artist} is the listed artist for ${current.title}. I do not have verified credits beyond the current playback metadata right now.`;
     }
-    if (isMusicKnowledgeQuestion(userText)) {
-      return `I can ground this in what is playing: ${current.title} is listed under ${current.artist}. I do not have verified background details beyond the current playback metadata right now.`;
+    if (isMusicKnowledgeQuestion(userText) || isCurrentArtistBiographicalFollowupQuestion(userText)) {
+      return `I can ground this in the current metadata: the listed artist for ${current.title} is ${current.artist}. I do not have verified biographical details beyond the current playback metadata right now.`;
     }
     return `I hear that. I will keep ${current.title} - ${current.artist} in that personal context and let the set stay music-first.`;
   }
@@ -2191,7 +2201,7 @@ function formatConversationFallback(userText: string, playbackState: Interactive
   if (isAmbiguousMusicAdjustment(userText)) {
     return "Do you want me to shape a station in that direction, or just talk through the mood first?";
   }
-  if (isMusicKnowledgeQuestion(userText) || isCurrentTrackQuestion(userText)) {
+  if (isMusicKnowledgeQuestion(userText) || isCurrentTrackQuestion(userText) || isCurrentArtistBiographicalFollowupQuestion(userText)) {
     return "I do not have a current track to ground that in right now. Tell me a song or artist, or start a station and I can talk about what is playing.";
   }
   if (isPersonalMoodStatement(userText)) {
