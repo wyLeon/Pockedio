@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import readline from "node:readline/promises";
+import { emitKeypressEvents, type Key } from "node:readline";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import { getPockedioHome } from "./config/paths.js";
 import { loadConfig, saveConfig } from "./config/load.js";
@@ -305,8 +306,7 @@ async function saveDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
 async function configureFishTts(): Promise<void> {
   while (true) {
     const config = loadConfig();
-    console.log(renderFishTtsSetupSurface(config));
-    const answer = await askNumberChoice(5);
+    const answer = await promptFishNumberedSurface(5, (selected) => renderFishTtsSetupSurface(config, selected));
     if (answer === 1) {
       await installFishTtsLocally();
       continue;
@@ -380,21 +380,7 @@ async function installFishTtsLocally(): Promise<void> {
 async function useExistingFishTtsInstall(): Promise<void> {
   while (true) {
     const detection = detectFishTtsInstall(loadConfig(), getPockedioHome());
-    console.log([
-      "Use existing Fish TTS install",
-      "",
-      "Searching common locations...",
-      "",
-      "Found:",
-      formatDetectedFishSetup(detection),
-      "",
-      "Actions",
-      "1. Use detected setup",
-      "2. Edit paths",
-      "3. Search again",
-      "4. Back"
-    ].join("\n"));
-    const answer = await askNumberChoice(4);
+    const answer = await promptFishNumberedSurface(4, (selected) => renderUseExistingFishTtsSurface(detection, selected));
     if (answer === 1) {
       if (detection.missing.length > 0) {
         await pauseWithMessage([
@@ -425,8 +411,7 @@ async function useExistingFishTtsInstall(): Promise<void> {
 async function editFishTtsPathsManually(): Promise<void> {
   while (true) {
     const config = loadConfig();
-    console.log(renderFishTtsManualPathSurface(config));
-    const answer = await askNumberChoice(7);
+    const answer = await promptFishNumberedSurface(7, (selected) => renderFishTtsManualPathSurface(config, selected));
     if (answer === 1) {
       saveFishAudioConfig({ pythonPath: await askLine(`Python path (${config.fishAudio.pythonPath}): `) || config.fishAudio.pythonPath });
       continue;
@@ -472,15 +457,7 @@ async function testFishTtsSetup(): Promise<"choose" | "return" | "keep"> {
     return "return";
   }
   await previewGeneratedFishAudio(result.audioPath);
-  console.log([
-    "Fish TTS test passed.",
-    "",
-    "What next?",
-    "> 1. Choose Mina or Nova",
-    "  2. Return to Voice Setup",
-    "  3. Keep current voice"
-  ].join("\n"));
-  const answer = await askNumberChoice(3);
+  const answer = await promptFishNumberedSurface(3, (selected) => renderFishTtsSuccessSurface(selected));
   if (answer === 1) {
     return "choose";
   }
@@ -533,8 +510,15 @@ function parseDjVoiceChoice(choice: DjVoiceChoiceId):
   return { provider, voice: voice as ReturnType<typeof loadConfig>["tts"]["macosVoice"] };
 }
 
-function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>): string {
+function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, selected = 1): string {
   const detection = detectFishTtsInstall(config, getPockedioHome());
+  const actions = [
+    "Install Fish TTS locally",
+    "Use existing Fish TTS install",
+    "Edit paths manually",
+    "Test Fish TTS",
+    "Back"
+  ];
   return [
     "Configure Fish TTS",
     "",
@@ -547,31 +531,68 @@ function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>): strin
     `  References  ${fs.existsSync(detection.minaReferencePath) ? "Mina ready" : "Mina missing"}, ${fs.existsSync(detection.novaReferencePath) ? "Nova ready" : "Nova missing"}`,
     "",
     "Actions",
-    "1. Install Fish TTS locally",
-    "2. Use existing Fish TTS install",
-    "3. Edit paths manually",
-    "4. Test Fish TTS",
-    "5. Back"
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
+    "",
+    "↑↓ Select  |  Enter Open  |  1-5 Open"
   ].join("\n");
 }
 
-function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>): string {
+function renderUseExistingFishTtsSurface(detection: ReturnType<typeof detectFishTtsInstall>, selected = 1): string {
+  const actions = [
+    "Use detected setup",
+    "Edit paths",
+    "Search again",
+    "Back"
+  ];
+  return [
+    "Use existing Fish TTS install",
+    "",
+    "Searching common locations...",
+    "",
+    "Found:",
+    formatDetectedFishSetup(detection),
+    "",
+    "Actions",
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
+    "",
+    "↑↓ Select  |  Enter Open  |  1-4 Open"
+  ].join("\n");
+}
+
+function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>, selected = 1): string {
   const detection = detectFishTtsInstall(config, getPockedioHome());
+  const actions = [
+    `Python path       ${config.fishAudio.pythonPath}`,
+    `Fish script path  ${config.fishAudio.scriptPath}`,
+    `Model directory   ${config.fishAudio.modelDir}`,
+    `Mina reference    ${fs.existsSync(detection.minaReferencePath) ? "Available" : "Missing"}`,
+    `Nova reference    ${fs.existsSync(detection.novaReferencePath) ? "Available" : "Missing"}`,
+    "Test Fish TTS",
+    "Back"
+  ];
   return [
     "Edit Fish TTS paths manually",
     "",
-    "Runtime",
-    `1. Python path       ${config.fishAudio.pythonPath}`,
-    `2. Fish script path  ${config.fishAudio.scriptPath}`,
-    `3. Model directory   ${config.fishAudio.modelDir}`,
-    "",
-    "References",
-    `4. Mina reference    ${fs.existsSync(detection.minaReferencePath) ? "Available" : "Missing"}`,
-    `5. Nova reference    ${fs.existsSync(detection.novaReferencePath) ? "Available" : "Missing"}`,
-    "",
     "Actions",
-    "6. Test Fish TTS",
-    "7. Back"
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
+    "",
+    "↑↓ Select  |  Enter Open  |  1-7 Open"
+  ].join("\n");
+}
+
+function renderFishTtsSuccessSurface(selected = 1): string {
+  const actions = [
+    "Choose Mina or Nova",
+    "Return to Voice Setup",
+    "Keep current voice"
+  ];
+  return [
+    "Fish TTS test passed.",
+    "",
+    "What next?",
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
+    "",
+    "↑↓ Select  |  Enter Open  |  1-3 Open"
   ].join("\n");
 }
 
@@ -617,6 +638,10 @@ function saveDetectedFishSetup(detection: FishSetupDetection): void {
 
 function formatCommand(command: string, args: string[]): string {
   return [command, ...args.map((arg) => /\s/.test(arg) ? JSON.stringify(arg) : arg)].join(" ");
+}
+
+function formatPromptAction(selected: boolean, index: number, label: string): string {
+  return `${selected ? ">" : " "} ${index}. ${label}`;
 }
 
 function saveFishReference(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): void {
@@ -1019,15 +1044,54 @@ async function askLine(message: string): Promise<string> {
   }
 }
 
-async function askNumberChoice(max: number): Promise<number> {
-  while (true) {
-    const answer = (await askLine(`Choose 1-${max}: `)).trim();
-    const choice = Number(answer);
-    if (Number.isInteger(choice) && choice >= 1 && choice <= max) {
-      return choice;
+function promptFishNumberedSurface(max: number, renderSurface: (selected: number) => string): Promise<number> {
+  return new Promise((resolve) => {
+    let selected = 1;
+    const previousRawMode = defaultInput.isRaw;
+
+    const render = () => {
+      defaultOutput.write("\x1B[?25l");
+      defaultOutput.write("\x1B[H\x1B[2J");
+      defaultOutput.write(renderSurface(selected));
+    };
+    const cleanup = (choice: number) => {
+      defaultInput.off("keypress", onKeypress);
+      if (defaultInput.isTTY) {
+        defaultInput.setRawMode(previousRawMode);
+      }
+      defaultInput.pause();
+      defaultOutput.write("\x1B[?25h\n");
+      resolve(choice);
+    };
+    const onKeypress = (_value: string, key: Key) => {
+      if (key.name === "up") {
+        selected = selected === 1 ? max : selected - 1;
+        render();
+        return;
+      }
+      if (key.name === "down") {
+        selected = selected === max ? 1 : selected + 1;
+        render();
+        return;
+      }
+      if (key.name === "return") {
+        cleanup(selected);
+        return;
+      }
+      const numericIndex = Number(key.name);
+      if (Number.isInteger(numericIndex) && numericIndex >= 1 && numericIndex <= max) {
+        cleanup(numericIndex);
+      }
+    };
+
+    emitKeypressEvents(defaultInput);
+    defaultInput.resume();
+    if (defaultInput.isTTY) {
+      defaultInput.setRawMode(true);
     }
-    console.log(`Type a number from 1 to ${max}.`);
-  }
+    defaultInput.on("keypress", onKeypress);
+    render();
+  });
 }
 
 async function pasteLlmApiKey(apiKeyEnv = loadConfig().llm.apiKeyEnv): Promise<void> {
