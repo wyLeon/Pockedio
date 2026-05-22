@@ -16,6 +16,8 @@ The hub should answer three questions quickly:
 - Am I ready? Show setup and context readiness.
 - What can I do next? Enter the DJ session, fix setup, inspect taste/memory, or check status.
 
+This first-level surface is also the product's setup map. Voice selection and LLM configuration belong here because they determine whether the core experience can work: the user needs an LLM to converse and generate stations, and they need a voice provider to hear DJ programs.
+
 ## Non-Goals
 
 This design does not add:
@@ -25,6 +27,7 @@ This design does not add:
 - a replacement for existing scriptable commands such as `pockedio setup`, `pockedio status`, `pockedio serve`, or `pockedio import-taste`
 - a Go/Bubble Tea rewrite by default
 - a landing-page style screen
+- a Fish-first voice setup requirement
 
 ## Product Principle
 
@@ -40,17 +43,18 @@ Pockedio
 Personal AI DJ for context-aware listening
 
 > Enter DJ Session        Talk, ask, play, reshape, queue, DJ mode
-  Setup & Connections     NetEase, voice, calendar, weather, diary
+  Setup & Connections     Music, LLM, voice, calendar, weather, diary
   Taste & Memory          Import taste, review personalization inputs
   Status                  Playback, scheduler, health, version
 
 Readiness
-  NetEase       Connected
-  Voice         Configured
-  Taste         Imported
-  Calendar      Enabled
+  Music        NetEase connected
+  LLM          Configured
+  Voice        Vale, built-in macOS
+  Taste        Imported
+  Calendar     Enabled
 
-↑↓ Select  |  Enter Open  |  S Setup  |  T Taste  |  V Version  |  Q Quit
+↑↓ Select  |  Enter Open  |  S Setup  |  L LLM  |  V Voice  |  Q Quit
 ```
 
 ## Entry Point 1: Enter DJ Session
@@ -96,14 +100,17 @@ Show whether the product is operational and route users to existing setup flows.
 ```text
 Setup & Connections
 
-NetEase         Connected
-Voice           Configured
+Music           NetEase connected
+LLM             OpenAI key missing
+Voice           Vale, built-in macOS
 Calendar        Enabled
 Weather         Shanghai
 Diary           Not enabled
 
 Actions:
 > Run full setup
+  Configure LLM
+  Configure Voice
   Configure NetEase
   Configure Calendar
   Back
@@ -112,9 +119,62 @@ Actions:
 ### Behavior
 
 - `Run full setup` maps to existing setup flow.
+- `Configure LLM` maps to a focused LLM setup flow.
+- `Configure Voice` maps to a focused voice setup flow.
 - `Configure NetEase` maps to existing NetEase setup flow.
 - `Configure Calendar` maps to existing Calendar setup flow.
-- Do not add a new setup model unless a current setup gap blocks the surface.
+- The setup flow should stay shallow. Each action opens one focused configuration surface and returns to `Setup & Connections`.
+
+### LLM Setup Surface
+
+```text
+LLM
+
+Provider        OpenAI-compatible
+Model           gpt-4.1-mini
+API key         Missing: OPENAI_API_KEY
+Base URL        OpenAI default
+
+Actions:
+> Set API key env name
+  Change model
+  Change base URL
+  Test connection
+  Back
+```
+
+Behavior:
+
+- Default to the current config values from `llm.provider`, `llm.model`, `llm.baseUrl`, and `llm.apiKeyEnv`.
+- Do not ask users to paste raw API keys into Pockedio. Ask for the environment variable name and show whether it is present.
+- `Test connection` should make the smallest practical LLM call and report configured / missing key / connection failed.
+- Missing LLM configuration should be a readiness warning, not a crash in the hub.
+
+### Voice Setup Surface
+
+```text
+Voice
+
+Provider        Built-in macOS voice
+Voice           Vale
+Advanced        Fish TTS not configured
+
+Actions:
+> Preview voices
+  Choose built-in voice
+  Configure Fish TTS
+  Use text-only DJ copy
+  Back
+```
+
+Behavior:
+
+- On macOS, default to the built-in Siri voice path from the macOS Siri TTS design.
+- Offer the Pockedio-facing voice names: Lumen, Sable, Arden, Vale, Sol.
+- Default to Vale.
+- Fish TTS is an advanced path for Mina and Nova, not a first-run requirement.
+- On non-macOS platforms, show text-only as the default and Fish TTS as the optional configured path.
+- Voice setup details and provider behavior are defined in `docs/superpowers/specs/2026-05-22-macos-siri-tts-fallback-design.md`.
 
 ## Entry Point 3: Taste & Memory
 
@@ -186,18 +246,45 @@ Actions:
 - In non-TTY contexts, keep output plain and avoid interactive rendering.
 - Current-fact checking stays an internal default capability. Do not expose it as a readiness item or user setting.
 
-## Open Questions
+## Implementation Goals
 
-1. Should bare `pockedio` always open the Welcome Hub, or should it open only on first run / setup-incomplete states?
-2. Should there be a flag such as `pockedio --session` or `pockedio --no-hub` for direct session entry?
-3. Should the Welcome Hub be implemented with current Node dependencies first, or should we add a TUI library?
-4. Which readiness fields are required for v1, and which can be best-effort?
-5. Should `Taste & Memory` allow showing any stored memory, or only summary-level metadata?
+The implementation should be judged against these goals:
 
-## Suggested Review Order
+1. A first-run user can understand the product from the first screen without reading docs.
+2. A returning user can press Enter from the hub and reach the main DJ session immediately.
+3. A user with missing LLM config can see the problem and open LLM setup from the hub.
+4. A macOS user can choose a built-in DJ voice without installing Fish TTS.
+5. A user who wants Mina or Nova can find Fish TTS setup as an advanced voice path.
+6. The hub does not create fake product modes; station generation, DJ mode, and scheduled DJ remain behaviors inside the session or scheduler.
+7. Non-TTY and existing scriptable commands keep working without the hub interfering.
 
-1. Confirm the four entry points.
-2. Confirm each destination surface.
-3. Decide whether the hub appears always or conditionally.
-4. Decide implementation technology.
-5. Write the implementation plan.
+## Acceptance Checks
+
+After implementation, verify the goals with these checks:
+
+- Launch `pockedio` in a TTY with a complete config. Expected: MOLE-like hub appears, `Enter DJ Session` is selected, readiness shows Music, LLM, Voice, Taste, and Calendar.
+- Press Enter from the hub. Expected: existing main DJ session opens without extra confirmation.
+- Launch with the configured LLM API key env missing. Expected: readiness shows the missing key and `Configure LLM` is reachable from `Setup & Connections`.
+- Run the LLM connection test with a valid key. Expected: setup reports configured and returns to the setup surface.
+- Open `Configure Voice` on macOS. Expected: Lumen, Sable, Arden, Vale, and Sol are available, with Vale as default.
+- Select a built-in voice and request a spoken DJ station. Expected: Pockedio prepares DJ voice without requiring Fish TTS.
+- Select Fish TTS / Mina or Nova. Expected: Pockedio asks for Fish runtime details only in that advanced path.
+- Run a non-TTY command such as `pockedio status` or piped invocation. Expected: plain command behavior, no interactive hub.
+- Run the automated tests covering hub routing, readiness formatting, LLM config detection, voice provider defaults, and non-TTY bypass.
+
+## Implementation Decisions
+
+1. Bare `pockedio` opens the Welcome Hub in TTY mode.
+2. Direct session entry should remain available through an explicit flag such as `pockedio --session` or `pockedio --no-hub`.
+3. Implement the hub with the current Node CLI stack first. Do not add Bubble Tea or a Go rewrite for this pass.
+4. Required readiness fields for this pass are Music, LLM, Voice, Taste, and Calendar.
+5. `Taste & Memory` shows summary-level metadata only. It must not expose raw diary entries, raw transcripts, or full private memory records.
+
+## Implementation Planning Order
+
+1. Add config/readiness helpers for Music, LLM, Voice, Taste, and Calendar.
+2. Add the Welcome Hub renderer and keyboard routing for the four entry points.
+3. Add focused LLM setup and Voice setup surfaces.
+4. Add direct session bypass for non-TTY and explicit session flags.
+5. Add automated tests for routing, readiness, setup surfaces, and non-TTY behavior.
+6. Run the manual acceptance checks listed above.
