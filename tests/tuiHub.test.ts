@@ -156,6 +156,7 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(setup).toContain("  1. Run full setup");
     expect(setup).toContain("> 3. Configure Voice");
+    expect(setup).toContain("\x1B[7m> 3. Configure Voice\x1B[0m");
     expect(setup).toContain("  6. Configure Scheduler");
     expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
     expect(resolveSetupConnectionsAction("1")).toBe("full_setup");

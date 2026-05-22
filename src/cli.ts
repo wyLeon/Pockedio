@@ -825,7 +825,8 @@ function formatCommand(command: string, args: string[]): string {
 }
 
 function formatPromptAction(selected: boolean, index: number, label: string): string {
-  return `${selected ? ">" : " "} ${index}. ${label}`;
+  const line = `${selected ? ">" : " "} ${index}. ${label}`;
+  return selected ? `\x1B[7m${line}\x1B[0m` : line;
 }
 
 function saveFishReference(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): void {

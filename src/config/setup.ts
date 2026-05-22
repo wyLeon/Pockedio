@@ -881,7 +881,7 @@ function promptSetupMenu<TValue extends string>(options: {
       defaultOutput.write([
         options.title,
         "",
-        ...options.entries.map((entry, index) => `${selected === index ? ">" : " "} ${index + 1}. ${entry.name}`),
+        ...options.entries.map((entry, index) => formatSetupMenuEntry(selected === index, index + 1, entry.name)),
         "",
         `↑↓ Select  |  Enter Open  |  1-${options.entries.length} Open  |  B Back  |  Q Quit`
       ].join("\n"));
@@ -1779,6 +1779,11 @@ function inferCurrentScheduledDjChoice(current: PockedioConfig): ScheduledDjSetu
     return "evening";
   }
   return "not_now";
+}
+
+function formatSetupMenuEntry(selected: boolean, index: number, name: string): string {
+  const line = `${selected ? ">" : " "} ${index}. ${name}`;
+  return selected ? `\x1B[7m${line}\x1B[0m` : line;
 }
 
 function inferCurrentNetEaseSetupMethod(current: PockedioConfig): NetEaseSetupMethod {

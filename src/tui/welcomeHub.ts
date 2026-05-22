@@ -1094,11 +1094,11 @@ function buildCalendarReadiness(config: PockedioConfig): WelcomeReadinessItem {
 }
 
 function formatHubEntry(selected: boolean, index: number, label: string, description: string): string {
-  return `${selected ? ">" : " "} ${`${index}. ${label}`.padEnd(27)} ${description}`;
+  return formatSelectableLine(selected, `${selected ? ">" : " "} ${`${index}. ${label}`.padEnd(27)} ${description}`);
 }
 
 function formatNumberedAction(selected: boolean, index: number, label: string): string {
-  return `${selected ? ">" : " "} ${index}. ${label}`;
+  return formatSelectableLine(selected, `${selected ? ">" : " "} ${index}. ${label}`);
 }
 
 function formatVoiceChoiceLine(
@@ -1108,7 +1108,11 @@ function formatVoiceChoiceLine(
   status: string,
   description: string
 ): string {
-  return `${selected ? ">" : " "} ${`${index}. ${label}`.padEnd(12)} ${status.padEnd(23)} ${description}`;
+  return formatSelectableLine(selected, `${selected ? ">" : " "} ${`${index}. ${label}`.padEnd(12)} ${status.padEnd(23)} ${description}`);
+}
+
+function formatSelectableLine(selected: boolean, line: string): string {
+  return selected ? `\x1B[7m${line}\x1B[0m` : line;
 }
 
 function formatReadinessItem(item: WelcomeReadinessItem): string {
