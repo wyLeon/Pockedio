@@ -5,14 +5,17 @@ describe("runFullSetupWizard", () => {
   it("runs setup steps one through five in order and treats scheduler as optional", async () => {
     const visited: FullSetupStepId[] = [];
     const prompts: string[] = [];
+    const events: string[] = [];
 
     await runFullSetupWizard({
       runStep: async (step) => {
         visited.push(step);
+        events.push(`step:${step}`);
         return "done";
       },
       confirmOptionalStep: async (step) => {
         prompts.push(step);
+        events.push(`prompt:${step}`);
         return false;
       },
       pause: async () => undefined,
@@ -21,6 +24,14 @@ describe("runFullSetupWizard", () => {
 
     expect(visited).toEqual(["llm", "voice", "netease", "playlist", "context"]);
     expect(prompts).toEqual(["scheduler", "session"]);
+    expect(events.slice(0, 6)).toEqual([
+      "step:llm",
+      "step:voice",
+      "step:netease",
+      "step:playlist",
+      "step:context",
+      "prompt:scheduler"
+    ]);
   });
 
   it("continues to voice after the LLM step completes instead of ending full setup", async () => {
