@@ -17,6 +17,7 @@ import { discoverVllmModels } from "./llm/vllmDiscovery.js";
 import { runProcess } from "./player/afplay.js";
 import { runServe } from "./scheduler/serve.js";
 import { runInteractiveSession } from "./session/sessionRunner.js";
+import { runFullSetupWizard, type FullSetupStepId } from "./setup/fullSetupWizard.js";
 import { formatStatusReport, getStatusReport, printStatus } from "./status/status.js";
 import { importTasteInput } from "./taste/importTaste.js";
 import { importTasteFromNetEasePlaylist } from "./taste/neteasePlaylist.js";
@@ -248,43 +249,68 @@ async function runSetupConnectionsAction(action: SetupConnectionsAction): Promis
 async function runFullSetup(): Promise<void> {
   console.log("Pockedio full setup");
   console.log("");
-  console.log("Every step is optional. Skipping a step keeps your current setting.");
+  console.log("Steps 1-5 guide the required decisions. Schedule DJ is optional.");
   console.log("");
-
-  if (await confirmFullSetupStep("Configure LLM", true)) {
-    await runLlmSetupLoop();
-  }
-  if (await confirmFullSetupStep("Configure voice", true)) {
-    await runVoiceSetupLoop();
-  }
-  if (await confirmFullSetupStep("Configure NetEase playback", true)) {
-    const outcome = await runNetEaseSetup();
-    if (outcome === "quit") {
-      return;
-    }
-  }
-  if (await confirmFullSetupStep("Import a NetEase playlist", false)) {
-    await importNetEasePlaylistFromSetup();
-  }
-  if (await confirmFullSetupStep("Configure context", true)) {
-    const outcome = await runContextSetupLoop();
-    if (outcome === "quit") {
-      return;
-    }
-  }
-  if (await confirmFullSetupStep("Configure Schedule DJ", false)) {
-    const outcome = await runSchedulerSetup();
-    if (outcome === "quit") {
-      return;
-    }
-  }
-
-  await pauseWithMessage("Full setup finished. You can reopen any section from Setup & Connections.");
+  await runFullSetupWizard({
+    runStep: runFullSetupStep,
+    confirmOptionalStep: async (step) => {
+      if (step === "scheduler") {
+        return confirmFullSetupOptionalStep("Step 6/6: Configure Schedule DJ now?", false);
+      }
+      return confirmFullSetupOptionalStep("Enter the DJ session now and try Pockedio?", true);
+    },
+    pause: pauseWithMessage,
+    enterSession: runInteractiveSession
+  });
 }
 
-async function confirmFullSetupStep(label: string, defaultYes: boolean): Promise<boolean> {
+async function runFullSetupStep(step: FullSetupStepId): Promise<"done" | "back" | "quit"> {
+  console.log(formatFullSetupStepHeader(step));
+  if (step === "llm") {
+    return normalizeSetupOutcome(await runLlmSetupLoop({ returnOnConfigured: true }));
+  }
+  if (step === "voice") {
+    return normalizeSetupOutcome(await runVoiceSetupLoop({ returnOnConfigured: true }));
+  }
+  if (step === "netease") {
+    return normalizeSetupOutcome(await runNetEaseSetup());
+  }
+  if (step === "playlist") {
+    await importNetEasePlaylistFromSetup();
+    return "done";
+  }
+  if (step === "context") {
+    console.log("Configure any context sources you want, then press B to continue full setup.");
+    return normalizeSetupOutcome(await runContextSetupLoop());
+  }
+  return normalizeSetupOutcome(await runSchedulerSetup());
+}
+
+function normalizeSetupOutcome(outcome: "continue" | "done" | "back" | "quit" | void): "done" | "back" | "quit" {
+  if (outcome === "quit") {
+    return "quit";
+  }
+  if (outcome === "back") {
+    return "back";
+  }
+  return "done";
+}
+
+function formatFullSetupStepHeader(step: FullSetupStepId): string {
+  const labels: Record<FullSetupStepId, string> = {
+    llm: "Step 1/6: Configure LLM",
+    voice: "Step 2/6: Configure Voice",
+    netease: "Step 3/6: Configure NetEase playback",
+    playlist: "Step 4/6: Import NetEase playlist",
+    context: "Step 5/6: Configure Context",
+    scheduler: "Step 6/6: Configure Schedule DJ"
+  };
+  return ["", labels[step], ""].join("\n");
+}
+
+async function confirmFullSetupOptionalStep(label: string, defaultYes: boolean): Promise<boolean> {
   const suffix = defaultYes ? "[Y/n]" : "[y/N]";
-  const answer = (await askLine(`${label}? ${suffix} `)).trim().toLowerCase();
+  const answer = (await askLine(`${label} ${suffix} `)).trim().toLowerCase();
   if (!answer) {
     return defaultYes;
   }
@@ -337,24 +363,34 @@ async function runContextSetupAction(action: ContextSetupAction): Promise<Contex
   return "quit";
 }
 
-type VoiceSetupOutcome = "continue" | "back" | "quit";
+type VoiceSetupOutcome = "continue" | "done" | "back" | "quit";
 
-async function runVoiceSetupLoop(): Promise<void> {
+async function runVoiceSetupLoop(options: { returnOnConfigured?: boolean } = {}): Promise<VoiceSetupOutcome> {
   while (true) {
-    const outcome = await runVoiceSetupAction(await promptVoiceSetup({ config: loadConfig() }));
+    const outcome = await runVoiceSetupAction(await promptVoiceSetup({ config: loadConfig() }), options);
     if (outcome === "continue") {
       continue;
     }
-    if (outcome === "back") {
-      await runSetupConnectionsLoop();
+    if (outcome === "done") {
+      return "done";
     }
-    return;
+    if (outcome === "back") {
+      if (options.returnOnConfigured) {
+        return "back";
+      }
+      await runSetupConnectionsLoop();
+      return "back";
+    }
+    return outcome;
   }
 }
 
-async function runVoiceSetupAction(action: VoiceSetupAction): Promise<VoiceSetupOutcome> {
+async function runVoiceSetupAction(
+  action: VoiceSetupAction,
+  options: { returnOnConfigured?: boolean } = {}
+): Promise<VoiceSetupOutcome> {
   if (action === "choose_voice") {
-    return chooseDjVoice();
+    return chooseDjVoice(undefined, options);
   }
   if (action === "fish_tts") {
     return await configureFishTts() === "quit" ? "quit" : "continue";
@@ -362,7 +398,7 @@ async function runVoiceSetupAction(action: VoiceSetupAction): Promise<VoiceSetup
   if (action === "text_only") {
     saveTtsConfig({ provider: "text" });
     await pauseWithMessage("Saved voice mode: text-only DJ copy.");
-    return "continue";
+    return options.returnOnConfigured ? "done" : "continue";
   }
   if (action === "back") {
     return "back";
@@ -370,7 +406,10 @@ async function runVoiceSetupAction(action: VoiceSetupAction): Promise<VoiceSetup
   return "quit";
 }
 
-async function chooseDjVoice(initialVoice?: DjVoiceChoiceId): Promise<VoiceSetupOutcome> {
+async function chooseDjVoice(
+  initialVoice?: DjVoiceChoiceId,
+  options: { returnOnConfigured?: boolean } = {}
+): Promise<VoiceSetupOutcome> {
   let selectedVoice = initialVoice;
   while (true) {
     const result = await promptDjVoiceChooser({ config: loadConfig(), platform: process.platform }, selectedVoice);
@@ -381,7 +420,7 @@ async function chooseDjVoice(initialVoice?: DjVoiceChoiceId): Promise<VoiceSetup
     }
     if (result.submit === "save") {
       await saveDjVoiceChoice(result.selectedVoice);
-      return "continue";
+      return options.returnOnConfigured ? "done" : "continue";
     }
     if (result.submit === "fish_setup") {
       if (await configureFishTts() === "quit") {
@@ -883,31 +922,41 @@ async function runTasteMemoryAction(action: TasteMemoryAction): Promise<TasteMem
   return "quit";
 }
 
-type LlmSetupOutcome = "continue" | "back" | "quit";
+type LlmSetupOutcome = "continue" | "done" | "back" | "quit";
 
-async function runLlmSetupLoop(): Promise<void> {
+async function runLlmSetupLoop(options: { returnOnConfigured?: boolean } = {}): Promise<LlmSetupOutcome> {
   while (true) {
-    const outcome = await runLlmSetupAction(await promptLlmSetup({ config: loadConfig() }));
+    const outcome = await runLlmSetupAction(await promptLlmSetup({ config: loadConfig() }), options);
     if (outcome === "continue") {
       continue;
     }
-    if (outcome === "back") {
-      await runSetupConnectionsLoop();
+    if (outcome === "done") {
+      return "done";
     }
-    return;
+    if (outcome === "back") {
+      if (options.returnOnConfigured) {
+        return "back";
+      }
+      await runSetupConnectionsLoop();
+      return "back";
+    }
+    return outcome;
   }
 }
 
-async function runLlmSetupAction(action: LlmSetupAction): Promise<LlmSetupOutcome> {
+async function runLlmSetupAction(
+  action: LlmSetupAction,
+  options: { returnOnConfigured?: boolean } = {}
+): Promise<LlmSetupOutcome> {
   if (action === "custom") {
-    return runLlmProviderLoop("custom");
+    return runLlmProviderLoop("custom", options);
   }
   if (isLlmProviderId(action)) {
-    return runLlmProviderLoop(action);
+    return runLlmProviderLoop(action, options);
   }
   if (action === "test_connection") {
     await testLlmConnection();
-    return "continue";
+    return options.returnOnConfigured ? "done" : "continue";
   }
   if (action === "back") {
     return "back";
@@ -915,11 +964,17 @@ async function runLlmSetupAction(action: LlmSetupAction): Promise<LlmSetupOutcom
   return "quit";
 }
 
-async function runLlmProviderLoop(providerId: LlmProviderId): Promise<LlmSetupOutcome> {
+async function runLlmProviderLoop(
+  providerId: LlmProviderId,
+  options: { returnOnConfigured?: boolean } = {}
+): Promise<LlmSetupOutcome> {
   while (true) {
-    const outcome = await runLlmProviderAction(providerId, await promptLlmProvider({ config: loadConfig() }, providerId));
+    const outcome = await runLlmProviderAction(providerId, await promptLlmProvider({ config: loadConfig() }, providerId), options);
     if (outcome === "continue") {
       continue;
+    }
+    if (outcome === "done") {
+      return "done";
     }
     if (outcome === "back") {
       return "continue";
@@ -930,19 +985,20 @@ async function runLlmProviderLoop(providerId: LlmProviderId): Promise<LlmSetupOu
 
 async function runLlmProviderAction(
   providerId: LlmProviderId,
-  action: LlmProviderAction
+  action: LlmProviderAction,
+  options: { returnOnConfigured?: boolean } = {}
 ): Promise<LlmSetupOutcome> {
   if (action === "paste_key") {
     const preset = getLlmPreset(providerId);
     saveLlmConfig(preset);
     await pasteLlmApiKey(preset.apiKeyEnv);
-    return "continue";
+    return options.returnOnConfigured ? "done" : "continue";
   }
   if (action === "use_shell_env") {
     const preset = getLlmPreset(providerId);
     saveLlmConfig(preset);
     await pauseWithMessage(formatLlmPresetSaved(getLlmProviderLabel(providerId), preset));
-    return "continue";
+    return options.returnOnConfigured ? "done" : "continue";
   }
   if (action === "change_model") {
     await changeLlmProviderModel(providerId);
@@ -967,7 +1023,7 @@ async function runLlmProviderAction(
   if (action === "test_connection") {
     saveLlmConfig(getLlmPreset(providerId));
     await testLlmConnection();
-    return "continue";
+    return options.returnOnConfigured ? "done" : "continue";
   }
   if (action === "back") {
     return "back";
