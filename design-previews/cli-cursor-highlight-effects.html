@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pockedio CLI Cursor Highlight Studies</title>
+  <style>
+    :root {
+      --ink: #f4f1e8;
+      --muted: #a8afa4;
+      --dim: #697169;
+      --line: rgba(244, 241, 232, 0.16);
+      --panel: rgba(14, 18, 17, 0.86);
+      --panel-strong: rgba(22, 28, 26, 0.94);
+      --green: #9de6b0;
+      --cyan: #8ad7e8;
+      --amber: #f3c86b;
+      --rose: #e99a8f;
+      --black: #080b0a;
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.38);
+      font-family: "Azeret Mono", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(120deg, rgba(157, 230, 176, 0.08), transparent 42%),
+        linear-gradient(300deg, rgba(243, 200, 107, 0.08), transparent 48%),
+        #090d0c;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.16;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, black, transparent 78%);
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+
+    .mast {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      padding: 8px 0 24px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 4vw, 46px);
+      line-height: 1.02;
+      letter-spacing: 0;
+      max-width: 760px;
+    }
+
+    .mast p {
+      margin: 12px 0 0;
+      color: var(--muted);
+      max-width: 760px;
+      line-height: 1.6;
+      font-size: 14px;
+    }
+
+    .legend {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      color: var(--muted);
+      padding: 7px 10px;
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .study {
+      position: relative;
+      min-height: 430px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      isolation: isolate;
+    }
+
+    .study header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .study h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .study header span {
+      color: var(--dim);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .terminal {
+      position: relative;
+      min-height: 360px;
+      padding: 18px 16px 20px;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+
+    .line {
+      position: relative;
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 10px;
+      align-items: baseline;
+      min-height: 32px;
+      padding: 6px 8px;
+      color: var(--muted);
+      border-radius: 6px;
+      transition: color 140ms ease, background 140ms ease, transform 140ms ease;
+      z-index: 2;
+    }
+
+    .line strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .prompt {
+      color: var(--green);
+    }
+
+    .meta {
+      color: var(--dim);
+    }
+
+    .terminal:hover .line.is-near {
+      color: var(--ink);
+    }
+
+    .terminal:hover .line.is-active {
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.07);
+      transform: translateX(2px);
+    }
+
+    .spotlight::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(230px circle at var(--x, 50%) var(--y, 50%), rgba(157, 230, 176, 0.22), rgba(138, 215, 232, 0.08) 38%, transparent 70%);
+      opacity: 0;
+      transition: opacity 180ms ease;
+      z-index: 1;
+    }
+
+    .spotlight:hover::before {
+      opacity: 1;
+    }
+
+    .spotlight .terminal::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(160px circle at var(--x, 50%) var(--y, 50%), transparent, rgba(8, 11, 10, 0.58) 82%);
+      opacity: 0;
+      transition: opacity 180ms ease;
+      z-index: 1;
+    }
+
+    .spotlight:hover .terminal::after {
+      opacity: 1;
+    }
+
+    .rail .line::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: var(--green);
+      opacity: 0;
+      transform: scaleY(0.5);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+
+    .rail .line.is-active::before {
+      opacity: 1;
+      transform: scaleY(1);
+    }
+
+    .rail .line.is-active {
+      background: linear-gradient(90deg, rgba(157, 230, 176, 0.12), rgba(157, 230, 176, 0.02));
+    }
+
+    .selection .line {
+      border: 1px solid transparent;
+    }
+
+    .selection .line.is-active {
+      border-color: rgba(243, 200, 107, 0.36);
+      background: rgba(243, 200, 107, 0.11);
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.28);
+    }
+
+    .selection .line.is-near:not(.is-active) {
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .magnetic .line {
+      transform-origin: left center;
+    }
+
+    .magnetic .line.is-active {
+      background: rgba(138, 215, 232, 0.1);
+      transform: translateX(6px);
+    }
+
+    .magnetic .line.is-near:not(.is-active) {
+      transform: translateX(2px);
+    }
+
+    .cursor-dot {
+      position: absolute;
+      left: var(--x, 50%);
+      top: var(--y, 50%);
+      width: 9px;
+      height: 9px;
+      border: 1px solid var(--cyan);
+      background: var(--black);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 4;
+      opacity: 0;
+      transition: opacity 140ms ease;
+    }
+
+    .terminal:hover .cursor-dot {
+      opacity: 1;
+    }
+
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      max-width: 920px;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        width: min(100vw - 20px, 620px);
+        padding-top: 18px;
+      }
+
+      .mast {
+        grid-template-columns: 1fr;
+      }
+
+      .legend {
+        justify-content: flex-start;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="mast" aria-labelledby="title">
+      <div>
+        <h1 id="title">Cursor-follow highlight studies for a music CLI</h1>
+        <p>Move the pointer through each terminal surface. These are reference patterns for Pockedio-like interfaces: they should reveal focus, hierarchy, and current action without making the terminal feel like a web landing page.</p>
+      </div>
+      <div class="legend" aria-label="interaction notes">
+        <span class="chip">Pointer-aware</span>
+        <span class="chip">Keyboard-friendly</span>
+        <span class="chip">Reduced-motion ready</span>
+      </div>
+    </section>
+
+    <section class="grid" aria-label="cursor highlight options">
+      <article class="study spotlight">
+        <header>
+          <h2>Option A: Soft Spotlight</h2>
+          <span>ambient focus</span>
+        </header>
+        <div class="terminal" data-mode="spotlight">
+          <div class="cursor-dot"></div>
+          <div class="line"><span class="prompt">&gt;</span><span>play a five-song late-night jazz station</span></div>
+          <div class="line"><span class="meta">01</span><span><strong>Autumn Leaves</strong> - Bill Evans</span></div>
+          <div class="line"><span class="meta">02</span><span>Blue in Green - Miles Davis</span></div>
+          <div class="line"><span class="meta">03</span><span>My Little Brown Book - John Coltrane</span></div>
+          <div class="line"><span class="meta">04</span><span>Skylark - Ella Fitzgerald</span></div>
+          <div class="line"><span class="meta">05</span><span>What Are You Doing The Rest Of Your Life? - Bill Evans</span></div>
+          <div class="line"><span class="meta">DJ</span><span>Mina's note: calm piano, low room light, no hard edges.</span></div>
+          <div class="line"><span class="prompt">&gt;</span><span>List my favorite songs</span></div>
+        </div>
+      </article>
+
+      <article class="study rail">
+        <header>
+          <h2>Option B: Focus Rail</h2>
+          <span>precise TUI</span>
+        </header>
+        <div class="terminal" data-mode="rail">
+          <div class="cursor-dot"></div>
+          <div class="line"><span class="prompt">&gt;</span><span>favorite this</span></div>
+          <div class="line"><span class="meta">OK</span><span>Saved "City Of Stars" as a favorite.</span></div>
+          <div class="line"><span class="prompt">&gt;</span><span>List my favorite songs</span></div>
+          <div class="line"><span class="meta">1</span><span>What A Wonderful World - Louis Armstrong</span></div>
+          <div class="line"><span class="meta">2</span><span>LA VIE EN ROSE - 小野リサ</span></div>
+          <div class="line"><span class="meta">3</span><span>City Of Stars - 王OK</span></div>
+          <div class="line"><span class="meta">4</span><span>我们俩 - 郭顶</span></div>
+          <div class="line"><span class="meta">5</span><span>Fly Me To The Moon - 小野リサ</span></div>
+        </div>
+      </article>
+
+      <article class="study selection">
+        <header>
+          <h2>Option C: Command Selection Band</h2>
+          <span>readability first</span>
+        </header>
+        <div class="terminal" data-mode="selection">
+          <div class="cursor-dot"></div>
+          <div class="line"><span class="prompt">&gt;</span><span>Who is Bill Evans?</span></div>
+          <div class="line"><span class="meta">AI</span><span>Bill Evans was an American jazz pianist known for lyrical trio work.</span></div>
+          <div class="line"><span class="meta">AI</span><span>He appears twice because the station is leaning into reflective piano ballads.</span></div>
+          <div class="line"><span class="prompt">&gt;</span><span>previous</span></div>
+          <div class="line"><span class="meta">Now</span><span>Autumn Leaves - Bill Evans</span></div>
+          <div class="line"><span class="meta">Next</span><span>Blue in Green - Miles Davis</span></div>
+          <div class="line"><span class="prompt">&gt;</span><span>more like this</span></div>
+          <div class="line"><span class="meta">OK</span><span>Reshaping the remaining queue around this quieter piano lane.</span></div>
+        </div>
+      </article>
+
+      <article class="study magnetic">
+        <header>
+          <h2>Option D: Magnetic Active Row</h2>
+          <span>playful motion</span>
+        </header>
+        <div class="terminal" data-mode="magnetic">
+          <div class="cursor-dot"></div>
+          <div class="line"><span class="prompt">&gt;</span><span>prepare tomorrow morning DJ program</span></div>
+          <div class="line"><span class="meta">08:45</span><span>Morning DJ program is ready.</span></div>
+          <div class="line"><span class="meta">TTL</span><span>Available for 6 hours, until 14:45 today.</span></div>
+          <div class="line"><span class="meta">Enter</span><span>Play now</span></div>
+          <div class="line"><span class="meta">L</span><span>Play later</span></div>
+          <div class="line"><span class="meta">S</span><span>Skip this program</span></div>
+          <div class="line"><span class="meta">Q</span><span>Show queue</span></div>
+          <div class="line"><span class="meta">Esc</span><span>Dismiss prompt, keep program available</span></div>
+        </div>
+      </article>
+    </section>
+
+    <p class="footer-note">Implementation note: in the real CLI, keep this subtle. Use a stable active row for keyboard navigation, reserve cursor-follow effects for rich terminal surfaces, and always provide a reduced-motion mode.</p>
+  </main>
+
+  <script>
+    const terminals = document.querySelectorAll(".terminal");
+
+    function updateActiveLine(terminal, y) {
+      const lines = Array.from(terminal.querySelectorAll(".line"));
+      let closest = null;
+      let closestDistance = Infinity;
+      for (const line of lines) {
+        const rect = line.getBoundingClientRect();
+        const center = rect.top + rect.height / 2;
+        const distance = Math.abs(center - y);
+        line.classList.toggle("is-near", distance < 52);
+        if (distance < closestDistance) {
+          closest = line;
+          closestDistance = distance;
+        }
+      }
+      lines.forEach((line) => line.classList.toggle("is-active", line === closest));
+    }
+
+    terminals.forEach((terminal) => {
+      terminal.addEventListener("pointermove", (event) => {
+        const rect = terminal.getBoundingClientRect();
+        terminal.style.setProperty("--x", `${event.clientX - rect.left}px`);
+        terminal.style.setProperty("--y", `${event.clientY - rect.top}px`);
+        updateActiveLine(terminal, event.clientY);
+      });
+
+      terminal.addEventListener("pointerleave", () => {
+        terminal.querySelectorAll(".line").forEach((line) => {
+          line.classList.remove("is-active", "is-near");
+        });
+      });
+    });
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.documentElement.style.setProperty("scroll-behavior", "auto");
+      document.querySelectorAll("*").forEach((node) => {
+        node.style.transitionDuration = "0.001ms";
+        node.style.animationDuration = "0.001ms";
+      });
+    }
+  </script>
+</body>
+</html>
