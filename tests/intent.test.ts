@@ -125,6 +125,14 @@ describe("parseIntent", () => {
       type: "feedback_favorite",
       confidence: "high"
     });
+    await expect(parseIntent("Love this song, favorite it")).resolves.toEqual({
+      type: "feedback_favorite",
+      confidence: "high"
+    });
+    await expect(parseIntent("Favorite River Of Tears")).resolves.toEqual({
+      type: "feedback_favorite",
+      confidence: "high"
+    });
     await expect(parseIntent("save this vibe")).resolves.toEqual({
       type: "feedback_save_vibe",
       confidence: "high"
@@ -198,6 +206,14 @@ describe("parseIntent", () => {
     });
     await expect(parseIntent("continue the music")).resolves.toEqual({
       type: "resume",
+      confidence: "high"
+    });
+    await expect(parseIntent("replay this song")).resolves.toEqual({
+      type: "replay",
+      confidence: "high"
+    });
+    await expect(parseIntent("play this again")).resolves.toEqual({
+      type: "replay",
       confidence: "high"
     });
     await expect(parseIntent("previous")).resolves.toEqual({

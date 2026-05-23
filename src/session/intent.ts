@@ -10,6 +10,7 @@ export type SessionIntentType =
   | "pending_station_refinement"
   | "playback_request"
   | "direct_playback_request"
+  | "queue_position_playback"
   | "single_track_playback"
   | "single_track_selection"
   | "favorite_playback_request"
@@ -27,6 +28,7 @@ export type SessionIntentType =
   | "playback_status"
   | "pause"
   | "resume"
+  | "replay"
   | "previous"
   | "stop"
   | "session_exit"
@@ -52,6 +54,7 @@ const intentTypes = new Set<SessionIntentType>([
   "pending_station_refinement",
   "playback_request",
   "direct_playback_request",
+  "queue_position_playback",
   "single_track_playback",
   "single_track_selection",
   "favorite_playback_request",
@@ -69,6 +72,7 @@ const intentTypes = new Set<SessionIntentType>([
   "playback_status",
   "pause",
   "resume",
+  "replay",
   "previous",
   "stop",
   "session_exit",
@@ -91,6 +95,7 @@ export async function parseIntent(input: string, llm?: LlmClient, options: LlmRe
       "Use favorite_list_request when the user asks to list, show, or see locally saved favorite songs.",
       "Use pause for natural stop-temporarily wording like pause, hold on, wait a second, or stop for a moment.",
       "Use resume for natural continuation wording like resume, keep playing, continue the music, carry on, or go on.",
+      "Use replay when the user asks to replay, restart, or play the current song again.",
       "Use previous for natural back-navigation wording like previous, go back, back one, or go to the previous track.",
       "Use single_track_playback when the user asks to play one specific song title, especially 'play [song] by [artist]'.",
       "Use music_recommendation when the user asks what music they should listen to but does not ask to play it.",
@@ -126,6 +131,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   }
   if (isResumeText(text)) {
     return { type: "resume", confidence: "high" };
+  }
+  if (isReplayText(text)) {
+    return { type: "replay", confidence: "high" };
   }
   if (isPreviousText(text)) {
     return { type: "previous", confidence: "high" };
@@ -165,7 +173,8 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(save this vibe|remember this vibe|keep this as a vibe)\b/.test(text)) {
     return { type: "feedback_save_vibe", confidence: "high" };
   }
-  if (/\b(favorite this|save this|add to best list)\b/.test(text)) {
+  if (/\b(favorite (this|it)|save (this|it)|add (this|it) to (my )?best list)\b/.test(text)
+    || /^(please\s+)?favorite\s+.+/.test(text)) {
     return { type: "feedback_favorite", confidence: "high" };
   }
   if (/\b(change the vibe|different vibe|switch the mood|change mood)\b/.test(text)) {
@@ -216,6 +225,10 @@ function isPauseText(text: string): boolean {
 function isResumeText(text: string): boolean {
   return /\bresume\b/.test(text)
     || /^(please\s+)?(keep playing|continue playing|continue the music|carry on|go on|keep going|play on)(\s+please)?[.!?]*$/.test(text);
+}
+
+function isReplayText(text: string): boolean {
+  return /^(please\s+)?(replay|replay this|replay this song|replay this track|restart|restart this|restart this song|restart this track|play this again|play this song again|play this track again|again)(\s+please)?[.!?]*$/.test(text);
 }
 
 function isPreviousText(text: string): boolean {
