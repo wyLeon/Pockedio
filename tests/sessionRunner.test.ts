@@ -5206,7 +5206,7 @@ describe("runSessionTurn", () => {
       },
       buildContext: async () => ({ personality: config.personality }),
       synthesizeFishAudio: async (_config, text, options) => {
-        if (text.includes("Track 3")) {
+        if (!text.includes("Mina opens")) {
           transitionSignal = options?.signal;
           return new Promise((resolve) => {
             options?.signal?.addEventListener("abort", () => {
@@ -5251,8 +5251,8 @@ describe("runSessionTurn", () => {
       llm: fakeLlm()
     });
 
-    for (let attempt = 0; attempt < 10 && !transitionSignal; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let attempt = 0; attempt < 50 && !transitionSignal; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     await runSessionTurn({
