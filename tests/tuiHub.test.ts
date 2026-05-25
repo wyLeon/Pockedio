@@ -424,7 +424,7 @@ describe("MOLE-inspired welcome hub", () => {
     const taste = renderTasteMemorySurface({ config });
     expect(taste).toContain("TASTE & MEMORY");
     expect(taste).toContain("Imported lists  3 playlists, 3 tracks");
-    expect(taste).toContain("Taste profile   Needs refresh");
+    expect(taste).toContain("Taste profile   Ready");
     expect(taste).toContain("▌ > 1. Import playlist");
     expect(taste).not.toContain("Start station");
 

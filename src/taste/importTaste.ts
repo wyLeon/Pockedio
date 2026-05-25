@@ -9,6 +9,7 @@ import { withDatabase } from "../db/database.js";
 import { MemoryStore } from "../memory/store.js";
 import { parseTasteCsv, type TasteImportRow } from "./csv.js";
 import { generateTasteMarkdown, summarizeTasteRows } from "./tasteMarkdown.js";
+import { updateTasteProfile } from "./profile.js";
 
 export type TasteImportResult = {
   trackCount: number;
@@ -16,7 +17,7 @@ export type TasteImportResult = {
   playlists: string[];
   tastePath: string;
   source?: "file" | "netease_playlist";
-  profileStatus: "needs_refresh";
+  profileStatus: "updated";
 };
 
 export function importTaste(file: string, config: PockedioConfig = loadConfig()): TasteImportResult {
@@ -65,12 +66,14 @@ export function importTasteRows(rows: TasteImportRow[], sourceFile: string, conf
     recordTasteImport(db, sourceFile, summary.trackCount, `Imported ${summary.trackCount} tracks from ${summary.sources.join(", ") || "unknown sources"}.`);
   });
 
+  updateTasteProfile(config);
+
   return {
     trackCount: summary.trackCount,
     artists: summary.artists,
     playlists: summary.playlists,
     tastePath: config.paths.taste,
-    profileStatus: "needs_refresh"
+    profileStatus: "updated"
   };
 }
 

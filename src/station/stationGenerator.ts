@@ -6,6 +6,7 @@ import { formatCalendarStateForPrompt } from "../context/calendar.js";
 import type { PockedioContext } from "../context/contextBuilder.js";
 import type { MusicProvider, MusicTrackCandidate, PlayableTrack } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
+import { generatedTasteProfileEnd, generatedTasteProfileStart } from "../taste/tasteMarkdown.js";
 import type { GeneratedStation, PlannedStationTrack, StationTrack } from "./stationTypes.js";
 
 export type StationLlmClient = LlmClient;
@@ -56,7 +57,7 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
       tracks: artistTracks
     };
   }
-  const tasteSummary = readTasteSummary(input.config.paths.taste);
+  const tasteSummary = readTasteSummary(input.config.paths.taste, input.context?.tasteProfile?.summary);
   const plan = await planTracks(input, llm, tasteSummary);
   throwIfAborted(input.signal);
   const plannedTracks = applyTasteSignalConstraints(plan.tracks, input, tasteSummary);
@@ -551,19 +552,45 @@ function unavailableStationTrack(planned: PlannedStationTrack, position: number,
   };
 }
 
-function readTasteSummary(tastePath: string): string {
+function readTasteSummary(tastePath: string, generatedTasteProfile?: string): string {
+  if (generatedTasteProfile?.trim()) {
+    return generatedTasteProfile.trim();
+  }
   if (!fs.existsSync(tastePath)) {
     return "No taste.md signals yet.";
   }
-  return fs.readFileSync(tastePath, "utf8").split(/\r?\n/).slice(0, 80).join("\n");
+  const markdown = fs.readFileSync(tastePath, "utf8");
+  const generated = extractGeneratedTasteProfile(markdown);
+  if (generated) {
+    return generated;
+  }
+  return markdown.split(/\r?\n/).slice(0, 80).join("\n");
+}
+
+function extractGeneratedTasteProfile(markdown: string): string | null {
+  const pattern = new RegExp(`${escapeRegExp(generatedTasteProfileStart)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(generatedTasteProfileEnd)}`);
+  return markdown.match(pattern)?.[1]?.trim() || null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function extractTasteSeeds(tasteSummary: string): string[] {
-  return tasteSummary
+  const seeds = tasteSummary
     .split(/\r?\n/)
     .map((line) => line.match(/^- (.+)$/)?.[1]?.trim())
-    .filter((value): value is string => Boolean(value) && value !== "No signals yet.")
-    .slice(0, 5);
+    .filter((value): value is string => {
+      if (!value || value === "No signals yet.") {
+        return false;
+      }
+      return !value.startsWith("Imported tracks:") && !value.startsWith("Sources:");
+    })
+    .flatMap((value) => {
+      const match = value.match(/^(?:Artists|Playlists|Track anchors):\s*(.+)$/);
+      return match ? match[1].split(",").map((seed) => seed.trim()).filter(Boolean) : [value];
+    });
+  return [...new Set(seeds)].slice(0, 5);
 }
 
 function fallbackSearchQueries(request: string, tasteSummary: string): string[] {

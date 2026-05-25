@@ -71,6 +71,37 @@ describe("generateStation", () => {
     expect(station.tracks.every((track) => track.playable.available)).toBe(true);
   });
 
+  it("uses musical seeds from a generated taste profile for deterministic fallback", async () => {
+    const provider = new FakeProvider();
+    const config = makeConfig();
+    fs.writeFileSync(config.paths.taste, [
+      "# Pockedio Taste",
+      "",
+      "<!-- POCKEDIO:BEGIN GENERATED TASTE PROFILE -->",
+      "## Generated Taste Profile",
+      "",
+      "### Imported Library Anchors",
+      "- Imported tracks: 589",
+      "- Artists: Keren Ann, Norah Jones",
+      "- Sources: netease",
+      "<!-- POCKEDIO:END GENERATED TASTE PROFILE -->",
+      ""
+    ].join("\n"));
+    const llm = createLlmClient(config, {});
+
+    await generateStation({
+      request: "play late night piano",
+      config,
+      provider,
+      llm
+    });
+
+    const queries = provider.searches.map((query) => query.keyword).join("\n");
+    expect(queries).toContain("Keren Ann");
+    expect(queries).not.toContain("Imported tracks");
+    expect(queries).not.toContain("Sources:");
+  });
+
   it("uses descriptive music search queries for conversational fallback requests", async () => {
     const provider = new FakeProvider();
     const config = makeConfig();
@@ -230,6 +261,55 @@ describe("generateStation", () => {
     expect(observedPrompt).toContain("Treat the device-local daypart as authoritative");
     expect(observedPrompt).toContain("Calendar listening hint:");
     expect(observedPrompt).toContain("Diary listening hint:");
+  });
+
+  it("uses the generated taste profile block instead of raw top-of-file taste rows", async () => {
+    const config = makeConfig();
+    fs.writeFileSync(config.paths.taste, [
+      "# Pockedio Taste",
+      "",
+      "## Imported Tracks",
+      "",
+      "- Top Raw Track - Should Not Drive Prompt",
+      "",
+      "<!-- POCKEDIO:BEGIN GENERATED TASTE PROFILE -->",
+      "## Generated Taste Profile",
+      "",
+      "### Imported Library Anchors",
+      "- Artists: Keren Ann, Norah Jones",
+      "<!-- POCKEDIO:END GENERATED TASTE PROFILE -->",
+      ""
+    ].join("\n"));
+    const provider = new FakeProvider();
+    let observedPrompt = "";
+    const llm: StationLlmClient = {
+      generateJson: async (prompt) => {
+        observedPrompt = prompt;
+        return {
+          ok: true,
+          value: {
+            tracks: [
+              { title: "A", artist: "Artist A", rationale: "first" },
+              { title: "B", artist: "Artist B", rationale: "second" },
+              { title: "C", artist: "Artist C", rationale: "third" },
+              { title: "D", artist: "Artist D", rationale: "fourth" },
+              { title: "E", artist: "Artist E", rationale: "fifth" }
+            ]
+          }
+        };
+      },
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    await generateStation({
+      request: "play gentle jazz",
+      config,
+      provider,
+      llm
+    });
+
+    expect(observedPrompt).toContain("Artists: Keren Ann, Norah Jones");
+    expect(observedPrompt).not.toContain("Top Raw Track");
   });
 
   it("uses feedback signals in fallback searches and filters banned artists", async () => {
