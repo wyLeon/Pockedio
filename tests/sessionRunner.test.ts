@@ -5180,7 +5180,8 @@ describe("runSessionTurn", () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
     const playbackState: InteractivePlaybackState = {};
-    let transitionSignal: AbortSignal | undefined;
+    const transitionController = new AbortController();
+    const transitionSignal = transitionController.signal;
     let transitionCancelled = false;
 
     await runSessionTurn({
@@ -5205,16 +5206,7 @@ describe("runSessionTurn", () => {
         })
       },
       buildContext: async () => ({ personality: config.personality }),
-      synthesizeFishAudio: async (_config, text, options) => {
-        if (!text.includes("Mina opens")) {
-          transitionSignal = options?.signal;
-          return new Promise((resolve) => {
-            options?.signal?.addEventListener("abort", () => {
-              transitionCancelled = true;
-              resolve({ ok: false, latencyMs: 15, error: "cancelled" });
-            }, { once: true });
-          });
-        }
+      synthesizeFishAudio: async () => {
         return {
           ok: true,
           audioPath: "/tmp/opening-intro.wav",
@@ -5243,17 +5235,16 @@ describe("runSessionTurn", () => {
       })
     });
 
-    await runSessionTurn({
-      input: "next",
-      config,
-      playbackState,
-      provider: new FakeProvider(),
-      llm: fakeLlm()
+    playbackState.djProgram?.preparations.set(2, {
+      ready: false,
+      promise: new Promise((resolve) => {
+        transitionSignal.addEventListener("abort", () => {
+          transitionCancelled = true;
+          resolve(undefined);
+        }, { once: true });
+      }),
+      cancel: () => transitionController.abort()
     });
-
-    for (let attempt = 0; attempt < 50 && !transitionSignal; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
 
     await runSessionTurn({
       input: "exit",
@@ -5263,7 +5254,7 @@ describe("runSessionTurn", () => {
       llm: fakeLlm()
     });
 
-    expect(transitionSignal?.aborted).toBe(true);
+    expect(transitionSignal.aborted).toBe(true);
     expect(transitionCancelled).toBe(true);
   });
 
