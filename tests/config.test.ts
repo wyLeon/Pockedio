@@ -13,6 +13,8 @@ import {
   buildConfigFromSchedulerSetupAction,
   formatCalendarSetupSummary,
   formatDiarySetupSummary,
+  formatSetupMenuEntry,
+  formatSetupMenuTitle,
   formatScheduledDjSetupSummary,
   formatSetupTasteImportFailure,
   formatSetupTasteImportSummary,
@@ -31,6 +33,10 @@ function makeEnv(): NodeJS.ProcessEnv {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-config-test-"));
   tempDirs.push(home);
   return { POCKEDIO_HOME: home };
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
 function saveConfigAndReload(env: NodeJS.ProcessEnv, config: ReturnType<typeof loadConfig>): ReturnType<typeof loadConfig> {
@@ -69,8 +75,10 @@ describe("config load and save", () => {
     expect(config.paths.neteaseCookie).toContain(path.join("secrets", "netease.cookie"));
     expect(config.paths.llmSecrets).toContain(path.join("secrets", "llm-api-keys.json"));
     expect(config.weather.location).toBe("Shanghai");
-    expect(config.calendar.enabled).toBe(true);
+    expect(config.weather.enabled).toBe(false);
+    expect(config.calendar.enabled).toBe(false);
     expect(config.diary.enabled).toBe(false);
+    expect(config.diary.path).toBeUndefined();
     expect(config.memory).toEqual({ dailyHeartbeat: true, heartbeatHistoryLimit: 20 });
     expect(config.personality.mbti).toBeUndefined();
     expect(config.llm.model).toBe("gpt-4.1-mini");
@@ -475,6 +483,34 @@ describe("config load and save", () => {
       { name: "higher - good fallback", value: "higher" },
       { name: "standard - safest fallback", value: "standard" }
     ]);
+  });
+
+  it("renders NetEase and Scheduled DJ setup menus with the shared colored TUI language", () => {
+    const neteaseTitle = formatSetupMenuTitle([
+      "NETEASE PLAYBACK",
+      "",
+      "● Connecting your account can reduce unavailable tracks and preview-only playback.",
+      "",
+      "ACTIONS"
+    ].join("\n"), { color: true, width: 88 });
+    const scheduleTitle = formatSetupMenuTitle([
+      "SCHEDULED DJ SETUP",
+      "",
+      "● Weekday DJ programs can be prepared before the time you choose, then wait for confirmation.",
+      "",
+      "CURRENT",
+      "Morning          weekdays 08:45",
+      "Evening          disabled",
+      "",
+      "ACTIONS"
+    ].join("\n"), { color: true, width: 88 });
+    const selected = formatSetupMenuEntry(true, 1, "Configure Morning DJ", { color: true, width: 88 });
+
+    expect(neteaseTitle).toMatch(/\u001b\[[0-9;]*38;5;116mACTIONS\u001b\[0m/);
+    expect(scheduleTitle).toMatch(/\u001b\[[0-9;]*38;5;116mCURRENT\u001b\[0m/);
+    expect(stripAnsi(scheduleTitle)).toContain("Morning         weekdays 08:45");
+    expect(selected).toMatch(/\u001b\[[0-9;]*48;5;23m/);
+    expect(stripAnsi(selected)).toContain("▌ > 1. Configure Morning DJ");
   });
 
   it("creates a visible NetEase QR image before polling", async () => {

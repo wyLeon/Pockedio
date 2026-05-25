@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pockedio Session Entry Color Options</title>
+  <style>
+    :root {
+      --paper: #f8f4e7;
+      --ink: #151713;
+      --muted: #6f766e;
+      --cyan: #86dce2;
+      --cyan-strong: #00746d;
+      --cyan-deep: #005f5a;
+      --charcoal: #2e302d;
+      --gold: #d4b451;
+      --gold-deep: #6c6c00;
+      --rail: #93e4e8;
+      --shadow: rgba(35, 35, 30, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #5f6d63;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      color: var(--ink);
+    }
+
+    .page {
+      padding: 28px;
+      display: grid;
+      gap: 28px;
+    }
+
+    .intro {
+      max-width: 980px;
+      color: #f6f3e6;
+      line-height: 1.5;
+    }
+
+    .intro h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .intro p {
+      margin: 0;
+      color: rgba(246, 243, 230, 0.82);
+      font-size: 15px;
+    }
+
+    .options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 22px;
+      align-items: start;
+    }
+
+    .option {
+      min-width: 0;
+    }
+
+    .caption {
+      margin: 0 0 10px;
+      color: #f8f4e7;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .caption strong {
+      color: var(--cyan);
+    }
+
+    .terminal {
+      min-height: 760px;
+      padding: 28px 30px;
+      background: var(--paper);
+      border-radius: 10px;
+      box-shadow: 0 18px 48px var(--shadow);
+      overflow: hidden;
+      font-size: clamp(14px, 1.35vw, 21px);
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .title {
+      font-weight: 800;
+      font-size: 1.14em;
+      margin-bottom: 18px;
+    }
+
+    .summary {
+      margin-bottom: 34px;
+    }
+
+    .section {
+      color: var(--cyan);
+      font-weight: 800;
+      margin: 30px 0 8px;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      min-height: 2.05em;
+      padding: 0 10px;
+      gap: 18px;
+    }
+
+    .row .key {
+      width: 7.8em;
+      flex: 0 0 auto;
+    }
+
+    .selected {
+      color: #fffdf0;
+      background: var(--cyan-strong);
+      font-weight: 800;
+      border-left: 8px solid var(--rail);
+    }
+
+    .next {
+      color: #e6e1d6;
+      background: var(--charcoal);
+      border-left: 8px solid #8e928c;
+    }
+
+    .band {
+      color: #fff9c8;
+      background: var(--gold-deep);
+      font-weight: 800;
+      border-left: 8px solid var(--gold);
+      padding: 4px 12px;
+      margin: 10px 0 8px;
+    }
+
+    .note {
+      color: #20221e;
+      margin: 0 0 14px;
+    }
+
+    .prompt {
+      margin-top: 32px;
+      color: var(--cyan-strong);
+      font-weight: 800;
+    }
+
+    .hint {
+      color: var(--muted);
+    }
+
+    .compact-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 3px;
+    }
+
+    .mini {
+      display: inline-block;
+      min-width: 4.4em;
+      color: var(--cyan-strong);
+      font-weight: 800;
+    }
+
+    .option-b .summary {
+      color: #fff9c8;
+      background: var(--gold-deep);
+      border-left: 8px solid var(--gold);
+      padding: 8px 12px;
+      margin-bottom: 28px;
+      font-weight: 800;
+    }
+
+    .option-b .section {
+      background: rgba(0, 116, 109, 0.13);
+      padding: 4px 10px;
+      border-left: 8px solid var(--cyan);
+    }
+
+    .option-b .row:not(.selected):not(.next) {
+      padding-left: 18px;
+    }
+
+    .option-c .terminal {
+      background: #101512;
+      color: #f7f1df;
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+    }
+
+    .option-c .section {
+      color: var(--cyan);
+    }
+
+    .option-c .summary {
+      color: #e1dbc9;
+    }
+
+    .option-c .note,
+    .option-c .hint {
+      color: #aab4a8;
+    }
+
+    .option-c .selected {
+      background: #006f68;
+    }
+
+    .option-c .next {
+      background: #2b312d;
+    }
+
+    @media (max-width: 1180px) {
+      .options {
+        grid-template-columns: 1fr;
+      }
+
+      .terminal {
+        min-height: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="intro">
+      <h1>Pockedio Session Entry, Three Color Directions</h1>
+      <p>All three stay inside real terminal capabilities: ANSI-like foreground/background bands, rails, section labels, and no browser-only glow.</p>
+    </header>
+
+    <section class="options">
+      <article class="option option-a">
+        <p class="caption"><strong>Option A, Radio Idle.</strong> Closest to playback: cyan active row, charcoal secondary row, gold DJ note.</p>
+        <div class="terminal"><div class="title">POCKEDIO SESSION</div><div class="band">MINA  listening</div><div class="note">Tell Mina what mood, task, song, artist, or station you want.</div><div class="section">START WITH</div><div class="row selected">›  I'm exhausted and want something calm.</div><div class="row next">   play something for deep work</div><div class="row">   what's playing?</div><div class="section">STATION FLOW</div><div class="compact-grid"><div><span class="mini">Enter</span> play suggested station</div><div><span class="mini">dj</span> spoken DJ version</div><div><span class="mini">adjust</span> tell Mina how to change it</div></div><div class="section">PLAYBACK CONTROLS</div><div class="compact-grid"><div><span class="mini">next</span> skip to next track</div><div><span class="mini">previous</span> return to previous track</div><div><span class="mini">replay</span> restart current track</div><div><span class="mini">queue</span> show queue</div><div><span class="mini">stop</span> stop playback</div></div><div class="section">SETUP</div><div class="compact-grid"><div><span class="mini">setup</span> open setup and connections</div><div><span class="mini">voice</span> change DJ voice</div><div><span class="mini">llm</span> configure model</div></div><div class="prompt">›</div></div>
+      </article>
+
+      <article class="option option-b">
+        <p class="caption"><strong>Option B, Guided Console.</strong> More color but still instructional, good if the page should feel like onboarding.</p>
+        <div class="terminal"><div class="title">POCKEDIO SESSION</div><div class="summary">● Mina is listening. Start with a mood, a task, a song, or a station idea.</div><div class="section">START WITH</div><div class="row selected">▌ ›  I'm exhausted and want something calm.</div><div class="row">    play something for deep work</div><div class="row">    what's playing?</div><div class="section">STATION FLOW</div><div class="row selected"><span class="key">Enter</span><span>play suggested station</span></div><div class="row next"><span class="key">dj</span><span>spoken DJ version</span></div><div class="row"><span class="key">adjust</span><span>tell Mina how to change it</span></div><div class="section">PLAYBACK CONTROLS</div><div class="row"><span class="key">next</span><span>skip to next track</span></div><div class="row"><span class="key">previous</span><span>return to previous track</span></div><div class="row"><span class="key">replay</span><span>restart current track</span></div><div class="row"><span class="key">queue</span><span>show queue</span></div><div class="row"><span class="key">stop</span><span>stop playback</span></div><div class="section">SETUP</div><div class="row"><span class="key">setup</span><span>open setup and connections</span></div><div class="row"><span class="key">voice</span><span>change DJ voice</span></div><div class="row"><span class="key">llm</span><span>configure model</span></div><div class="prompt">›</div></div>
+      </article>
+
+      <article class="option option-c">
+        <p class="caption"><strong>Option C, Dark Studio.</strong> A richer radio-console mood. Strongest layering, but changes the session background more.</p>
+        <div class="terminal"><div class="title">POCKEDIO SESSION</div><div class="summary">● Mina is listening. Tell her where the music should take the room.</div><div class="section">ON AIR</div><div class="row selected">▌ ›  I'm exhausted and want something calm.</div><div class="row next">    play something for deep work</div><div class="row">    what's playing?</div><div class="band">STATION FLOW</div><div class="compact-grid"><div><span class="mini">Enter</span> play suggested station</div><div><span class="mini">dj</span> spoken DJ version</div><div><span class="mini">adjust</span> tell Mina how to change it</div></div><div class="section">CONTROLS</div><div class="row selected"><span class="key">next</span><span>skip to next track</span></div><div class="row next"><span class="key">previous</span><span>return to previous track</span></div><div class="row"><span class="key">replay</span><span>restart current track</span></div><div class="row"><span class="key">queue</span><span>show queue</span></div><div class="row"><span class="key">stop</span><span>stop playback</span></div><div class="section">SETUP</div><div class="compact-grid"><div><span class="mini">setup</span> open setup and connections</div><div><span class="mini">voice</span> change DJ voice</div><div><span class="mini">llm</span> configure model</div></div><div class="prompt">›</div></div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

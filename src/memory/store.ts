@@ -67,6 +67,11 @@ export type RecentSessionSummary = {
   triggerText: string;
 };
 
+export type RecentPlayedTrack = {
+  title: string;
+  artist: string;
+};
+
 export type MessageRecord = {
   role: MessageRole;
   content: string;
@@ -201,6 +206,17 @@ export class MemoryStore {
       SET playback_status = ?, failure_reason = ?
       WHERE id = ?
     `).run(status, failureReason ?? null, trackId);
+  }
+
+  getRecentPlayedTracks(limit: number): RecentPlayedTrack[] {
+    return this.db.prepare(`
+      SELECT st.title, st.artist
+      FROM station_tracks st
+      INNER JOIN sessions s ON s.id = st.session_id
+      WHERE st.playback_status IN ('played', 'playing', 'skipped')
+      ORDER BY s.started_at DESC, st.position DESC, st.rowid DESC
+      LIMIT ?
+    `).all(limit) as RecentPlayedTrack[];
   }
 
   addFeedback(sessionId: string, trackId: string | null, action: FeedbackAction, note?: string): string {
@@ -388,6 +404,21 @@ export class MemoryStore {
     }));
   }
 
+  getRankedSessionMemories(query: string | undefined, limit: number): MemorySummaryRecord[] {
+    const memories = this.getRecentMemoryItems(["summary"], Math.max(limit * 8, 20));
+    if (!query?.trim()) {
+      return memories.slice(0, limit);
+    }
+    return memories
+      .map((memory, index) => ({
+        memory,
+        score: scoreSessionMemory(memory, query) - index * 0.001
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((item) => item.memory);
+  }
+
   addContextSnapshot(sessionId: string, context: ContextSnapshotInput): string {
     const id = randomUUID();
     this.db.prepare(`
@@ -573,6 +604,42 @@ function parseJson(value: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+function scoreSessionMemory(memory: MemorySummaryRecord, query: string): number {
+  const queryTerms = tokenize(query);
+  const metadataText = flattenMetadataText(memory.metadata);
+  const memoryTerms = tokenize(`${memory.content} ${metadataText}`);
+  let score = 0;
+  for (const term of queryTerms) {
+    if (memoryTerms.includes(term)) {
+      score += 3;
+    }
+  }
+  if (/\b(read|reading|book|diary|journal)\b/i.test(query) && /\b(read|reading|book|diary|journal)\b/i.test(`${memory.content} ${metadataText}`)) {
+    score += 6;
+  }
+  if (/\b(focus|work|meeting|deep)\b/i.test(query) && /\b(focus|work|meeting|deep)\b/i.test(`${memory.content} ${metadataText}`)) {
+    score += 5;
+  }
+  if (/\b(night|evening|late)\b/i.test(query) && /\b(night|evening|late)\b/i.test(`${memory.content} ${metadataText}`)) {
+    score += 4;
+  }
+  return score;
+}
+
+function tokenize(value: string): string[] {
+  return value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function flattenMetadataText(metadata: unknown): string {
+  if (!metadata || typeof metadata !== "object") {
+    return "";
+  }
+  return Object.values(metadata as Record<string, unknown>)
+    .flatMap((value) => Array.isArray(value) ? value : [value])
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
 }
 
 function calendarDedupeKey(event: CalendarEventInput): string {

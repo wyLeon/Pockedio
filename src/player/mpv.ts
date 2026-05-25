@@ -13,7 +13,14 @@ export type MpvDuckedIntroOptions = MpvOptions & {
   musicVolume?: number;
   introTimeoutMs?: number;
   runner?: ProcessRunner;
+  fadeDurationMs?: number;
+  fadeSteps?: number;
+  sleep?: (ms: number) => Promise<void>;
 };
+
+const DEFAULT_DUCKED_MUSIC_VOLUME = 0.18;
+const DEFAULT_DUCKED_FADE_DURATION_MS = 1_000;
+const DEFAULT_DUCKED_FADE_STEPS = 6;
 
 export function isMpvAvailable(command = "mpv"): boolean {
   const result = spawnSync("which", [command], { stdio: "ignore" });
@@ -82,21 +89,64 @@ export async function startMpvDuckedUrlWithIntro(
   introFilePath: string,
   options: MpvDuckedIntroOptions = {}
 ): Promise<PlaybackHandle> {
+  const musicVolume = Math.round((options.musicVolume ?? DEFAULT_DUCKED_MUSIC_VOLUME) * 100);
   const handle = await startMpvUrlPlayback(url, {
     command: options.command,
-    volume: Math.round((options.musicVolume ?? 0.18) * 100)
+    volume: musicVolume
   });
   const runner = options.runner ?? runProcess;
   let introResult: PlayerResult;
   try {
     introResult = await runner("afplay", [introFilePath], options.introTimeoutMs);
   } finally {
-    await handle.setVolume?.(100);
+    const faded = await fadePlaybackVolume(handle, musicVolume, 100, {
+      durationMs: options.fadeDurationMs,
+      steps: options.fadeSteps,
+      sleep: options.sleep
+    });
+    if (!faded) {
+      await handle.setVolume?.(100);
+    }
   }
   return {
     ...handle,
     introResult
   };
+}
+
+export async function fadePlaybackVolume(
+  handle: PlaybackHandle,
+  fromVolume: number,
+  toVolume: number,
+  options: {
+    durationMs?: number;
+    steps?: number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {}
+): Promise<boolean> {
+  if (!handle.setVolume) {
+    return false;
+  }
+
+  const steps = Math.max(1, Math.floor(options.steps ?? DEFAULT_DUCKED_FADE_STEPS));
+  const durationMs = Math.max(0, options.durationMs ?? DEFAULT_DUCKED_FADE_DURATION_MS);
+  const intervalMs = durationMs / steps;
+  const sleep = options.sleep ?? delay;
+  for (let step = 1; step <= steps; step += 1) {
+    if (intervalMs > 0) {
+      await sleep(intervalMs);
+    }
+    const nextVolume = Math.round(fromVolume + ((toVolume - fromVolume) * step) / steps);
+    const ok = await handle.setVolume(nextVolume);
+    if (!ok) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function buildMpvArgs(target: string, ipcPath: string, volume?: number): string[] {

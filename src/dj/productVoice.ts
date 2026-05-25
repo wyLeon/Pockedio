@@ -53,7 +53,7 @@ export function formatFeedbackConfirmation(action: string, context: FeedbackConf
     case "more_like_this":
       return `Got it. I’ll keep the next picks close to ${trackLabel}${direction}.`;
     case "change_vibe":
-      return "Understood. I’ll shift the mood from here.";
+      return "I’ll change the tone from here.";
     case "less_like_this":
       return `Got it. I’ll ease away from ${trackLabel} without banning it.`;
     case "favorite":
