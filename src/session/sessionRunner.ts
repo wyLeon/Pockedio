@@ -293,6 +293,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
   const userText = normalizeSessionInput(input.input);
   const sessionId = input.sessionId ?? store.createSession("conversation", userText);
   const shouldEndSession = input.endSession ?? !input.sessionId;
+  const startingTasteSignalCount = shouldEndSession ? store.getTasteSignalCount() : 0;
   if (input.playbackState) {
     input.playbackState.sessionId = sessionId;
     input.playbackState.startUrlPlayback = input.startUrlPlayback
@@ -958,6 +959,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       }
     }
     if (shouldEndSession) {
+      refreshTasteProfileIfSignalsChanged(config, store, startingTasteSignalCount);
       await summarizeSessionWithLlm(store, sessionId, llm, signal);
       store.endSession(sessionId);
     }
@@ -2847,6 +2849,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
   runMigrations(config);
   const store = new MemoryStore(config);
   const sessionId = store.createSession("conversation", "interactive session");
+  const startingTasteSignalCount = store.getTasteSignalCount();
   store.close();
   const statusWriter = createInteractiveStatusWriter(defaultOutput);
   try {
@@ -2929,6 +2932,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
     stopPlaybackForSessionExit(playbackState);
     const endStore = new MemoryStore(config);
     try {
+      refreshTasteProfileIfSignalsChanged(config, endStore, startingTasteSignalCount);
       summarizeSession(endStore, sessionId);
       endStore.endSession(sessionId);
     } finally {
@@ -2937,6 +2941,13 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
     rl.close();
   }
   return outcome;
+}
+
+function refreshTasteProfileIfSignalsChanged(config: PockedioConfig, store: MemoryStore, startingTasteSignalCount: number): void {
+  if (store.getTasteSignalCount() <= startingTasteSignalCount) {
+    return;
+  }
+  updateTasteProfile(config);
 }
 
 function promptPendingSingleTrackSelection(selection: PendingSingleTrackSelection): Promise<string> {

@@ -92,8 +92,22 @@ describe("taste import", () => {
     expect(result).toMatchObject({
       trackCount: 1,
       playlists: ["Sunday R&B"],
-      profileStatus: "needs_refresh"
+      profileStatus: "updated"
     });
+  });
+
+  it("automatically writes a generated taste profile after import", () => {
+    const config = makeConfig();
+    const result = importTaste("tests/fixtures/taste-normalized.csv", config);
+    const markdown = fs.readFileSync(result.tastePath, "utf8");
+    const snapshot = withDatabase(config, (db) => new MemoryStore(db).getLatestTasteProfileSnapshot());
+
+    expect(result.profileStatus).toBe("updated");
+    expect(markdown).toContain(generatedTasteProfileStart);
+    expect(markdown).toContain("### Imported Library Anchors");
+    expect(markdown).toContain("- Imported tracks: 3");
+    expect(markdown).toContain("Artists: Brian Eno, Miles Davis, Ryuichi Sakamoto");
+    expect(snapshot?.summary).toContain("Imported Library Anchors");
   });
 
   it("keeps previous imported tracks and notes after a second playlist import", async () => {
@@ -278,6 +292,7 @@ describe("taste import", () => {
     expect(result.signalCount).toBe(1);
     expect(markdown).toContain("User note: do not overwrite me.");
     expect(markdown).toContain(generatedTasteProfileStart);
+    expect(markdown).toContain("Generated from imported taste and local listening feedback.");
     expect(markdown).toContain("track: Blue in Green - Miles Davis");
     const snapshot = withDatabase(config, (db) => new MemoryStore(db).getLatestTasteProfileSnapshot());
     expect(snapshot?.summary).toContain("Blue in Green");

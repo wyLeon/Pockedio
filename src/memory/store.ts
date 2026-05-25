@@ -284,6 +284,11 @@ export class MemoryStore {
     }));
   }
 
+  getTasteSignalCount(): number {
+    const row = this.db.prepare("SELECT COUNT(*) as count FROM taste_signals").get() as { count: number };
+    return row.count;
+  }
+
   getFavoriteTrackCandidates(limit: number): FavoriteTrackCandidate[] {
     const rows = this.db.prepare(`
       SELECT target_value as targetValue, weight, context_json as contextJson, created_at as createdAt
