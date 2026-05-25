@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { PockedioConfig } from "../config/schema.js";
 import { loadConfig } from "../config/load.js";
+import { formatCalendarStateForPrompt } from "../context/calendar.js";
 import { buildContext, type PockedioContext } from "../context/contextBuilder.js";
 import { runMigrations } from "../db/migrations.js";
 import { shouldUseSpokenDjAudio } from "../dj/voiceRules.js";
@@ -122,14 +123,14 @@ export async function runScheduledDjJob(input: ScheduledDjInput): Promise<Schedu
   }
   const context = input.context ?? await buildContext(config, {
       now,
-      calendarWindow: "last7DaysAndToday",
+      calendarWindow: "last7DaysTodayAndNext3Days",
       calendarSource: "scheduled",
       consolidateMemory: true
     });
   if (!input.context) {
     writeOutput("Context ready.");
   }
-  if (calendarLooksBusy(context.calendar.summary)) {
+  if (calendarLooksBusy(context)) {
     return { ran: false, reason: "Calendar indicates an active meeting." };
   }
 
@@ -255,14 +256,14 @@ export async function prepareScheduledDjJob(input: ScheduledDjPreparationInput):
   }
   const context = input.context ?? await buildContext(config, {
     now,
-    calendarWindow: "last7DaysAndToday",
+    calendarWindow: "last7DaysTodayAndNext3Days",
     calendarSource: "scheduled",
     consolidateMemory: true
   });
   if (!input.context) {
     writeOutput("Context ready.");
   }
-  if (calendarLooksBusy(context.calendar.summary)) {
+  if (calendarLooksBusy(context)) {
     return { ran: false, reason: "Calendar indicates an active meeting." };
   }
 
@@ -434,6 +435,7 @@ async function generateScheduledDjText(input: {
     "Do not tell the user to press play, click play, or start playback; the CLI controls playback outside this spoken script.",
     `Calendar: ${input.context.calendar.summary}`,
     `Calendar listening hint: ${input.context.calendar.listeningHint}`,
+    formatCalendarStateForPrompt(input.context.calendar.state),
     `Weather: ${input.context.weather?.summary ?? "not available"}`,
     `Weather listening hint: ${input.context.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${input.context.diary?.summary ?? "not available"}`,
@@ -703,8 +705,9 @@ async function promptScheduledDjPlayback(message: string): Promise<ScheduledDjPl
   return "later";
 }
 
-function calendarLooksBusy(summary: string): boolean {
-  return /\b(active meeting|meeting is active|in a meeting|busy now|currently in)\b/i.test(summary);
+function calendarLooksBusy(context: PockedioContext): boolean {
+  return (context.calendar.available && context.calendar.state?.nowStatus === "in_event")
+    || /\b(active meeting|meeting is active|in a meeting|busy now|currently in)\b/i.test(context.calendar.summary);
 }
 
 function hasScheduledDjSoon(now: Date, config: PockedioConfig, windowMinutes: number): boolean {

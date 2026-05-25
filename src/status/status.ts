@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import Database from "better-sqlite3";
 import { loadConfig } from "../config/load.js";
 import { hasLocalLlmApiKey } from "../config/llmSecrets.js";
@@ -9,6 +10,13 @@ import type { PockedioConfig } from "../config/schema.js";
 import { getLatestContextRefreshRun, type ContextRefreshRunRecord } from "../context/heartbeat.js";
 import { schemaVersion } from "../db/migrations.js";
 import { NetEaseProvider } from "../providers/netease.js";
+import {
+  renderTuiBulletLine,
+  renderTuiKeyValue,
+  renderTuiPageTitle,
+  renderTuiSectionLabel,
+  type TuiRenderOptions
+} from "../tui/terminalRenderer.js";
 import { resolveRuntimePath } from "../tts/fishAudio.js";
 import { formatFishVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
 
@@ -101,7 +109,7 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
     config: configStatus,
     runtime: {
       currentPlayback: getCurrentPlayback(config),
-      scheduledJobs: formatScheduledJobs(config)
+      scheduledJobs: formatScheduledJobs(config, isSchedulerServeRunning())
     },
     database,
     llm: {
@@ -290,11 +298,12 @@ function getCurrentPlayback(config: PockedioConfig): string | null {
   }
 }
 
-function formatScheduledJobs(config: PockedioConfig): string {
+function formatScheduledJobs(config: PockedioConfig, serveRunning = false): string {
   return [
     formatScheduledProgramStatus("Morning DJ", config.dj.schedule.morning),
     formatScheduledProgramStatus("Evening DJ", config.dj.schedule.evening),
-    "mood checks hourly while serve runs"
+    "mood checks hourly while serve runs",
+    serveRunning ? "serve running" : "serve not running"
   ].join("; ");
 }
 
@@ -308,31 +317,58 @@ function formatScheduledProgramStatus(
   return `${label} weekdays ${schedule.playTime} (prepare ${schedule.prepareMinutesBefore} min before)`;
 }
 
-export function formatStatusReport(report: StatusReport): string {
+function isSchedulerServeRunning(): boolean {
+  const result = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" });
+  if (result.status !== 0 || !result.stdout) {
+    return false;
+  }
+  return result.stdout
+    .split("\n")
+    .some((line) => isPockedioServeProcessLine(line, process.pid));
+}
+
+function isPockedioServeProcessLine(line: string, currentPid: number): boolean {
+  const match = line.trim().match(/^(\d+)\s+(.+)$/);
+  if (!match) {
+    return false;
+  }
+  const pid = Number(match[1]);
+  const command = match[2];
+  if (pid === currentPid) {
+    return false;
+  }
+  return /\bpockedio\s+serve\b/.test(command)
+    || /\btsx\s+src\/cli\.ts\s+serve\b/.test(command)
+    || /\/dist\/cli\.js\s+serve\b/.test(command);
+}
+
+export function formatStatusReport(report: StatusReport, options: TuiRenderOptions = {}): string {
   const lines = [
-    "Pockedio Status",
+    renderTuiPageTitle("POCKEDIO STATUS", options),
     "",
-    "Runtime",
-    `Playback   ${report.runtime.currentPlayback ?? "none"}`,
-    `Session    ${report.latestSessionTimestamp ?? "none"}`,
-    `Schedule   ${report.runtime.scheduledJobs}`,
+    renderTuiBulletLine("Current runtime, setup, memory, and local data state.", options),
     "",
-    "Setup",
-    `Music     ${formatNetEaseStatus(report.netease)}`,
-    `LLM       ${formatLlmStatus(report.llm)}`,
-    `Voice     ${report.voice.summary}`,
-    `Context   Calendar ${report.calendar.enabled ? "on" : "off"}, Weather ${report.weather.enabled ? report.weather.location : "off"}`,
+    renderTuiSectionLabel("RUNTIME", { ...options, accent: "playback" }),
+    formatStatusLine("Playback", report.runtime.currentPlayback ?? "none", options),
+    formatStatusLine("Session", report.latestSessionTimestamp ?? "none", options),
+    formatStatusLine("Schedule", report.runtime.scheduledJobs, options),
     "",
-    "Memory",
-    `Config    ${report.config.present ? "ok" : "missing"}`,
-    `Database  ${report.database.migrated ? "ok" : report.database.present ? "needs migration" : "missing"}`,
-    `Taste     ${report.taste.present ? "ok" : "missing"}`,
-    `Voices    ${report.personas.present ? "ok" : "missing"}`,
-    `Heartbeat ${formatContextHeartbeatStatus(report.contextHeartbeat)}`,
+    renderTuiSectionLabel("SETUP", { ...options, accent: "playback" }),
+    formatStatusLine("Music", formatNetEaseStatus(report.netease), options),
+    formatStatusLine("LLM", formatLlmStatus(report.llm), options),
+    formatStatusLine("Voice", report.voice.summary, options),
+    formatStatusLine("Context", `Calendar ${report.calendar.enabled ? "on" : "off"}, Weather ${report.weather.enabled ? report.weather.location : "off"}`, options),
     "",
-    "Data",
-    `Local     ${path.dirname(report.config.path)}`,
-    "External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used."
+    renderTuiSectionLabel("MEMORY", { ...options, accent: "playback" }),
+    formatStatusLine("Config", report.config.present ? "ok" : "missing", options),
+    formatStatusLine("Database", report.database.migrated ? "ok" : report.database.present ? "needs migration" : "missing", options),
+    formatStatusLine("Taste", report.taste.present ? "ok" : "missing", options),
+    formatStatusLine("Voices", report.personas.present ? "ok" : "missing", options),
+    formatStatusLine("Heartbeat", formatContextHeartbeatStatus(report.contextHeartbeat), options),
+    "",
+    renderTuiSectionLabel("LOCAL DATA", { ...options, accent: "playback" }),
+    formatStatusLine("Local", path.dirname(report.config.path), options),
+    formatStatusLine("External", "NetEase, configured LLM, weather, and diary summaries may leave this machine when used.", options)
   ];
   if (report.database.error) {
     lines.push(`Database detail: ${report.database.error}`);
@@ -347,6 +383,14 @@ export function formatStatusReport(report: StatusReport): string {
   return lines.join("\n");
 }
 
+function formatStatusLine(label: string, value: string, options: TuiRenderOptions): string {
+  const width = ["Playback", "Session", "Schedule"].includes(label) ? 11 : 10;
+  if (!options.color) {
+    return `${label.padEnd(width)}${value}`;
+  }
+  return renderTuiKeyValue(label, value, width - 1, options);
+}
+
 function formatContextHeartbeatStatus(run: ContextRefreshRunRecord | null): string {
   if (!run) {
     return "not run yet";
@@ -358,10 +402,10 @@ function formatContextHeartbeatStatus(run: ContextRefreshRunRecord | null): stri
 }
 
 function formatNetEaseStatus(netease: StatusReport["netease"]): string {
-  const account = netease.authMode === "account" && netease.cookiePresent
-    ? `account, ${netease.qualityLevel}`
-    : "anonymous";
-  return `${netease.reachable ? "NetEase connected" : "NetEase unreachable"} (${account})`;
+  if (netease.authMode === "account" && netease.cookiePresent) {
+    return `${netease.reachable ? "NetEase account connected" : "NetEase API unreachable"} (${netease.qualityLevel})`;
+  }
+  return `${netease.reachable ? "NetEase API reachable" : "NetEase API unreachable"} (anonymous playback, not logged in)`;
 }
 
 function formatLlmStatus(llm: StatusReport["llm"]): string {
@@ -384,7 +428,10 @@ function formatLlmKeySource(source: StatusReport["llm"]["apiKeySource"]): string
 }
 
 export async function printStatus(): Promise<void> {
-  console.log(formatStatusReport(await getStatusReport()));
+  console.log(formatStatusReport(await getStatusReport(), {
+    color: Boolean(process.stdout.isTTY),
+    width: process.stdout.columns
+  }));
 }
 
 function isPockedioConfig(value: PockedioConfig | StatusReportOptions): value is PockedioConfig {

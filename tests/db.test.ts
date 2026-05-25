@@ -252,6 +252,37 @@ describe("database migrations", () => {
     });
   });
 
+  it("ranks recent session memories by DJ request tags", () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+      const readingSession = store.createSession("conversation", "talk about reading");
+      const workoutSession = store.createSession("conversation", "talk about workout");
+
+      store.addSessionSummary(readingSession, "Session memory summary:\n- Listening/taste signals: quiet piano for night reading.", {
+        source: "session",
+        musicTags: ["quiet piano", "spacious"],
+        contextTags: ["reading", "night"],
+        avoidTags: ["busy percussion"],
+        useCases: ["reading"],
+        confidence: "medium"
+      });
+      store.addSessionSummary(workoutSession, "Session memory summary:\n- Listening/taste signals: upbeat workout pop.", {
+        source: "session",
+        musicTags: ["upbeat pop"],
+        contextTags: ["workout"],
+        useCases: ["workout"],
+        confidence: "medium"
+      });
+
+      const ranked = store.getRankedSessionMemories("music for reading tonight", 2);
+
+      expect(ranked).toHaveLength(2);
+      expect(ranked[0].sourceSessionId).toBe(readingSession);
+      expect(ranked[0].content).toContain("quiet piano");
+    });
+  });
+
   it("stores station tracks and playback failure reasons", () => {
     const config = makeConfig();
     withDatabase(config, (db) => {

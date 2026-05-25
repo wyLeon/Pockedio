@@ -22,7 +22,7 @@ export async function refreshContext(
 ): Promise<RefreshContextResult> {
   const context = await buildContext(config, {
     ...options,
-    calendarWindow: options.calendarWindow ?? "last7DaysAndToday",
+    calendarWindow: options.calendarWindow ?? "last7DaysTodayAndNext3Days",
     calendarSource: options.calendarSource ?? "interactive"
   });
   const store = new MemoryStore(config);

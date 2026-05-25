@@ -1,9 +1,10 @@
 import readline from "node:readline/promises";
-import { clearLine, cursorTo, emitKeypressEvents, type Key } from "node:readline";
+import { clearLine, cursorTo, emitKeypressEvents, moveCursor, type Key } from "node:readline";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import fs from "node:fs";
 import { loadConfig } from "../config/load.js";
 import type { PockedioConfig } from "../config/schema.js";
+import { formatCalendarStateForPrompt } from "../context/calendar.js";
 import { buildContext, type ContextBuilderOptions, type PockedioContext } from "../context/contextBuilder.js";
 import { createWikidataMusicFreshnessProvider, type MusicFreshnessProvider, type MusicFreshnessSource } from "../context/musicFreshness.js";
 import { runMigrations } from "../db/migrations.js";
@@ -17,7 +18,7 @@ import { shouldUseSpokenDjAudio } from "../dj/voiceRules.js";
 import { createLlmClient } from "../llm/openaiClient.js";
 import type { LlmClient } from "../llm/llmClient.js";
 import { MemoryStore, type FavoriteTrackCandidate, type FeedbackAction, type TasteSignalInput } from "../memory/store.js";
-import { summarizeSession } from "../memory/sessionSummary.js";
+import { summarizeSession, summarizeSessionWithLlm } from "../memory/sessionSummary.js";
 import { buildFeedbackTasteSignals } from "../memory/tasteSignals.js";
 import {
   playFile as playAudioFile,
@@ -35,11 +36,24 @@ import { stopStalePockedioPlaybackProcesses } from "../player/stalePlayback.js";
 import type { MusicProvider, MusicTrackCandidate, PlayableTrack } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
 import { generateStation } from "../station/stationGenerator.js";
+import type { StationTrackIdentity } from "../station/stationGenerator.js";
 import type { GeneratedStation, StationTrack } from "../station/stationTypes.js";
 import { updateTasteProfile } from "../taste/profile.js";
 import { synthesizeDjAudio as synthesizeFishAudioDefault, type DjAudioOptions as FishAudioOptions } from "../tts/djAudio.js";
 import type { FishAudioResult } from "../tts/fishAudio.js";
 import { formatFishVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
+import {
+  renderPlaybackSurface,
+  renderTuiBulletLine,
+  renderTuiCommandRow,
+  renderTuiDjNoteBlock,
+  renderTuiPageTitle,
+  renderTuiPrompt,
+  renderTuiReplyBlock,
+  renderTuiSectionLabel,
+  renderTuiUserTurn,
+  type TuiRenderOptions
+} from "../tui/terminalRenderer.js";
 import { parseDeterministicIntent, parseIntent, type SessionIntent } from "./intent.js";
 
 type OutputWriter = (text: string) => void;
@@ -156,9 +170,16 @@ export type SessionTurnResult = {
   intent: SessionIntent;
   response: string;
   shouldExit: boolean;
+  shouldReturnToMenu?: boolean;
   station?: GeneratedStation;
   djAudio?: FishAudioResult;
 };
+
+export type InteractiveSessionOutcome = "exit" | "menu";
+
+function formatStartupExample(text: string, options: TuiRenderOptions = {}): string {
+  return `  ${renderTuiPrompt({ ...options, accent: "primary" })} ${text}`;
+}
 
 export function createDefaultInteractiveStartUrlPlayback(
   starter?: ProcessStarter,
@@ -170,29 +191,35 @@ export function createDefaultInteractiveStartUrlPlayback(
   return (url) => startAudioUrlPlayback(url);
 }
 
-export function formatInteractiveStartupGuide(displayName = "Pockedio", setupNote = ""): string {
+export function formatInteractiveStartupGuide(displayName = "Pockedio", setupNote = "", options: TuiRenderOptions = {}): string {
   const lines = [
-    `${displayName} is listening.`,
-    "What are we tuning for?",
+    renderTuiPageTitle("POCKEDIO SESSION", options),
     "",
-    "Try:",
-    "  I'm exhausted and want something calm.",
-    "  play something for deep work",
-    "  what's playing?",
+    renderTuiBulletLine(`${displayName} is listening. Tell her what mood, task, song, artist, or station you want.`, options),
     "",
-    "When I suggest a station:",
-    "  press Enter to play it",
-    "  type dj for a spoken DJ version",
+    renderTuiSectionLabel("START WITH", { ...options, accent: "playback" }),
+    formatStartupExample("I'm exhausted and want something calm.", options),
+    formatStartupExample("play something for deep work", options),
+    formatStartupExample("what's playing?", options),
     "",
-    "Controls:",
-    "  next",
-    "  previous",
-    "  stop",
-    "  show queue",
-    "  Ctrl+C exits, or cancels while processing",
+    renderTuiSectionLabel("STATION FLOW", { ...options, accent: "playback" }),
+    renderTuiCommandRow("Enter", "play suggested station", 11, options),
+    renderTuiCommandRow("dj", "spoken DJ version", 11, options),
+    renderTuiCommandRow("adjust", `tell ${displayName} how to change it`, 11, options),
     "",
-    "Setup:",
-    "  pockedio setup"
+    renderTuiSectionLabel("PLAYBACK CONTROLS", { ...options, accent: "playback" }),
+    renderTuiCommandRow("next", "skip to next track", 11, options),
+    renderTuiCommandRow("previous", "return to previous track", 11, options),
+    renderTuiCommandRow("replay", "restart current track", 11, options),
+    renderTuiCommandRow("queue", "show queue", 11, options),
+    renderTuiCommandRow("stop", "stop playback", 11, options),
+    renderTuiCommandRow("menu", "return to main menu", 11, options),
+    renderTuiCommandRow("q", "quit while processing", 11, options),
+    "",
+    renderTuiSectionLabel("SETUP", { ...options, accent: "playback" }),
+    renderTuiCommandRow("setup", "open setup and connections", 11, options),
+    renderTuiCommandRow("voice", "change DJ voice", 11, options),
+    renderTuiCommandRow("llm", "configure model", 11, options)
   ];
   if (setupNote) {
     lines.push("", setupNote);
@@ -218,7 +245,7 @@ export function formatRuntimeDjDisplayName(config: PockedioConfig, platform: Nod
     return formatFishVoiceName(config.tts.fishVoice);
   }
   if (config.tts.provider === "macos") {
-    return platform === "darwin" ? formatMacosVoiceName(config.tts.macosVoice) : config.dj.displayName;
+    return formatMacosVoiceName(config.tts.macosVoice);
   }
   if (config.tts.provider === "text") {
     return "Pockedio";
@@ -232,9 +259,9 @@ export function formatStartupSetupNote(config: PockedioConfig): string {
   }
 
   return [
-    "Setup note:",
-    "  Taste is not imported yet.",
-    "  Run pockedio setup when you want to improve personalization."
+    "SETUP NOTE",
+    "Taste signals are not imported yet.",
+    "Run pockedio setup when you want to improve personalization."
   ].join("\n");
 }
 
@@ -271,9 +298,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     input.playbackState.startUrlPlayback = input.startUrlPlayback
       ?? input.playbackState.startUrlPlayback
       ?? startUrlPlayback;
-    input.playbackState.writeOutput = input.writeOutput
-      ?? input.playbackState.writeOutput
-      ?? writeOutput;
+    if (!input.playbackState.writeOutput && input.writeOutput) {
+      input.playbackState.writeOutput = input.writeOutput;
+    }
     input.playbackState.startDuckedIntroPlayback = input.startDuckedIntroPlayback
       ?? input.playbackState.startDuckedIntroPlayback
       ?? startDuckedIntroPlayback;
@@ -355,9 +382,17 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       writeOutput(response);
       return { sessionId, intent: { type: "conversation", confidence: "high" }, response, shouldExit: false };
     }
-    const pendingSingleTrackCandidate = getPendingSingleTrackCandidate(input.playbackState, userText);
+    const pendingSingleTrackCancel = isPendingSingleTrackCancel(input.playbackState, userText);
+    const pendingSingleTrackCandidate = pendingSingleTrackCancel ? undefined : getPendingSingleTrackCandidate(input.playbackState, userText);
+    const queuePositionIndex = !input.playbackState?.pendingSingleTrackSelection
+      ? getRequestedQueuePositionIndex(input.playbackState, userText)
+      : undefined;
     let intent = pendingSingleTrackCandidate
         ? { type: "single_track_selection" as const, confidence: "high" as const }
+      : pendingSingleTrackCancel
+        ? { type: "conversation" as const, confidence: "high" as const }
+      : queuePositionIndex !== undefined
+        ? { type: "queue_position_playback" as const, confidence: "high" as const }
       : input.playbackState?.pendingStationRequest && isPendingStationDjProgramRequest(userText)
         ? { type: "pending_station_dj_program" as const, confidence: "high" as const }
       : input.playbackState?.pendingStationRequest && isPendingStationConfirmation(input.input)
@@ -365,13 +400,24 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       : input.playbackState?.pendingStationRequest && isPendingStationDecline(userText)
         ? { type: "pending_station_decline" as const, confidence: "high" as const }
         : await resolveIntent(userText, llm, writeStatus, signal);
-    if (((input.playbackState?.currentTrackId && isCurrentTrackQuestion(userText)) || isMusicKnowledgeQuestion(userText))
+    const groundedPlaybackKnowledgeQuestion = (input.playbackState?.currentTrackId
+      && (isCurrentTrackQuestion(userText) || isCurrentArtistBiographicalFollowupQuestion(userText) || isLyricsRequest(userText)))
+      || isMusicKnowledgeQuestion(userText);
+    if (groundedPlaybackKnowledgeQuestion
       && !hasExplicitPlaybackCommand(userText)
-      && !isProtectedOperationalIntent(intent.type)) {
+      && (!isProtectedOperationalIntent(intent.type) || isCurrentArtistBiographicalFollowupQuestion(userText))) {
       intent = { type: "conversation", confidence: "high" };
     }
     if (input.playbackState?.currentTrackId && isPositiveCurrentArtistPreference(userText)) {
       intent = { type: "conversation", confidence: "high" };
+    }
+
+    if (pendingSingleTrackCancel) {
+      input.playbackState!.pendingSingleTrackSelection = undefined;
+      const response = "Selection cancelled.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
     }
 
     if (intent.type === "single_track_selection" && pendingSingleTrackCandidate) {
@@ -394,6 +440,13 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       store.addMessage(sessionId, "pockedio", playback.response);
       writeOutput(playback.response);
       return { sessionId, intent, response: playback.response, shouldExit: false };
+    }
+
+    if (intent.type === "queue_position_playback" && queuePositionIndex !== undefined) {
+      const response = await playQueuedTrackAt(input.playbackState, config, store, queuePositionIndex, input.playbackState?.startUrlPlayback ?? startUrlPlayback);
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
     }
 
     if (intent.type === "pending_station_decline") {
@@ -440,8 +493,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
           writeOutput(response);
           return { sessionId, intent, response, shouldExit: false };
         }
-        input.playbackState.activePlayback.stop();
+        const activePlayback = input.playbackState.activePlayback;
         input.playbackState.activePlayback = undefined;
+        activePlayback.stop();
       }
       if (input.playbackState?.activePlaybackPaused && input.playbackState.currentIndex !== undefined) {
         const restartResponse = await startTrackAt(
@@ -473,15 +527,23 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response, shouldExit: false };
     }
 
+    if (intent.type === "replay") {
+      const response = await replayCurrentTrack(input.playbackState, config, store, input.playbackState?.startUrlPlayback ?? startUrlPlayback);
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
     if (intent.type === "session_exit") {
       cancelDjProgramPreparations(input.playbackState);
       if (input.playbackState?.activePlayback) {
-        input.playbackState.activePlayback.stop();
+        const activePlayback = input.playbackState.activePlayback;
+        input.playbackState.activePlayback = undefined;
+        input.playbackState.activePlaybackPaused = false;
+        activePlayback.stop();
         if (input.playbackState.currentTrackId) {
           store.updateTrackPlayback(input.playbackState.currentTrackId, "skipped");
         }
-        input.playbackState.activePlayback = undefined;
-        input.playbackState.activePlaybackPaused = false;
       }
       const response = "Session closed.";
       store.addMessage(sessionId, "pockedio", response);
@@ -489,16 +551,34 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response, shouldExit: true };
     }
 
+    if (intent.type === "main_menu") {
+      cancelDjProgramPreparations(input.playbackState);
+      if (input.playbackState?.activePlayback) {
+        const activePlayback = input.playbackState.activePlayback;
+        input.playbackState.activePlayback = undefined;
+        input.playbackState.activePlaybackPaused = false;
+        activePlayback.stop();
+        if (input.playbackState.currentTrackId) {
+          store.updateTrackPlayback(input.playbackState.currentTrackId, "skipped");
+        }
+      }
+      const response = "Returning to main menu.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: true, shouldReturnToMenu: true };
+    }
+
     if (intent.type === "stop") {
       let response = "Nothing is playing right now.";
       cancelDjProgramPreparations(input.playbackState);
       if (input.playbackState?.activePlayback) {
-        input.playbackState.activePlayback.stop();
+        const activePlayback = input.playbackState.activePlayback;
+        input.playbackState.activePlayback = undefined;
+        input.playbackState.activePlaybackPaused = false;
+        activePlayback.stop();
         if (input.playbackState.currentTrackId) {
           store.updateTrackPlayback(input.playbackState.currentTrackId, "skipped");
         }
-        input.playbackState.activePlayback = undefined;
-        input.playbackState.activePlaybackPaused = false;
         response = "Stopped playback.";
       }
       store.addMessage(sessionId, "pockedio", response);
@@ -508,8 +588,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 
     if (isFeedbackIntent(intent.type)) {
       const action = feedbackActionForIntent(intent.type);
-      const currentTrack = getCurrentPlaybackTrack(input.playbackState);
-      const currentTrackId = input.playbackState?.currentTrackId ?? null;
+      const feedbackTarget = resolveFeedbackTarget(action, userText, input.playbackState);
+      const currentTrack = feedbackTarget?.track ?? getCurrentPlaybackTrack(input.playbackState);
+      const currentTrackId = feedbackTarget?.dbId ?? input.playbackState?.currentTrackId ?? null;
       const currentTrackTarget = currentTrack ? `${currentTrack.title} - ${currentTrack.artist}` : undefined;
       const duplicateFavorite = action === "favorite" && currentTrackTarget
         ? store.hasFavoriteTrackTarget(currentTrackTarget)
@@ -584,7 +665,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (intent.type === "identity_capability") {
-      const response = await withStatus(writeStatus, "Thinking...", () => generateIdentityCapabilityResponse({ config, llm, userText, signal }), signal);
+      const response = formatReplySurface(await withStatus(writeStatus, "Thinking...", () => generateIdentityCapabilityResponse({ config, llm, userText, signal }), signal), config);
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -610,7 +691,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (intent.type === "session_memory_update") {
-      const result = summarizeSession(store, sessionId);
+      const result = await summarizeSessionWithLlm(store, sessionId, llm, signal);
       const response = result.summaryId
         ? [
             "Updated session memory.",
@@ -694,7 +775,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (intent.type === "music_recommendation") {
-      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, { memoryQuery: userText }), signal);
+      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, buildContextOptionsForUserText(userText)), signal);
       store.addContextSnapshot(sessionId, {
         calendarSummary: context.calendar?.summary,
         weather: context.weather,
@@ -834,18 +915,18 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (isFreshnessSensitiveMusicQuestion(userText)) {
-      const response = await withStatus(writeStatus, "Checking current sources...", () => generateFreshnessSensitiveResponse({
+      const response = formatReplySurface(await withStatus(writeStatus, "Checking current sources...", () => generateFreshnessSensitiveResponse({
         userText,
         freshness: musicFreshness,
         signal
-      }), signal);
+      }), signal), config);
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent: { type: "conversation", confidence: "high" }, response, shouldExit: false };
     }
 
-    const conversationContext = isContextualCalendarConversation(userText)
-      ? await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, { memoryQuery: userText }), signal)
+    const conversationContext = shouldReadConversationContext(userText)
+      ? await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, buildContextOptionsForUserText(userText)), signal)
       : undefined;
     if (conversationContext) {
       store.addContextSnapshot(sessionId, {
@@ -855,7 +936,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         personality: conversationContext.personality ?? config.personality
       });
     }
-    const response = await withStatus(writeStatus, "Thinking...", () => generateConversationResponse({
+    const rawResponse = await withStatus(writeStatus, "Thinking...", () => generateConversationResponse({
       config,
       llm,
       userText,
@@ -864,7 +945,8 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       signal
     }), signal);
     recordConversationalTasteSignals(store, input.playbackState, userText);
-    maybeStorePendingStationFromConversationOffer(input.playbackState, userText, response);
+    maybeStorePendingStationFromConversationOffer(input.playbackState, userText, rawResponse);
+    const response = formatReplySurface(rawResponse, config);
     store.addMessage(sessionId, "pockedio", response);
     writeOutput(response);
     return { sessionId, intent, response, shouldExit: false };
@@ -876,7 +958,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       }
     }
     if (shouldEndSession) {
-      summarizeSession(store, sessionId);
+      await summarizeSessionWithLlm(store, sessionId, llm, signal);
       store.endSession(sessionId);
     }
     store.close();
@@ -884,7 +966,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
 }
 
 function normalizeSessionInput(input: string): string {
-  return input.trim().replace(/^>\s*/, "").trim();
+  return input.trim().replace(/^[>›]\s*/, "").trim();
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -930,10 +1012,13 @@ async function resolveIntent(userText: string, llm: LlmClient, writeStatus: Stat
 
 function isInstantLocalIntent(type: SessionIntent["type"]): boolean {
   return type === "stop"
+    || type === "main_menu"
     || type === "session_exit"
     || type === "pause"
     || type === "resume"
+    || type === "replay"
     || type === "previous"
+    || type === "queue_position_playback"
     || type === "playback_status"
     || type === "favorite_list_request"
     || type === "feedback_like"
@@ -993,7 +1078,7 @@ function createInteractiveStatusWriter(output: typeof defaultOutput): StatusWrit
 
   const frames = ["|", "/", "-", "\\"];
   return (text) => {
-    const displayText = `${text}  Ctrl+C to cancel`;
+    const displayText = formatInteractiveStatusDisplayText(text);
     let index = 0;
     const render = () => {
       output.write(`\r${frames[index % frames.length]} ${displayText}`);
@@ -1006,6 +1091,10 @@ function createInteractiveStatusWriter(output: typeof defaultOutput): StatusWrit
       output.write(`\r${" ".repeat(displayText.length + 4)}\r`);
     };
   };
+}
+
+export function formatInteractiveStatusDisplayText(text: string): string {
+  return `${text}  press q to quit`;
 }
 
 function createTurnScopedStatusWriter(baseWriter: StatusWriter, initialText?: string): { writeStatus: StatusWriter; finish: () => void } {
@@ -1050,6 +1139,206 @@ export function createTurnScopedOutputWriter(writeOutput: OutputWriter, finishSt
   };
 }
 
+function formatInteractiveOutputBlock(text: string): string {
+  return `\n${text.trimEnd()}\n`;
+}
+
+export function formatInteractiveLivePrompt(options: TuiRenderOptions = {}): string {
+  return `${renderTuiPrompt({ ...options, accent: "primary" })} `;
+}
+
+export function formatInteractiveLivePromptRule(options: TuiRenderOptions = {}): string {
+  if (!options.color) {
+    return "";
+  }
+  const width = Math.max(0, options.width ?? 0);
+  const rule = width > 0 ? "─".repeat(width) : "─".repeat(32);
+  return `\u001b[38;5;242m${rule}\u001b[0m`;
+}
+
+export function formatInteractiveLivePromptBox(text = "", options: TuiRenderOptions = {}): string {
+  const value = `${formatInteractiveLivePrompt(options)}${text}`;
+  if (!options.color) {
+    return value;
+  }
+  const width = Math.max(0, options.width ?? 0);
+  if (width <= 0) {
+    return value;
+  }
+  return value.padEnd(width);
+}
+
+function formatInteractiveLivePromptArea(text = "", options: TuiRenderOptions = {}): string {
+  const rule = formatInteractiveLivePromptRule(options);
+  const box = formatInteractiveLivePromptBox(text, options);
+  return rule ? `${rule}\n${box}\n${rule}` : box;
+}
+
+function getInteractiveLivePromptColumn(line: string, cursor: number, options: TuiRenderOptions = {}): number {
+  void options;
+  const promptWidth = 2;
+  return Math.max(0, promptWidth + promptDisplayWidth(line.slice(0, cursor)));
+}
+
+function promptDisplayWidth(value: string): number {
+  let width = 0;
+  for (const char of value) {
+    const codePoint = char.codePointAt(0) ?? 0;
+    if (codePoint < 32 || (codePoint >= 0x7f && codePoint < 0xa0)) {
+      continue;
+    }
+    width += isPromptWideCodePoint(codePoint) ? 2 : 1;
+  }
+  return width;
+}
+
+function isPromptWideCodePoint(codePoint: number): boolean {
+  return (codePoint >= 0x1100 && codePoint <= 0x115f)
+    || codePoint === 0x2329
+    || codePoint === 0x232a
+    || (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f)
+    || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
+    || (codePoint >= 0xf900 && codePoint <= 0xfaff)
+    || (codePoint >= 0xfe10 && codePoint <= 0xfe19)
+    || (codePoint >= 0xfe30 && codePoint <= 0xfe6f)
+    || (codePoint >= 0xff00 && codePoint <= 0xff60)
+    || (codePoint >= 0xffe0 && codePoint <= 0xffe6);
+}
+
+export async function questionWithInteractiveFrame(
+  rl: readline.Interface,
+  input: typeof defaultInput,
+  output: TerminalOutput,
+  promptView: ReadlinePromptView,
+  onInterrupt: () => void,
+  options: TuiRenderOptions = {}
+): Promise<string> {
+  const prompt = formatInteractiveLivePrompt(options);
+  if (!input.isTTY || !output.isTTY) {
+    return rl.question(prompt);
+  }
+
+  return new Promise((resolve, reject) => {
+    const previousRawMode = input.isRaw;
+    let hasRenderedPrompt = false;
+    const render = () => {
+      if (hasRenderedPrompt) {
+        clearInteractiveLivePromptBox(output);
+      }
+      output.write(formatInteractiveLivePromptArea(promptView.line, options));
+      hasRenderedPrompt = true;
+      moveCursor(output, 0, -1);
+      cursorTo(output, getInteractiveLivePromptColumn(promptView.line, promptView.cursor, options));
+    };
+    const cleanup = () => {
+      input.off("keypress", onKeypress);
+      restoreInputAfterInlinePrompt(input, previousRawMode);
+      input.pause();
+    };
+    const submit = () => {
+      const value = promptView.line;
+      cleanup();
+      resolve(value);
+    };
+    const onKeypress = (value: string, key: Key) => {
+      if (key.ctrl && key.name === "c") {
+        clearInteractiveLivePromptBox(output);
+        cleanup();
+        onInterrupt();
+        reject(new Error("readline was closed"));
+        return;
+      }
+      if (key.name === "return") {
+        submit();
+        return;
+      }
+      if (key.name === "backspace") {
+        if (promptView.cursor > 0) {
+          promptView.line = `${promptView.line.slice(0, promptView.cursor - 1)}${promptView.line.slice(promptView.cursor)}`;
+          promptView.cursor -= 1;
+          render();
+        }
+        return;
+      }
+      if (key.name === "delete") {
+        if (promptView.cursor < promptView.line.length) {
+          promptView.line = `${promptView.line.slice(0, promptView.cursor)}${promptView.line.slice(promptView.cursor + 1)}`;
+          render();
+        }
+        return;
+      }
+      if (key.name === "left") {
+        promptView.cursor = Math.max(0, promptView.cursor - 1);
+        render();
+        return;
+      }
+      if (key.name === "right") {
+        promptView.cursor = Math.min(promptView.line.length, promptView.cursor + 1);
+        render();
+        return;
+      }
+      if (key.name === "home") {
+        promptView.cursor = 0;
+        render();
+        return;
+      }
+      if (key.name === "end") {
+        promptView.cursor = promptView.line.length;
+        render();
+        return;
+      }
+      if (key.name === "escape") {
+        return;
+      }
+      if (!value || key.ctrl || key.meta) {
+        return;
+      }
+      promptView.line = `${promptView.line.slice(0, promptView.cursor)}${value}${promptView.line.slice(promptView.cursor)}`;
+      promptView.cursor += value.length;
+      render();
+    };
+
+    promptView.line = "";
+    promptView.cursor = 0;
+    emitKeypressEvents(input);
+    input.resume();
+    input.setRawMode(true);
+    input.on("keypress", onKeypress);
+    render();
+  });
+}
+
+export function formatInteractiveSubmittedUserTurn(input: string, options: { color?: boolean; width?: number } = {}): string {
+  const userText = normalizeSessionInput(input);
+  if (!userText) {
+    return "";
+  }
+  if (options.color) {
+    return `\n${renderTuiUserTurn(userText, options)}\n\n`;
+  }
+  return `\n${renderTuiUserTurn(userText, options)}\n\n`;
+}
+
+export function clearInteractiveSubmittedInputEcho(output: TerminalOutput): void {
+  clearInteractiveLivePromptBox(output);
+}
+
+function clearInteractiveLivePromptBox(output: TerminalOutput): void {
+  if (!output.isTTY) {
+    return;
+  }
+  clearLine(output, 0);
+  cursorTo(output, 0);
+  moveCursor(output, 0, -1);
+  clearLine(output, 0);
+  cursorTo(output, 0);
+  moveCursor(output, 0, 2);
+  clearLine(output, 0);
+  cursorTo(output, 0);
+  moveCursor(output, 0, -2);
+  cursorTo(output, 0);
+}
+
 type ReadlinePromptView = {
   line: string;
   cursor: number;
@@ -1057,6 +1346,7 @@ type ReadlinePromptView = {
 
 type TerminalOutput = NodeJS.WritableStream & {
   isTTY?: boolean;
+  columns?: number;
 };
 
 export function createPromptSafeOutputWriter(
@@ -1072,11 +1362,12 @@ export function createPromptSafeOutputWriter(
 
     const line = rl.line;
     const cursor = rl.cursor;
-    clearLine(output, 0);
-    cursorTo(output, 0);
+    clearInteractiveSubmittedInputEcho(output);
     output.write(`${text}\n`);
-    output.write(`> ${line}`);
-    cursorTo(output, Math.max(0, 2 + cursor));
+    const options = { color: true, width: output.columns };
+    output.write(formatInteractiveLivePromptArea(line, options));
+    moveCursor(output, 0, -1);
+    cursorTo(output, getInteractiveLivePromptColumn(line, cursor, options));
   };
 }
 
@@ -1367,8 +1658,12 @@ function formatSingleTrackChoiceSurface(selection: PendingSingleTrackSelection, 
       return `${marker} ${index + 1}. ${candidate.track.title} - ${candidate.track.artist}`;
     }),
     "",
-    "↑↓ Select  |  Enter Play"
+    "↑↓ Select  |  Enter Play  |  B Back  |  Esc Cancel"
   ].join("\n");
+}
+
+function isPendingSingleTrackCancel(playbackState: InteractivePlaybackState | undefined, text: string): boolean {
+  return Boolean(playbackState?.pendingSingleTrackSelection) && /^(b|back|cancel|esc|escape|q)$/i.test(text.trim());
 }
 
 function getPendingSingleTrackCandidate(
@@ -1381,6 +1676,27 @@ function getPendingSingleTrackCandidate(
     return undefined;
   }
   return selection.candidates[Number(match[1]) - 1];
+}
+
+function getRequestedQueuePositionIndex(
+  playbackState: InteractivePlaybackState | undefined,
+  text: string
+): number | undefined {
+  const queue = playbackState?.storedTracks ?? [];
+  if (!playbackState?.station || queue.length === 0) {
+    return undefined;
+  }
+  const match = text.trim().toLowerCase().match(/^(?:play\s+)?(?:song\s+|track\s+|#)?([1-9]\d*)$/)
+    ?? text.trim().toLowerCase().match(/^(?:play|start|queue|jump to|go to)\s+(?:song\s+|track\s+|#)?([1-9]\d*)$/);
+  if (!match) {
+    return undefined;
+  }
+  const position = Number(match[1]);
+  const index = queue.findIndex((entry) => entry.track.position === position);
+  if (index === -1 || !queue[index]?.track.playable.available) {
+    return undefined;
+  }
+  return index;
 }
 
 async function handlePlaybackRequest(input: {
@@ -1414,6 +1730,7 @@ async function handlePlaybackRequest(input: {
     request: input.requestText,
     config: input.config,
     context,
+    avoidTracks: buildStationAvoidTracks(input.store, input.playbackState),
     provider: input.provider,
     llm: input.llm,
     signal: input.signal
@@ -1437,6 +1754,7 @@ async function handlePlaybackRequest(input: {
   if (input.djProgramIntro) {
     stationIntro = "";
   }
+  stationIntro = formatStationIntroSurface(stationIntro, input.config);
   if (input.djProgramIntro && input.synthesize && input.playFile) {
     const intro = await withStatus(input.writeStatus, "Preparing DJ voice...", () => generateStationDjProgramIntro({
       config: input.config,
@@ -1502,7 +1820,7 @@ async function handlePlaybackRequest(input: {
     nowPlaying,
     formatUnavailableTrackFallbackForResponse(station.tracks),
     playbackFailure ? `Playback detail: ${playbackFailure}` : ""
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 
   return { response, station };
 }
@@ -1532,6 +1850,7 @@ async function prepareDjProgramRequest(input: {
     request: input.requestText,
     config: input.config,
     context,
+    avoidTracks: buildStationAvoidTracks(input.store, input.playbackState),
     provider: input.provider,
     llm: input.llm,
     signal: input.signal
@@ -1573,7 +1892,7 @@ async function prepareDjProgramRequest(input: {
   input.playbackState.storedTracks = undefined;
   input.playbackState.djProgram = undefined;
 
-  return { station, response: formatPreparedDjProgramReadyResponse() };
+  return { station, response: formatPreparedDjProgramReadyResponse(input.config) };
 }
 
 async function startPreparedDjProgram(input: {
@@ -1637,12 +1956,12 @@ function createDjProgramPlaybackState(pending: PendingDjProgramState): DjProgram
   };
 }
 
-function formatPreparedDjProgramReadyResponse(): string {
-  return [
+function formatPreparedDjProgramReadyResponse(config: PockedioConfig): string {
+  return formatReplySurface([
     "DJ program is ready.",
     "",
     "Press Enter to start it, or tell me how to adjust it."
-  ].join("\n");
+  ].join("\n"), config);
 }
 
 async function generateStationIntroResponse(input: {
@@ -1655,21 +1974,26 @@ async function generateStationIntroResponse(input: {
 }): Promise<string> {
   const totalTracks = input.station.tracks.length;
   const playableTracks = input.station.tracks.filter((track) => track.playable.available).length;
+  const displayName = formatRuntimeDjDisplayName(input.config);
   const prompt = [
-    `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's personal DJ.`,
+    `You are ${displayName}, Pockedio's personal DJ.`,
+    `${displayName} is the DJ/assistant name, not the user's name. Do not address the user as ${displayName}. If the user's preferred name is unknown, do not use a personal name.`,
     "Write a warm, concise station introduction for a CLI music session.",
     "Acknowledge the user's mood or request in human language before mentioning the station.",
     "Keep it to 2-3 sentences.",
     formatLanguageInstruction(input.config),
     "Do not say playback failed. Do not list the queue.",
     "Do not claim a different track count than the station facts below.",
+    "Do not claim the user has current tasks, meetings, calendar pressure, or scheduled work unless the user request or Calendar summary explicitly says so. If diary context suggests tasks, phrase it as past/recent context, not today's schedule.",
     `User request: ${input.userText}`,
     `DJ style: ${input.config.dj.style}`,
     `DJ language: ${input.config.dj.language}`,
     `Station size: ${totalTracks} tracks total`,
     `Playable tracks: ${playableTracks}`,
+    formatLocalTimeContextInstruction(input.context),
     `Calendar summary: ${input.context.calendar?.summary ?? "not available"}`,
     `Calendar listening hint: ${input.context.calendar?.listeningHint ?? "not available"}`,
+    formatCalendarStateForPrompt(input.context.calendar?.state),
     `Weather summary: ${input.context.weather?.summary ?? "not available"}`,
     `Weather listening hint: ${input.context.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${input.context.diary?.summary ?? "not available"}`,
@@ -1677,10 +2001,38 @@ async function generateStationIntroResponse(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return result.value.trim();
+    return alignGeneratedTextToLocalDaypart(
+      sanitizeDjNameAsUserAddress(result.value.trim(), input.config),
+      input.userText,
+      input.context
+    );
   }
 
   return formatWarmStationIntro(input.station, input.userText);
+}
+
+function formatStationIntroSurface(stationIntro: string, config: PockedioConfig): string {
+  return formatDjNoteSurface(stationIntro, config);
+}
+
+function formatDjNoteSurface(note: string, config: PockedioConfig): string {
+  if (!note) {
+    return "";
+  }
+  return renderTuiDjNoteBlock(formatRuntimeDjDisplayName(config), note, {
+    color: Boolean(defaultOutput.isTTY),
+    width: defaultOutput.columns
+  });
+}
+
+function formatReplySurface(reply: string, config: PockedioConfig): string {
+  if (!reply) {
+    return "";
+  }
+  return renderTuiReplyBlock(formatRuntimeDjDisplayName(config), reply, {
+    color: Boolean(defaultOutput.isTTY),
+    width: defaultOutput.columns
+  });
 }
 
 function formatWarmStationIntro(station: GeneratedStation, userText: string): string {
@@ -1707,8 +2059,11 @@ async function generateMusicRecommendationResponse(input: {
     "End by asking whether they want you to build or play that station.",
     formatLanguageInstruction(input.config),
     "Do not claim playback has started.",
+    "Do not claim the user has current tasks, meetings, calendar pressure, or scheduled work unless the user request or Calendar summary explicitly says so. If diary context suggests tasks, phrase it as past/recent context, not today's schedule.",
+    formatLocalTimeContextInstruction(input.context),
     `Calendar summary: ${input.context?.calendar?.summary ?? "not available"}`,
     `Calendar listening hint: ${input.context?.calendar?.listeningHint ?? "not available"}`,
+    formatCalendarStateForPrompt(input.context?.calendar?.state),
     `Weather summary: ${input.context?.weather?.summary ?? "not available"}`,
     `Weather listening hint: ${input.context?.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${input.context?.diary?.summary ?? "not available"}`,
@@ -1718,14 +2073,14 @@ async function generateMusicRecommendationResponse(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return appendPendingStationChoicePrompt(result.value.trim());
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(result.value.trim(), input.config));
   }
 
-  return appendPendingStationChoicePrompt([
+  return appendPendingStationChoicePrompt(formatDjNoteSurface([
     "I could not get a polished recommendation reply this turn, but I can still help with the music.",
     "",
     "Want me to search directly from your request and build a five-track station?"
-  ].join("\n"));
+  ].join("\n"), input.config));
 }
 
 function isPendingStationConfirmation(text: string): boolean {
@@ -1784,11 +2139,22 @@ function isCurrentTrackQuestion(text: string): boolean {
     || /\b(tell me|what do you know)\b.*\b(this song|this track|current song|current track)\b/.test(normalized);
 }
 
+function isCurrentArtistBiographicalFollowupQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  const hasCurrentArtistReference = /\b(she|he|they|her|him|them|his|their|this artist|that artist|the artist|this singer|that singer|the singer|this vocalist|that vocalist|the vocalist)\b/.test(normalized);
+  const hasBiographicalCue = /\b(when|where|how old|born|birthday|birthplace|from|age|alive|dead|died|passed away|band|group)\b/.test(normalized);
+  return hasCurrentArtistReference && hasBiographicalCue;
+}
+
 function isMusicKnowledgeQuestion(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return /^(tell me about|can you tell me about|what do you know about|give me background on|what'?s the story behind|who is|who was)\b/.test(normalized)
     || /\b(background|backgroun|story|history|meaning|origin|influence|influences)\b.*\b(song|track|album|artist|band|composer|singer|musician|producer)\b/.test(normalized)
     || /\b(song|track|album|artist|band|composer|singer|musician|producer)\b.*\b(background|backgroun|story|history|meaning|origin|influence|influences)\b/.test(normalized);
+}
+
+function isLyricsRequest(text: string): boolean {
+  return /\b(lyrics?|lyric)\b/i.test(text);
 }
 
 function isFreshnessSensitiveMusicQuestion(text: string): boolean {
@@ -1847,6 +2213,7 @@ function formatFreshnessUnavailableResponse(userText: string): string {
 function isStationStartingIntent(type: SessionIntent["type"]): boolean {
   return type === "playback_request"
     || type === "direct_playback_request"
+    || type === "queue_position_playback"
     || type === "single_track_playback"
     || type === "favorite_playback_request"
     || type === "music_recommendation";
@@ -1854,8 +2221,10 @@ function isStationStartingIntent(type: SessionIntent["type"]): boolean {
 
 function isProtectedOperationalIntent(type: SessionIntent["type"]): boolean {
   return type === "stop"
+    || type === "main_menu"
     || type === "pause"
     || type === "resume"
+    || type === "replay"
     || type === "previous"
     || type === "playback_status"
     || type === "feedback_like"
@@ -1876,20 +2245,26 @@ function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: str
     return false;
   }
   if (intent.type === "stop"
+    || intent.type === "main_menu"
     || intent.type === "session_exit"
     || intent.type === "pause"
     || intent.type === "resume"
+    || intent.type === "replay"
     || intent.type === "playback_status"
     || intent.type === "favorite_list_request"
     || intent.type === "identity_capability"
     || intent.type === "explicit_dj_audio_request"
     || intent.type === "session_memory_update"
+    || intent.type === "queue_position_playback"
     || intent.type === "single_track_playback"
     || intent.type === "favorite_playback_request"
     || intent.type === "single_track_selection"
     || intent.type === "pending_station_confirmation"
     || intent.type === "pending_station_dj_program"
     || intent.type === "pending_station_decline") {
+    return false;
+  }
+  if (isLyricsRequest(userText)) {
     return false;
   }
   if ((intent.type === "playback_request" || intent.type === "direct_playback_request") && hasExplicitPlaybackCommand(userText)) {
@@ -1931,10 +2306,10 @@ async function handlePendingStationFollowup(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return appendPendingStationChoicePrompt(result.value.trim());
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(result.value.trim(), input.config));
   }
 
-  return appendPendingStationChoicePrompt(`Got it. I’ll shape it around: ${input.userText.trim()}.\n\nPlay this version?`);
+  return appendPendingStationChoicePrompt(formatDjNoteSurface(`Got it. I’ll shape it around: ${input.userText.trim()}.\n\nPlay this version?`, input.config));
 }
 
 function isPendingStationQuestion(text: string): boolean {
@@ -1962,10 +2337,10 @@ async function answerPendingStationQuestion(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return appendPendingStationChoicePrompt(result.value.trim());
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(result.value.trim(), input.config));
   }
 
-  return appendPendingStationChoicePrompt("I’d keep it close to the direction we just discussed, then adjust once the first track lands.\n\nPlay this version?");
+  return appendPendingStationChoicePrompt(formatDjNoteSurface("I’d keep it close to the direction we just discussed, then adjust once the first track lands.\n\nPlay this version?", input.config));
 }
 
 function mergePendingStationRequest(previous: string, refinement: string): string {
@@ -2075,7 +2450,7 @@ async function generateConversationResponse(input: {
   const prompt = formatConversationPrompt(input.userText, input.playbackState, input.config, input.context);
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return result.value.trim();
+    return sanitizeDjNameAsUserAddress(result.value.trim(), input.config);
   }
 
   return formatConversationFallback(input.userText, input.playbackState, input.config);
@@ -2090,19 +2465,109 @@ function formatConversationPrompt(
   const displayName = config ? formatRuntimeDjDisplayName(config) : "Pockedio";
   return [
     `You are ${displayName}, Pockedio's concise personal DJ in a text conversation.`,
+    `${displayName} is the DJ/assistant name, not the user's name. Do not address the user as ${displayName}. If the user's preferred name is unknown, do not use a personal name.`,
     "The user may be sharing a personal memory, listening insight, mood, taste signal, or a question about the current music.",
     "Reply like a radio DJ who is listening carefully: acknowledge the user, connect it to music when useful, and stay brief.",
     "Normal conversation is the default. Do not turn a question into playback unless the user explicitly asks you to play, start, queue, skip, pause, resume, or stop.",
-    "For current-track questions, resolve references like 'the singer', 'this artist', 'this song', and 'this track' from the Current playback facts below.",
+    "For current-track questions, resolve references like 'the singer', 'this artist', 'she', 'he', 'they', 'this song', and 'this track' from the Current playback facts below.",
     "For artist or song background questions, answer from the current metadata and your general music knowledge. If you are not sure, say what is known from the listed metadata instead of inventing details.",
+    "For lyric requests, do not provide full copyrighted lyrics or offer to continue lyrics. You may provide a brief non-lyric summary, or at most one very short excerpt under 10 words when useful.",
     config ? formatLanguageInstruction(config) : "Reply in English by default, even if the user writes in another language. Preserve song titles and artist names as written.",
     "Do not act as a therapist, diagnose the user, or give life advice.",
     "Do not claim spoken audio was generated. Do not change playback or promise queue edits unless the user explicitly asked for playback control.",
+    formatLocalTimeContextInstruction(context),
     formatConversationTasteContext(config, userText),
     formatConversationCalendarContext(context),
+    formatConversationDiaryContext(context),
     formatConversationPlaybackContext(playbackState),
     `User: ${userText}`
   ].filter(Boolean).join("\n");
+}
+
+function formatLocalTimeContextInstruction(context: Partial<PockedioContext> | undefined): string {
+  if (!context?.timeOfDay && !context?.now) {
+    return "Local time context: not available. Do not invent a specific daypart unless the user states one.";
+  }
+
+  const parts = [
+    context.timeOfDay ? `device-local daypart=${context.timeOfDay}` : "",
+    context.now ? `timestamp=${context.now}` : ""
+  ].filter(Boolean).join(", ");
+  return `Local time context: ${parts}. Treat the device-local daypart as authoritative; do not call it morning, evening, or night if it conflicts.`;
+}
+
+function alignGeneratedTextToLocalDaypart(
+  response: string,
+  userText: string,
+  context: Partial<PockedioContext> | undefined
+): string {
+  const localDaypart = context?.timeOfDay;
+  if (!localDaypart) {
+    return response;
+  }
+
+  const requestedDaypart = extractRequestedDaypart(userText);
+  const localPhrase = formatLocalDaypartPhrase(localDaypart);
+  return [
+    { daypart: "morning" as const, pattern: /\b(this\s+)?morning\b/gi },
+    { daypart: "afternoon" as const, pattern: /\b(this\s+)?afternoon\b/gi },
+    { daypart: "evening" as const, pattern: /\b(this\s+)?evening\b/gi },
+    { daypart: "night" as const, pattern: /\btonight\b/gi }
+  ].reduce((text, { daypart, pattern }) => {
+    if (daypart === localDaypart || requestedDaypart === daypart) {
+      return text;
+    }
+    return text.replace(pattern, (match) => matchCapitalization(localPhrase, match));
+  }, response);
+}
+
+function extractRequestedDaypart(text: string): PockedioContext["timeOfDay"] | undefined {
+  const normalized = text.toLowerCase();
+  if (/\b(this\s+)?morning\b/.test(normalized)) {
+    return "morning";
+  }
+  if (/\b(this\s+)?afternoon\b/.test(normalized)) {
+    return "afternoon";
+  }
+  if (/\b(this\s+)?evening\b/.test(normalized)) {
+    return "evening";
+  }
+  if (/\btonight\b|\bnight\b/.test(normalized)) {
+    return "night";
+  }
+  return undefined;
+}
+
+function formatLocalDaypartPhrase(daypart: PockedioContext["timeOfDay"]): string {
+  if (daypart === "night") {
+    return "tonight";
+  }
+  return `this ${daypart}`;
+}
+
+function matchCapitalization(replacement: string, original: string): string {
+  if (!original || original[0] !== original[0].toUpperCase()) {
+    return replacement;
+  }
+  return `${replacement[0]?.toUpperCase() ?? ""}${replacement.slice(1)}`;
+}
+
+function sanitizeDjNameAsUserAddress(response: string, config?: PockedioConfig): string {
+  const displayName = config ? formatRuntimeDjDisplayName(config) : "";
+  if (!displayName || displayName.toLowerCase() === "pockedio") {
+    return response;
+  }
+
+  const name = escapeRegExp(displayName);
+  return response
+    .replace(new RegExp(`^${name},\\s+`, "i"), "")
+    .replace(new RegExp(`,\\s*${name}([.!?])`, "gi"), "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function formatConversationTasteContext(config: PockedioConfig | undefined, userText: string): string {
@@ -2127,14 +2592,54 @@ function formatConversationCalendarContext(context: Partial<PockedioContext> | u
   }
   return [
     `Calendar summary: ${context.calendar.summary}`,
-    `Calendar listening hint: ${context.calendar.listeningHint}`
+    `Calendar listening hint: ${context.calendar.listeningHint}`,
+    formatCalendarStateForPrompt(context.calendar.state),
+    "Use calendar only as schedule evidence. Treat future events as upcoming and recent events as past pattern; do not invent tasks, pressure, or feelings."
   ].join("\n");
+}
+
+function formatConversationDiaryContext(context: Partial<PockedioContext> | undefined): string {
+  if (!context?.diary) {
+    return "";
+  }
+  const diaryMemories = (context.memorySummaries ?? [])
+    .filter((memory) => memory.kind === "diary" || memory.content.startsWith("Diary memory:"))
+    .slice(0, 3)
+    .map((memory) => memory.content.replace(/\s+/g, " ").trim());
+  return [
+    `Diary summary: ${context.diary.summary}`,
+    `Diary listening hint: ${context.diary.listeningHint}`,
+    diaryMemories.length > 0 ? `Diary memory summaries: ${diaryMemories.join(" | ")}` : "",
+    "Diary context is recent context, not proof of the user's current schedule or identity. Use it lightly and do not sound clinical."
+  ].filter(Boolean).join("\n");
+}
+
+function shouldReadConversationContext(text: string): boolean {
+  return isContextualCalendarConversation(text) || isContextualPersonalConversation(text);
+}
+
+function buildContextOptionsForUserText(text: string): ContextBuilderOptions {
+  const calendarWindow = shouldUseWiderCalendarWindow(text) ? "last7DaysTodayAndNext3Days" : undefined;
+  return {
+    memoryQuery: text,
+    ...(calendarWindow ? { calendarWindow } : {})
+  };
+}
+
+function shouldUseWiderCalendarWindow(text: string): boolean {
+  return /\b(tomorrow|next few days|next\s+\d+\s+days|this week|next week|week ahead|my week|schedule ahead|upcoming)\b/i.test(text);
 }
 
 function isContextualCalendarConversation(text: string): boolean {
   const normalized = text.trim().toLowerCase();
-  return /\b(today|this morning|this afternoon|tonight|my day|my schedule|calendar|meeting|meetings|focus block|work block|get through|afternoon|evening|morning)\b/.test(normalized)
+  return /\b(today|tomorrow|next few days|this week|next week|upcoming|this morning|this afternoon|tonight|my day|my schedule|calendar|meeting|meetings|focus block|work block|get through|afternoon|evening|morning)\b/.test(normalized)
     && /\b(how|what|help|suggest|fit|fits|should|listen|music|feel|look|plan|through)\b/.test(normalized);
+}
+
+function isContextualPersonalConversation(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return /\b(diary|journal|memory|mood|grief|loss|sad|heavy|tired|exhausted|stressed|reflective)\b/.test(normalized)
+    && /\b(diary|journal|mood|feel|feels|felt|music|song|songs|listen|hear|station|set|fit|fits|should)\b/.test(normalized);
 }
 
 function isTasteInsightQuestion(text: string): boolean {
@@ -2177,11 +2682,14 @@ function formatConversationFallback(userText: string, playbackState: Interactive
     ? undefined
     : playbackState.storedTracks?.[playbackState.currentIndex]?.track;
   if (current) {
+    if (isLyricsRequest(userText)) {
+      return `I can’t provide full lyrics for ${current.title} - ${current.artist}, but I can summarize the song’s mood or talk about the line you’re thinking of.`;
+    }
     if (isCurrentTrackQuestion(userText)) {
       return `${current.artist} is the listed artist for ${current.title}. I do not have verified credits beyond the current playback metadata right now.`;
     }
-    if (isMusicKnowledgeQuestion(userText)) {
-      return `I can ground this in what is playing: ${current.title} is listed under ${current.artist}. I do not have verified background details beyond the current playback metadata right now.`;
+    if (isMusicKnowledgeQuestion(userText) || isCurrentArtistBiographicalFollowupQuestion(userText)) {
+      return `I can ground this in the current metadata: the listed artist for ${current.title} is ${current.artist}. I do not have verified biographical details beyond the current playback metadata right now.`;
     }
     return `I hear that. I will keep ${current.title} - ${current.artist} in that personal context and let the set stay music-first.`;
   }
@@ -2191,7 +2699,7 @@ function formatConversationFallback(userText: string, playbackState: Interactive
   if (isAmbiguousMusicAdjustment(userText)) {
     return "Do you want me to shape a station in that direction, or just talk through the mood first?";
   }
-  if (isMusicKnowledgeQuestion(userText) || isCurrentTrackQuestion(userText)) {
+  if (isMusicKnowledgeQuestion(userText) || isCurrentTrackQuestion(userText) || isCurrentArtistBiographicalFollowupQuestion(userText)) {
     return "I do not have a current track to ground that in right now. Tell me a song or artist, or start a station and I can talk about what is playing.";
   }
   if (isPersonalMoodStatement(userText)) {
@@ -2316,9 +2824,11 @@ function isPersonalMoodStatement(userText: string): boolean {
   return /\b(i'?m|i am|feel|feeling)\b.*\b(tired|exhausted|drained|stressed|grumpy|sad|anxious|overwhelmed|low)\b/.test(text);
 }
 
-export async function runInteractiveSession(config: PockedioConfig = loadConfig()): Promise<void> {
+export async function runInteractiveSession(config: PockedioConfig = loadConfig()): Promise<InteractiveSessionOutcome> {
   const rl = readline.createInterface({ input: defaultInput, output: defaultOutput });
+  const livePromptView: ReadlinePromptView = { line: "", cursor: 0 };
   const playbackState: InteractivePlaybackState = {};
+  let outcome: InteractiveSessionOutcome = "exit";
   const interruptState: InteractiveInterruptState = {
     playbackState,
     exiting: false,
@@ -2333,21 +2843,39 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
   });
   process.on("SIGINT", handleInterrupt);
   stopStalePockedioPlaybackProcesses();
-  playbackState.writeOutput = createPromptSafeOutputWriter(rl, defaultOutput, () => playbackState.isAwaitingInput === true);
+  playbackState.writeOutput = createPromptSafeOutputWriter(livePromptView, defaultOutput, () => playbackState.isAwaitingInput === true);
   runMigrations(config);
   const store = new MemoryStore(config);
   const sessionId = store.createSession("conversation", "interactive session");
   store.close();
   const statusWriter = createInteractiveStatusWriter(defaultOutput);
   try {
-    console.log(formatInteractiveStartupGuide(formatInteractiveStartupDisplayName(config), formatStartupSetupNote(config)));
+    console.log(formatInteractiveStartupGuide(formatInteractiveStartupDisplayName(config), formatStartupSetupNote(config), {
+      color: Boolean(defaultOutput.isTTY),
+      width: defaultOutput.columns
+    }));
     while (true) {
       let line: string;
       try {
         playbackState.isAwaitingInput = true;
-        line = playbackState.pendingSingleTrackSelection && defaultInput.isTTY && defaultOutput.isTTY
-          ? await promptPendingSingleTrackSelection(playbackState.pendingSingleTrackSelection)
-          : await rl.question("> ");
+        const pendingSingleTrackSelection = playbackState.pendingSingleTrackSelection;
+        const usesInlinePicker = Boolean(pendingSingleTrackSelection && defaultInput.isTTY && defaultOutput.isTTY);
+        line = usesInlinePicker
+          ? await promptPendingSingleTrackSelection(pendingSingleTrackSelection!)
+          : await questionWithInteractiveFrame(rl, defaultInput, defaultOutput, livePromptView, handleInterrupt, {
+              color: Boolean(defaultOutput.isTTY),
+              width: defaultOutput.columns
+            });
+        const submittedTurn = formatInteractiveSubmittedUserTurn(line, {
+          color: Boolean(defaultOutput.isTTY),
+          width: defaultOutput.columns
+        });
+        if (!usesInlinePicker) {
+          clearInteractiveSubmittedInputEcho(defaultOutput);
+        }
+        if (submittedTurn) {
+          defaultOutput.write(submittedTurn);
+        }
       } catch (error) {
         if (error instanceof Error && error.message === "readline was closed") {
           break;
@@ -2359,6 +2887,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
       const controller = new AbortController();
       interruptState.activeTurnController = controller;
       const turnStatus = createTurnScopedStatusWriter(statusWriter, formatInitialInteractiveTurnStatus(line, playbackState));
+      const stopProcessingQuitKeypress = watchProcessingQuitKeypress(defaultInput, interruptState);
       let result: SessionTurnResult;
       try {
         result = await runSessionTurn({
@@ -2368,22 +2897,27 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
           sessionId,
           endSession: false,
           playbackState,
-          writeOutput: createTurnScopedOutputWriter((text) => console.log(text), turnStatus.finish),
+          writeOutput: createTurnScopedOutputWriter((text) => console.log(formatInteractiveOutputBlock(text)), turnStatus.finish),
           writeStatus: turnStatus.writeStatus
         });
       } catch (error) {
         if (isCancellationError(error)) {
           recordCancelledTurn(config, sessionId);
           turnStatus.finish();
+          if (interruptState.exiting) {
+            break;
+          }
           console.log("Cancelled.");
           continue;
         }
         throw error;
       } finally {
+        stopProcessingQuitKeypress();
         turnStatus.finish();
         interruptState.activeTurnController = undefined;
       }
       if (result.shouldExit) {
+        outcome = result.shouldReturnToMenu ? "menu" : "exit";
         break;
       }
     }
@@ -2402,6 +2936,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
     }
     rl.close();
   }
+  return outcome;
 }
 
 function promptPendingSingleTrackSelection(selection: PendingSingleTrackSelection): Promise<string> {
@@ -2418,10 +2953,7 @@ function promptPendingSingleTrackSelection(selection: PendingSingleTrackSelectio
     };
     const cleanup = (value: string) => {
       input.off("keypress", onKeypress);
-      if (input.isTTY) {
-        input.setRawMode(previousRawMode);
-      }
-      input.pause();
+      restoreInputAfterInlinePrompt(input, previousRawMode);
       output.write("\x1B[?25h\n");
       resolve(value);
     };
@@ -2440,13 +2972,17 @@ function promptPendingSingleTrackSelection(selection: PendingSingleTrackSelectio
         cleanup(String(selectedIndex + 1));
         return;
       }
+      if (key.name === "escape") {
+        cleanup("cancel");
+        return;
+      }
       const numericIndex = Number(key.name) - 1;
       if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < selection.candidates.length) {
         cleanup(String(numericIndex + 1));
         return;
       }
-      if (key.name === "q" || (key.ctrl && key.name === "c")) {
-        cleanup("");
+      if (key.name === "b" || key.name === "q" || (key.ctrl && key.name === "c")) {
+        cleanup("cancel");
       }
     };
 
@@ -2458,9 +2994,61 @@ function promptPendingSingleTrackSelection(selection: PendingSingleTrackSelectio
   });
 }
 
+type InlinePromptInput = Pick<typeof defaultInput, "isTTY" | "isRaw" | "setRawMode" | "resume">;
+
+export function restoreInputAfterInlinePrompt(input: InlinePromptInput, previousRawMode: boolean | undefined): void {
+  if (input.isTTY) {
+    input.setRawMode(Boolean(previousRawMode));
+  }
+  input.resume();
+}
+
+export function watchProcessingQuitKeypress(input: typeof defaultInput, state: InteractiveInterruptState): () => void {
+  if (!input.isTTY) {
+    return () => undefined;
+  }
+
+  const previousRawMode = input.isRaw;
+  let stopped = false;
+  const onKeypress = (_value: string, key: Key) => {
+    if (key.name === "q" && !key.ctrl && !key.meta) {
+      handleInteractiveProcessingQuit(state);
+    }
+  };
+
+  emitKeypressEvents(input);
+  input.resume();
+  input.setRawMode(true);
+  input.on("keypress", onKeypress);
+
+  return () => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    input.off("keypress", onKeypress);
+    restoreInputAfterInlinePrompt(input, previousRawMode);
+    input.pause();
+  };
+}
+
+export function handleInteractiveProcessingQuit(state: InteractiveInterruptState): void {
+  const activeTurnController = state.activeTurnController;
+  if (activeTurnController && !activeTurnController.signal.aborted) {
+    activeTurnController.abort();
+  }
+  state.exiting = true;
+  stopPlaybackForSessionExit(state.playbackState);
+  state.closeReadline();
+}
+
 export function handleInteractiveInterrupt(state: InteractiveInterruptState, now: NowProvider = () => new Date()): void {
   const activeTurnController = state.activeTurnController;
   if (activeTurnController) {
+    if (state.playbackState.activePlayback) {
+      handleInteractiveProcessingQuit(state);
+      return;
+    }
     if (!activeTurnController.signal.aborted) {
       state.suppressIdleInterruptUntil = now().getTime() + 750;
       activeTurnController.abort();
@@ -2476,6 +3064,7 @@ export function handleInteractiveInterrupt(state: InteractiveInterruptState, now
 }
 
 export function stopPlaybackForSessionExit(playbackState: InteractivePlaybackState): void {
+  cancelDjProgramPreparations(playbackState);
   const activePlayback = playbackState.activePlayback;
   playbackState.activePlayback = undefined;
   playbackState.activePlaybackPaused = undefined;
@@ -2504,6 +3093,39 @@ function storeStation(
     storedTracks.push({ dbId, track });
   }
   return storedTracks;
+}
+
+function buildStationAvoidTracks(store: MemoryStore, playbackState?: InteractivePlaybackState): StationTrackIdentity[] {
+  const currentQueue = (playbackState?.storedTracks ?? []).map((entry) => ({
+    title: entry.track.title,
+    artist: entry.track.artist
+  }));
+  return dedupeStationTrackIdentities([
+    ...currentQueue,
+    ...store.getRecentPlayedTracks(25)
+  ]).slice(0, 25);
+}
+
+function dedupeStationTrackIdentities(tracks: StationTrackIdentity[]): StationTrackIdentity[] {
+  const seen = new Set<string>();
+  const deduped: StationTrackIdentity[] = [];
+  for (const track of tracks) {
+    const key = normalizeTrackIdentityKey(track);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(track);
+  }
+  return deduped;
+}
+
+function normalizeTrackIdentityKey(track: StationTrackIdentity): string {
+  return `${track.title} - ${track.artist}`
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 async function reshapeRemainingQueueForFeedback(input: {
@@ -2536,6 +3158,7 @@ async function reshapeRemainingQueueForFeedback(input: {
     request,
     config: input.config,
     context,
+    avoidTracks: buildStationAvoidTracks(input.store, input.playbackState),
     provider: input.provider,
     llm: input.llm,
     signal: input.signal
@@ -2598,12 +3221,14 @@ async function reshapeRemainingQueueForFeedback(input: {
 }
 
 function isQueueReshapeFeedback(action: FeedbackAction): boolean {
-  return action === "more_like_this" || action === "less_like_this";
+  return action === "more_like_this" || action === "less_like_this" || action === "change_vibe";
 }
 
 function buildFeedbackReshapeRequest(baseRequest: string, currentTrack: StationTrack, action: FeedbackAction): string {
   const direction = action === "more_like_this"
     ? `more like the current track ${currentTrack.title} - ${currentTrack.artist}`
+    : action === "change_vibe"
+    ? `a different, gentler tone than the current track ${currentTrack.title} - ${currentTrack.artist}`
     : `less like the current track ${currentTrack.title} - ${currentTrack.artist}, without banning it`;
   return `${baseRequest}. Feedback for remaining queue: ${direction}.`;
 }
@@ -2661,10 +3286,7 @@ async function generateStationDjProgramIntro(input: {
 
   if (!input.playFile) {
     return {
-      text: [
-        formatDjTranscriptLabel(input.config),
-        text
-      ].join("\n"),
+      text: formatDjTranscript(input.config, text),
       rawText: text,
       audioPath: djAudio.audioPath,
       latencyMs: djAudio.latencyMs,
@@ -2681,8 +3303,7 @@ async function generateStationDjProgramIntro(input: {
 
   return {
     text: [
-      formatDjTranscriptLabel(input.config),
-      text,
+      formatDjTranscript(input.config, text),
       playback.ok ? "" : `Playback detail: ${playback.error ?? "DJ intro playback failed."}`
     ].filter(Boolean).join("\n"),
     rawText: text,
@@ -2747,6 +3368,74 @@ function getCurrentPlaybackTrack(playbackState: InteractivePlaybackState | undef
   return playbackState?.storedTracks?.[currentIndex]?.track;
 }
 
+function resolveFeedbackTarget(
+  action: FeedbackAction,
+  userText: string,
+  playbackState: InteractivePlaybackState | undefined
+): StoredPlaybackTrack | undefined {
+  if (action !== "favorite") {
+    return undefined;
+  }
+  const queuePosition = extractFavoriteQueuePosition(userText);
+  if (queuePosition !== undefined) {
+    return playbackState?.storedTracks?.find((entry) => entry.track.position === queuePosition);
+  }
+  const query = extractNamedFavoriteQuery(userText);
+  if (!query) {
+    return undefined;
+  }
+  return findQueuedTrackByQuery(playbackState?.storedTracks ?? [], query);
+}
+
+function extractFavoriteQueuePosition(text: string): number | undefined {
+  const normalized = text.trim().toLowerCase();
+  const positional = normalized.match(/\b(?:favorite|save)\s+(?:the\s+)?(first|second|third|fourth|fifth|last)\s+(?:song|track|one)\b/)
+    ?? normalized.match(/\b(?:favorite|save)\s+(?:song|track|#)?\s*([1-9]\d*)\b/);
+  if (!positional) {
+    return undefined;
+  }
+  const token = positional[1];
+  if (/^\d+$/.test(token)) {
+    return Number(token);
+  }
+  const positions: Record<string, number> = {
+    first: 1,
+    second: 2,
+    third: 3,
+    fourth: 4,
+    fifth: 5,
+    last: 5
+  };
+  return positions[token];
+}
+
+function extractNamedFavoriteQuery(text: string): string {
+  const match = text.trim().match(/^(?:please\s+)?favorite\s+(.+?)(?:\s+please)?[.!?]*$/i);
+  const query = match?.[1]?.trim() ?? "";
+  return /^(this|it|this song|this track)$/i.test(query) ? "" : query;
+}
+
+function findQueuedTrackByQuery(queue: StoredPlaybackTrack[], query: string): StoredPlaybackTrack | undefined {
+  const normalizedQuery = normalizeTrackSearchText(query);
+  if (!normalizedQuery) {
+    return undefined;
+  }
+  return queue.find((entry) => {
+    const title = normalizeTrackSearchText(entry.track.title);
+    const titleAndArtist = normalizeTrackSearchText(`${entry.track.title} ${entry.track.artist}`);
+    return title.includes(normalizedQuery)
+      || titleAndArtist.includes(normalizedQuery)
+      || normalizedQuery.includes(title);
+  });
+}
+
+function normalizeTrackSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, "")
+    .replace(/[^a-z0-9\u3400-\u9fff]+/g, "");
+}
+
 function formatUnavailableTrackFallbackForResponse(tracks: StationTrack[]): string {
   return tracks.some((track) => !track.playable.available)
     ? `${tracks.filter((track) => !track.playable.available).length} unavailable track(s) kept in the station.`
@@ -2757,15 +3446,16 @@ function stopActivePlayback(playbackState: InteractivePlaybackState, store: Memo
   if (!playbackState.activePlayback) {
     return;
   }
-  playbackState.activePlayback.stop();
+  const activePlayback = playbackState.activePlayback;
+  playbackState.activePlayback = undefined;
   if (playbackState.currentTrackId) {
     store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
   }
-  playbackState.activePlayback = undefined;
   playbackState.activePlaybackPaused = undefined;
   playbackState.currentIndex = undefined;
   playbackState.currentTrackId = undefined;
   playbackState.currentStartedAt = undefined;
+  activePlayback.stop();
 }
 
 function cancelDjProgramPreparations(playbackState: InteractivePlaybackState | undefined): void {
@@ -2787,12 +3477,26 @@ async function advancePlayback(
   store: MemoryStore,
   startUrlPlayback: StartUrlPlayback
 ): Promise<string> {
-  playbackState.activePlayback?.stop();
+  const nextIndex = findNextPlayableIndex(playbackState, playbackState.currentIndex ?? -1);
+  const activePlayback = playbackState.activePlayback;
+  playbackState.activePlayback = undefined;
   playbackState.activePlaybackPaused = undefined;
+  activePlayback?.stop();
   if (playbackState.currentTrackId) {
     store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
   }
-  const nextIndex = (playbackState.currentIndex ?? -1) + 1;
+  if (nextIndex === undefined) {
+    playbackState.currentIndex = undefined;
+    playbackState.currentTrackId = undefined;
+    playbackState.currentStartedAt = undefined;
+    if (playbackState.station) {
+      playbackState.pendingStationRequest = playbackState.station.request;
+      playbackState.pendingStationOriginalRequest = playbackState.station.request;
+      playbackState.pendingStationNeedsChoice = true;
+      return formatStationCompleteResponse();
+    }
+    return "No playable tracks remain.";
+  }
   const preparedIntro = getPreparedDjIntro(playbackState, nextIndex);
   const response = await startTrackAt(playbackState, config, store, nextIndex, startUrlPlayback, () => new Date(), {
     intro: preparedIntro,
@@ -2819,8 +3523,10 @@ async function retreatPlayback(
     return "No previous track is available right now.";
   }
 
-  playbackState.activePlayback?.stop();
+  const activePlayback = playbackState.activePlayback;
+  playbackState.activePlayback = undefined;
   playbackState.activePlaybackPaused = undefined;
+  activePlayback?.stop();
   if (playbackState.currentTrackId) {
     store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
   }
@@ -2831,9 +3537,74 @@ async function retreatPlayback(
   });
 }
 
+async function playQueuedTrackAt(
+  playbackState: InteractivePlaybackState | undefined,
+  config: PockedioConfig,
+  store: MemoryStore,
+  queueIndex: number,
+  startUrlPlayback: StartUrlPlayback
+): Promise<string> {
+  if (!playbackState?.station || !playbackState.storedTracks?.[queueIndex]?.track.playable.available) {
+    return "That queue position is not playable right now.";
+  }
+
+  const activePlayback = playbackState.activePlayback;
+  playbackState.activePlayback = undefined;
+  playbackState.activePlaybackPaused = undefined;
+  activePlayback?.stop();
+  if (playbackState.currentTrackId) {
+    store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
+  }
+  const preparedIntro = getPreparedDjIntro(playbackState, queueIndex);
+  return startTrackAt(playbackState, config, store, queueIndex, startUrlPlayback, () => new Date(), {
+    intro: preparedIntro,
+    startDuckedIntroPlayback: playbackState.startDuckedIntroPlayback
+  });
+}
+
+async function replayCurrentTrack(
+  playbackState: InteractivePlaybackState | undefined,
+  config: PockedioConfig,
+  store: MemoryStore,
+  startUrlPlayback: StartUrlPlayback
+): Promise<string> {
+  if (!playbackState?.station || playbackState.currentIndex === undefined) {
+    return "No current track is available to replay right now.";
+  }
+
+  const currentIndex = playbackState.currentIndex;
+  const currentEntry = playbackState.storedTracks?.[currentIndex];
+  if (!currentEntry?.track.playable.available) {
+    return "The current track is not playable right now.";
+  }
+
+  const activePlayback = playbackState.activePlayback;
+  playbackState.activePlayback = undefined;
+  playbackState.activePlaybackPaused = undefined;
+  activePlayback?.stop();
+  if (playbackState.currentTrackId) {
+    store.updateTrackPlayback(playbackState.currentTrackId, "skipped");
+  }
+  const preparedIntro = getPreparedDjIntro(playbackState, currentIndex);
+  return startTrackAt(playbackState, config, store, currentIndex, startUrlPlayback, () => new Date(), {
+    intro: preparedIntro,
+    startDuckedIntroPlayback: playbackState.startDuckedIntroPlayback
+  });
+}
+
 function findPreviousPlayableIndex(playbackState: InteractivePlaybackState, currentIndex: number): number | undefined {
   const storedTracks = playbackState.storedTracks ?? [];
   for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    if (storedTracks[index]?.track.playable.available) {
+      return index;
+    }
+  }
+  return undefined;
+}
+
+function findNextPlayableIndex(playbackState: InteractivePlaybackState, currentIndex: number): number | undefined {
+  const storedTracks = playbackState.storedTracks ?? [];
+  for (let index = currentIndex + 1; index < storedTracks.length; index += 1) {
     if (storedTracks[index]?.track.playable.available) {
       return index;
     }
@@ -2936,14 +3707,10 @@ function formatTrackStartFailure(track: StationTrack, reason: string): string {
 }
 
 function formatDjTranscript(config: PockedioConfig, text: string): string {
-  return [
-    formatDjTranscriptLabel(config),
-    text.trim()
-  ].filter(Boolean).join("\n");
-}
-
-function formatDjTranscriptLabel(config: PockedioConfig): string {
-  return `${formatRuntimeDjDisplayName(config)}:`;
+  return renderTuiDjNoteBlock(formatRuntimeDjDisplayName(config), text.trim(), {
+    color: Boolean(defaultOutput.isTTY),
+    width: defaultOutput.columns
+  });
 }
 
 async function handleActivePlaybackFailure(
@@ -3228,10 +3995,7 @@ async function generateTrackDjProgramIntro(input: {
     return { text: formatDjAudioFallbackText(text, djAudio.error), rawText: text };
   }
   return {
-    text: [
-      formatDjTranscriptLabel(input.config),
-      text
-    ].join("\n"),
+    text: formatDjTranscript(input.config, text),
     rawText: text,
     audioPath: djAudio.audioPath,
     latencyMs: djAudio.latencyMs,
@@ -3298,19 +4062,16 @@ function formatTrackStartSurface(
   queue: StoredPlaybackTrack[] = [{ dbId: "", track }],
   currentIndex = Math.max(0, track.position - 1)
 ): string {
-  return [
-    formatTrackStartNowPlayingLine(track, startedAt, now, queue.length),
-    "",
-    `${formatRuntimeDjDisplayName(config)}'s note:`,
-    formatDjTrackNote(track),
-    formatUpNext(queue, currentIndex),
-    formatCurrentQueueSnapshot(queue, currentIndex)
-  ].filter(Boolean).join("\n");
-}
-
-function formatTrackStartNowPlayingLine(track: StationTrack, startedAt: Date | undefined, now: Date, totalTracks: number): string {
-  const positionPrefix = totalTracks > 1 ? `${track.position}/${totalTracks}  ` : "";
-  return `Now playing: ${positionPrefix}${track.title} - ${track.artist}\n${formatElapsedBar(startedAt, now, getTrackDurationMs(track))}`;
+  return renderPlaybackSurface({
+    queue,
+    currentIndex,
+    currentStartedAt: startedAt,
+    now,
+    djDisplayName: formatRuntimeDjDisplayName(config),
+    trackNote: formatDjTrackNote(track),
+    color: Boolean(defaultOutput.isTTY),
+    width: defaultOutput.columns
+  });
 }
 
 function formatUpNext(queue: StoredPlaybackTrack[], currentIndex: number): string {
@@ -3325,21 +4086,6 @@ function formatUpNext(queue: StoredPlaybackTrack[], currentIndex: number): strin
     "",
     "Up next:",
     ...upcoming.map((entry) => `  ${entry.track.position}. ${entry.track.title} - ${entry.track.artist}`)
-  ].join("\n");
-}
-
-function formatCurrentQueueSnapshot(queue: StoredPlaybackTrack[], currentIndex: number): string {
-  if (queue.length <= 1) {
-    return "";
-  }
-  return [
-    "",
-    "Queue:",
-    ...queue.map((entry, index) => {
-      const marker = index === currentIndex ? ">" : " ";
-      const suffix = entry.track.playable.available ? "" : " (unavailable)";
-      return `${marker} ${entry.track.position}. ${entry.track.title} - ${entry.track.artist}${suffix}`;
-    })
   ].join("\n");
 }
 

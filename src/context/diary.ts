@@ -52,7 +52,7 @@ export async function refreshDiaryHistoryMemory(
   llm: LlmClient,
   options: DiaryHistoryRefreshOptions = {}
 ): Promise<DiaryHistoryRefreshResult> {
-  const files = listDiaryFiles(config.diary.enabled ? config.diary.path : undefined).slice(0, options.limit ?? 120);
+  const files = listDiaryFiles(config.diary.enabled ? config.diary.path : undefined, options.now).slice(0, options.limit ?? 120);
   if (files.length === 0) {
     return {
       available: false,
@@ -205,10 +205,12 @@ export function rankDiaryMemoryItems<T extends { content: string; metadata: unkn
   limit = 5
 ): T[] {
   const queryTokens = tokenizeForDiaryRank(query);
+  const queryMoodTags = extractMoodTags(query);
+  const queryLifeContextTags = extractLifeContextTags(query);
   return items
     .map((item, index) => ({
       item,
-      score: scoreDiaryMemory(item, queryTokens, index)
+      score: scoreDiaryMemory(item, queryTokens, queryMoodTags, queryLifeContextTags, index)
     }))
     .sort((a, b) => b.score - a.score || b.item.createdAt.localeCompare(a.item.createdAt))
     .slice(0, limit)
@@ -298,11 +300,11 @@ function deriveDiaryListeningHint(summary: string): string {
   return "Use diary context lightly; choose music that fits the user's recent emotional energy without over-explaining it.";
 }
 
-function findLatestDiaryFile(root: string): string | null {
-  return listDiaryFiles(root)[0] ?? null;
+function findLatestDiaryFile(root: string, now = new Date()): string | null {
+  return listDiaryFiles(root, now)[0] ?? null;
 }
 
-function listDiaryFiles(root: string | undefined): string[] {
+function listDiaryFiles(root: string | undefined, now = new Date()): string[] {
   if (!root || !fs.existsSync(root)) {
     return [];
   }
@@ -310,7 +312,23 @@ function listDiaryFiles(root: string | undefined): string[] {
   return entries
     .filter((entry) => entry.isFile() && /\.(md|markdown|txt)$/i.test(entry.name))
     .map((entry) => path.join(root, entry.name))
+    .filter((filePath) => !isFutureDatedDiaryFile(filePath, now))
     .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+}
+
+function isFutureDatedDiaryFile(filePath: string, now: Date): boolean {
+  const diaryDate = inferDiaryDate(filePath, undefined);
+  if (!diaryDate) {
+    return false;
+  }
+  return diaryDate > localDateKey(now);
+}
+
+function localDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function inferDiaryDate(filePath: string, sourceMtime: string | undefined): string | undefined {
@@ -351,19 +369,31 @@ function extractTags(text: string, patterns: Record<string, RegExp>): string[] {
 function scoreDiaryMemory(
   item: { content: string; metadata: unknown },
   queryTokens: string[],
+  queryMoodTags: string[],
+  queryLifeContextTags: string[],
   index: number
 ): number {
   const metadata = isRecord(item.metadata) ? item.metadata : {};
+  const moodTags = Array.isArray(metadata.moodTags) ? metadata.moodTags.filter((tag): tag is string => typeof tag === "string") : [];
+  const lifeContextTags = Array.isArray(metadata.lifeContextTags) ? metadata.lifeContextTags.filter((tag): tag is string => typeof tag === "string") : [];
   const searchable = [
     item.content,
     metadata.date,
     metadata.month,
     metadata.musicHint,
-    ...(Array.isArray(metadata.moodTags) ? metadata.moodTags : []),
-    ...(Array.isArray(metadata.lifeContextTags) ? metadata.lifeContextTags : [])
+    ...moodTags,
+    ...lifeContextTags
   ].join(" ").toLowerCase();
   const queryScore = queryTokens.reduce((score, token) => score + (searchable.includes(token) ? 4 : 0), 0);
-  return queryScore + Math.max(0, 3 - index * 0.1);
+  const moodScore = queryMoodTags.reduce(
+    (score, tag, tagIndex) => score + (moodTags.includes(tag) ? Math.max(3, 8 - tagIndex) : 0),
+    0
+  );
+  const lifeContextScore = queryLifeContextTags.reduce(
+    (score, tag) => score + (lifeContextTags.includes(tag) ? 4 : 0),
+    0
+  );
+  return queryScore + moodScore + lifeContextScore + Math.max(0, 3 - index * 0.1);
 }
 
 function tokenizeForDiaryRank(query: string): string[] {

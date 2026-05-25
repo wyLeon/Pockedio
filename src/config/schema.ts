@@ -34,11 +34,11 @@ export const pockedioConfigSchema = z.object({
     provider: z.enum(musicProviders).default("netease")
   }).default({}),
   weather: z.object({
-    enabled: z.boolean().default(true),
+    enabled: z.boolean().default(false),
     location: z.string().min(1).default("Shanghai")
   }).default({}),
   calendar: z.object({
-    enabled: z.boolean().default(true)
+    enabled: z.boolean().default(false)
   }).default({}),
   diary: z.object({
     enabled: z.boolean().default(false),

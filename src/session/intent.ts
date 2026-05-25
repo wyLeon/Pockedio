@@ -10,6 +10,7 @@ export type SessionIntentType =
   | "pending_station_refinement"
   | "playback_request"
   | "direct_playback_request"
+  | "queue_position_playback"
   | "single_track_playback"
   | "single_track_selection"
   | "favorite_playback_request"
@@ -27,8 +28,10 @@ export type SessionIntentType =
   | "playback_status"
   | "pause"
   | "resume"
+  | "replay"
   | "previous"
   | "stop"
+  | "main_menu"
   | "session_exit"
   | "explicit_dj_audio_request";
 
@@ -52,6 +55,7 @@ const intentTypes = new Set<SessionIntentType>([
   "pending_station_refinement",
   "playback_request",
   "direct_playback_request",
+  "queue_position_playback",
   "single_track_playback",
   "single_track_selection",
   "favorite_playback_request",
@@ -69,8 +73,10 @@ const intentTypes = new Set<SessionIntentType>([
   "playback_status",
   "pause",
   "resume",
+  "replay",
   "previous",
   "stop",
+  "main_menu",
   "session_exit",
   "explicit_dj_audio_request"
 ]);
@@ -91,7 +97,9 @@ export async function parseIntent(input: string, llm?: LlmClient, options: LlmRe
       "Use favorite_list_request when the user asks to list, show, or see locally saved favorite songs.",
       "Use pause for natural stop-temporarily wording like pause, hold on, wait a second, or stop for a moment.",
       "Use resume for natural continuation wording like resume, keep playing, continue the music, carry on, or go on.",
+      "Use replay when the user asks to replay, restart, or play the current song again.",
       "Use previous for natural back-navigation wording like previous, go back, back one, or go to the previous track.",
+      "Use main_menu when the user asks to return to the main menu.",
       "Use single_track_playback when the user asks to play one specific song title, especially 'play [song] by [artist]'.",
       "Use music_recommendation when the user asks what music they should listen to but does not ask to play it.",
       "Use explicit_dj_audio_request only when the user asks for standalone spoken/audio DJ narration; the runner will redirect this toward station DJ mode.",
@@ -127,8 +135,14 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (isResumeText(text)) {
     return { type: "resume", confidence: "high" };
   }
+  if (isReplayText(text)) {
+    return { type: "replay", confidence: "high" };
+  }
   if (isPreviousText(text)) {
     return { type: "previous", confidence: "high" };
+  }
+  if (/^(main menu|menu|back to menu|return to main menu|go to main menu)$/i.test(text)) {
+    return { type: "main_menu", confidence: "high" };
   }
   if (/^(quit|exit)$/i.test(text) || /\b(quit|exit)\b/.test(text)) {
     return { type: "session_exit", confidence: "high" };
@@ -138,6 +152,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   }
   if (isIdentityCapabilityText(text)) {
     return { type: "identity_capability", confidence: "high" };
+  }
+  if (isLyricsRequestText(text)) {
+    return { type: "conversation", confidence: "high" };
   }
   if (/\b(update|refresh|rebuild|summarize)\b.*\b(taste profile|taste\.md|music taste|taste memory)\b/.test(text)
     || /\b(taste profile|taste\.md|music taste|taste memory)\b.*\b(update|refresh|rebuild|summarize)\b/.test(text)) {
@@ -165,10 +182,14 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(save this vibe|remember this vibe|keep this as a vibe)\b/.test(text)) {
     return { type: "feedback_save_vibe", confidence: "high" };
   }
-  if (/\b(favorite this|save this|add to best list)\b/.test(text)) {
+  if (/\b(favorite (this|it)|save (this|it)|add (this|it) to (my )?best list)\b/.test(text)
+    || /^(please\s+)?favorite\s+.+/.test(text)) {
     return { type: "feedback_favorite", confidence: "high" };
   }
-  if (/\b(change the vibe|different vibe|switch the mood|change mood)\b/.test(text)) {
+  if (isReplacementStationRequestText(text)) {
+    return { type: "playback_request", confidence: "high" };
+  }
+  if (/\b(change the vibe|different vibe|switch the mood|change mood|change the tone|change tone|change the station tone|station tone)\b/.test(text)) {
     return { type: "feedback_change_vibe", confidence: "high" };
   }
   if (/\b(what's playing|what is playing|current song|current track|show queue|where are we|what are we listening to|what'?s next|what is next|what comes next|up next)\b/.test(text)) {
@@ -218,6 +239,10 @@ function isResumeText(text: string): boolean {
     || /^(please\s+)?(keep playing|continue playing|continue the music|carry on|go on|keep going|play on)(\s+please)?[.!?]*$/.test(text);
 }
 
+function isReplayText(text: string): boolean {
+  return /^(please\s+)?(replay|replay this|replay this song|replay this track|restart|restart this|restart this song|restart this track|play this again|play this song again|play this track again|again)(\s+please)?[.!?]*$/.test(text);
+}
+
 function isPreviousText(text: string): boolean {
   return /^(please\s+)?(previous|prev|previous song|previous track|go back|back one|go back one|play previous|play the previous song|play the previous track|go to previous|go to the previous song|go to the previous track)(\s+please)?[.!?]*$/.test(text);
 }
@@ -225,6 +250,10 @@ function isPreviousText(text: string): boolean {
 function isIdentityCapabilityText(text: string): boolean {
   return /\b(who are you|who is talking|who'?s talking|what are you|what can you do|what do you do|how do you work|are you a real dj)\b/.test(text)
     || /^(help|help me)$/i.test(text);
+}
+
+function isLyricsRequestText(text: string): boolean {
+  return /\b(lyrics?|lyric)\b/.test(text);
 }
 
 function isMusicRecommendationText(text: string): boolean {
@@ -242,6 +271,11 @@ function isPlaybackRequestText(text: string): boolean {
   return hasPlaybackCommand(text)
     || hasMusicSubjectWithAction(text)
     || hasMusicSubjectWithUseCase(text);
+}
+
+function isReplacementStationRequestText(text: string): boolean {
+  return /\b(build|make|create|start|play)\b.*\b(another|new|different)\b.*\b(station|set|queue)\b/.test(text)
+    || /\b(another|new|different)\b.*\b(station|set|queue)\b.*\b(change|switch|shift)\b.*\b(vibe|mood|tone)\b/.test(text);
 }
 
 function isFavoritePlaybackRequestText(text: string): boolean {

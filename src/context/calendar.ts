@@ -8,18 +8,38 @@ export type CalendarEvent = {
   isAllDay: boolean;
 };
 
-export type CalendarReadWindow = "today" | "last7Days" | "last7DaysAndToday";
+export type CalendarEventTag = "meeting" | "focus" | "travel" | "social" | "workout" | "personal" | "all_day";
+export type CalendarNowStatus = "in_event" | "before_next_event" | "between_events" | "after_last_event" | "free";
+export type CalendarReadWindow = "today" | "last7Days" | "last7DaysAndToday" | "todayAndNext24Hours" | "last7DaysTodayAndNext3Days";
+
+export type CalendarStateEvent = CalendarEvent & {
+  tags: CalendarEventTag[];
+};
+
+export type CalendarState = {
+  nowStatus: CalendarNowStatus;
+  currentEvent: CalendarStateEvent | null;
+  nextEvent: CalendarStateEvent | null;
+  minutesUntilNext: number | null;
+  freeWindowMinutes: number | null;
+  todayEventCount: number;
+  nextDaysHighlights: string[];
+  recentSchedulePattern: string;
+  tags: CalendarEventTag[];
+};
 
 export type CalendarContext =
   | {
       available: true;
       events: CalendarEvent[];
+      state: CalendarState;
       summary: string;
       listeningHint: string;
     }
   | {
       available: false;
       events: [];
+      state?: undefined;
       summary: string;
       listeningHint: string;
       warning: string;
@@ -49,7 +69,8 @@ tell application "Calendar"
       set eventTitle to summary of evt
       set eventStart to start date of evt
       set eventEnd to end date of evt
-      set end of outputLines to ((name of cal) & " | " & eventTitle & " | " & (eventStart as text) & " | " & (eventEnd as text) & " | false")
+      set eventAllDay to allday event of evt
+      set end of outputLines to ((name of cal) & " | " & eventTitle & " | " & (eventStart as text) & " | " & (eventEnd as text) & " | " & (eventAllDay as text))
     end repeat
   end repeat
 end tell
@@ -63,7 +84,8 @@ export async function readCalendarContext(
   enabled: boolean,
   timeoutMs = 20_000,
   runner: CalendarProcessRunner = runOsaScript,
-  window: CalendarReadWindow = "today"
+  window: CalendarReadWindow = "today",
+  now: Date = new Date()
 ): Promise<CalendarContext> {
   if (!enabled) {
     return unavailableCalendar("Calendar context is disabled.");
@@ -81,6 +103,7 @@ export async function readCalendarContext(
     return {
       available: true,
       events,
+      state: buildCalendarState(events, now),
       summary: summarizeCalendarEvents(events, window),
       listeningHint: buildCalendarListeningHint(events, window)
     };
@@ -173,6 +196,73 @@ export function buildCalendarListeningHint(events: CalendarEvent[], window: Cale
   return `Calendar listening hint for ${label}: ${hints.join("; ")}.`;
 }
 
+export function buildCalendarState(events: CalendarEvent[], now: Date = new Date()): CalendarState {
+  const nowMs = now.getTime();
+  const todayStart = startOfLocalDay(now).getTime();
+  const tomorrowStart = todayStart + 24 * 60 * 60 * 1000;
+  const nextThreeDaysEnd = todayStart + 4 * 24 * 60 * 60 * 1000;
+
+  const datedEvents = events
+    .map((event) => {
+      const start = parseCalendarDate(event.startTime);
+      const end = parseCalendarDate(event.endTime);
+      return start && end ? { event: withCalendarTags(event), start, end } : null;
+    })
+    .filter((event): event is { event: CalendarStateEvent; start: Date; end: Date } => Boolean(event))
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  const current = datedEvents.find(({ start, end }) => start.getTime() <= nowMs && end.getTime() > nowMs) ?? null;
+  const next = datedEvents.find(({ start }) => start.getTime() > nowMs) ?? null;
+  const todayEvents = datedEvents.filter(({ start }) => {
+    const startMs = start.getTime();
+    return startMs >= todayStart && startMs < tomorrowStart;
+  });
+  const pastTodayEvents = todayEvents.filter(({ end }) => end.getTime() <= nowMs);
+  const futureTodayEvents = todayEvents.filter(({ start }) => start.getTime() > nowMs);
+  const recentEvents = datedEvents.filter(({ start }) => start.getTime() < todayStart);
+  const nextDaysHighlights = datedEvents
+    .filter(({ start }) => {
+      const startMs = start.getTime();
+      return startMs >= tomorrowStart && startMs < nextThreeDaysEnd;
+    })
+    .slice(0, 5)
+    .map(({ event }) => `${event.title} at ${event.startTime}`);
+
+  const minutesUntilNext = next ? minutesBetween(nowMs, next.start.getTime()) : null;
+  const nowStatus = deriveNowStatus(Boolean(current), todayEvents.length, pastTodayEvents.length, futureTodayEvents.length, minutesUntilNext);
+  const tags = uniqueTags(datedEvents.flatMap(({ event }) => event.tags));
+
+  return {
+    nowStatus,
+    currentEvent: current?.event ?? null,
+    nextEvent: next?.event ?? null,
+    minutesUntilNext,
+    freeWindowMinutes: current ? 0 : minutesUntilNext,
+    todayEventCount: todayEvents.length,
+    nextDaysHighlights,
+    recentSchedulePattern: formatRecentSchedulePattern(recentEvents.length),
+    tags
+  };
+}
+
+export function formatCalendarStateForPrompt(state: CalendarState | undefined): string {
+  if (!state) {
+    return "Calendar state: not available.";
+  }
+  const parts = [
+    `nowStatus=${state.nowStatus}`,
+    state.currentEvent ? `current=${state.currentEvent.title}` : "",
+    state.nextEvent ? `next=${state.nextEvent.title}` : "",
+    state.minutesUntilNext !== null ? `minutesUntilNext=${state.minutesUntilNext}` : "",
+    state.freeWindowMinutes !== null ? `freeWindowMinutes=${state.freeWindowMinutes}` : "",
+    `todayEventCount=${state.todayEventCount}`,
+    state.nextDaysHighlights.length > 0 ? `nextDays=${state.nextDaysHighlights.join("; ")}` : "",
+    `recent=${state.recentSchedulePattern}`,
+    state.tags.length > 0 ? `tags=${state.tags.join(",")}` : ""
+  ].filter(Boolean).join("; ");
+  return `Calendar state: ${parts}.`;
+}
+
 export function runOsaScript(script: string, timeoutMs: number): Promise<{ stdout: string; stderr: string; timedOut: boolean; code: number | null }> {
   return new Promise((resolve) => {
     const child: ChildProcess = spawn("osascript", ["-e", script], { stdio: ["ignore", "pipe", "pipe"] });
@@ -227,6 +317,17 @@ set startOfWindow to startOfWindow - (7 * 24 * 60 * 60)
 set endOfWindow to startOfToday + (24 * 60 * 60)`;
   }
 
+  if (window === "todayAndNext24Hours") {
+    return String.raw`set startOfWindow to startOfToday
+set endOfWindow to current date + (24 * 60 * 60)`;
+  }
+
+  if (window === "last7DaysTodayAndNext3Days") {
+    return String.raw`set startOfWindow to startOfToday
+set startOfWindow to startOfWindow - (7 * 24 * 60 * 60)
+set endOfWindow to startOfToday + (4 * 24 * 60 * 60)`;
+  }
+
   return String.raw`set startOfWindow to startOfToday
 set endOfWindow to startOfWindow + (24 * 60 * 60)`;
 }
@@ -238,5 +339,93 @@ function calendarWindowSummaryLabel(window: CalendarReadWindow): string {
   if (window === "last7DaysAndToday") {
     return "the last 7 days and today";
   }
+  if (window === "todayAndNext24Hours") {
+    return "today and the next 24 hours";
+  }
+  if (window === "last7DaysTodayAndNext3Days") {
+    return "the last 7 days, today, and the next 3 days";
+  }
   return "today";
+}
+
+function parseCalendarDate(value: string): Date | null {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfLocalDay(date: Date): Date {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function minutesBetween(fromMs: number, toMs: number): number {
+  return Math.max(0, Math.round((toMs - fromMs) / 60_000));
+}
+
+function deriveNowStatus(
+  hasCurrentEvent: boolean,
+  todayEventCount: number,
+  pastTodayEventCount: number,
+  futureTodayEventCount: number,
+  minutesUntilNext: number | null
+): CalendarNowStatus {
+  if (hasCurrentEvent) {
+    return "in_event";
+  }
+  if (futureTodayEventCount > 0 && minutesUntilNext !== null && minutesUntilNext <= 120) {
+    return "before_next_event";
+  }
+  if (pastTodayEventCount > 0 && futureTodayEventCount > 0) {
+    return "between_events";
+  }
+  if (todayEventCount > 0 && futureTodayEventCount === 0) {
+    return "after_last_event";
+  }
+  return "free";
+}
+
+function withCalendarTags(event: CalendarEvent): CalendarStateEvent {
+  return {
+    ...event,
+    tags: classifyCalendarEvent(event)
+  };
+}
+
+function classifyCalendarEvent(event: CalendarEvent): CalendarEventTag[] {
+  const text = `${event.calendarName} ${event.title}`.toLowerCase();
+  const tags: CalendarEventTag[] = [];
+  if (/\b(meeting|sync|review|standup|call|interview|planning|1:1|one on one)\b/.test(text)) {
+    tags.push("meeting");
+  }
+  if (/\b(focus|deep work|write|writing|study|block)\b/.test(text)) {
+    tags.push("focus");
+  }
+  if (/\b(commute|flight|train|travel|airport|trip)\b/.test(text)) {
+    tags.push("travel");
+  }
+  if (/\b(dinner|date|party|family|friend|social)\b/.test(text)) {
+    tags.push("social");
+  }
+  if (/\b(gym|workout|run|training|yoga|walk)\b/.test(text)) {
+    tags.push("workout");
+  }
+  if (/\b(personal|home|life)\b/.test(text)) {
+    tags.push("personal");
+  }
+  if (event.isAllDay) {
+    tags.push("all_day");
+  }
+  return uniqueTags(tags);
+}
+
+function uniqueTags(tags: CalendarEventTag[]): CalendarEventTag[] {
+  return [...new Set(tags)];
+}
+
+function formatRecentSchedulePattern(count: number): string {
+  if (count === 0) {
+    return "No recent calendar events found.";
+  }
+  return `${count} recent event${count === 1 ? "" : "s"} found.`;
 }

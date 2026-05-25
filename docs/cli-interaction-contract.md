@@ -781,8 +781,9 @@ Calendar read modes:
 
 ```text
 first setup / setup calendar -> read last 7 days, store as setup context
-normal conversation          -> read today, store as interactive context
-scheduled DJ                 -> read last 7 days + today, store as scheduled context
+normal conversation          -> read today + next 24 hours, store as interactive context
+future schedule questions    -> read last 7 days + today + next 3 days, store as interactive context
+scheduled DJ                 -> read last 7 days + today + next 3 days, store as scheduled context
 ```
 
 Calendar usage rules:
@@ -790,6 +791,7 @@ Calendar usage rules:
 - Calendar is situational context, not taste memory.
 - Store title, calendar name, start time, end time, and all-day flag only.
 - Derive a short calendar listening hint from event count and event titles.
+- Derive schedule state from titles and times: current event, next event, free window, today's event count, next-days highlights, recent schedule pattern, and broad tags such as meeting, focus, travel, social, workout, personal, and all-day.
 - Use the hint in station generation, recommendation replies, station intros, scheduled DJ copy, and context-like conversation.
 - Do not read event notes, attendees, URLs, or locations.
 - Do not mention calendar in every response; use it when it improves the moment.
@@ -1815,11 +1817,12 @@ station-complete message
 Rules:
 
 - Raw transcript rows remain in SQLite `messages`.
-- Session memory is generated automatically and silently when a session ends.
+- Session memory is generated automatically and silently when a session ends. When the LLM is available, use it to extract structured DJ memory; if unavailable or aborted, fall back to deterministic extraction.
 - Durable summaries are stored as local `memory_items` with kind `summary`.
-- Summaries should capture useful requests, listening memories, preference language, and feedback/control signals.
+- Summaries should capture useful requests, listening memories, preference language, feedback/control signals, and reusable context.
+- Structured summary metadata should include reusable DJ fields when available: `musicTags`, `contextTags`, `avoidTags`, `useCases`, and `confidence`.
 - Routine chatter without durable preference value should not create a summary.
-- Station generation reads recent session summaries during `Reading your context...` and uses them during `Building a station...`.
+- Station generation reads request-ranked session summaries during `Reading your context...` and uses them during `Building a station...` as relevant DJ memories. Explicit current user requests, hard feedback, calendar state, and diary context override old memory.
 - Manual session-memory commands may exist as internal/debug tools, but they should not be taught as normal listening-session behavior.
 - QMD or another memory index can be evaluated later, but SQLite remains the canonical source for now.
 

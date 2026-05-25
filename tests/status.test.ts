@@ -59,8 +59,8 @@ describe("status report", () => {
     expect(report.config.present).toBe(true);
     expect(report.database).toMatchObject({ present: true, migrated: true });
     expect(report.netease.reachable).toBe(true);
-    expect(report.calendar.enabled).toBe(true);
-    expect(report.weather.enabled).toBe(true);
+    expect(report.calendar.enabled).toBe(false);
+    expect(report.weather.enabled).toBe(false);
     expect(report.weather.location).toBe("Shanghai");
     expect(report.llm).toMatchObject({
       provider: "OpenAI-compatible",
@@ -74,15 +74,18 @@ describe("status report", () => {
     expect(report.latestSessionTimestamp).toEqual(expect.any(String));
 
     const text = formatStatusReport(report);
-    expect(text).toContain("Runtime");
-    expect(text).toContain("Setup");
-    expect(text).toContain("Memory");
-    expect(text).toContain("Data");
+    expect(text).toContain("RUNTIME");
+    expect(text).toContain("SETUP");
+    expect(text).toContain("MEMORY");
+    expect(text).toContain("LOCAL DATA");
     expect(text).toContain("External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used.");
     expect(text).toContain("Playback   none");
     expect(text).toContain("Schedule   Morning DJ weekdays 08:45");
     expect(text).toContain("prepare 20 min before");
     expect(text).toContain("LLM       gpt-4.1-mini (missing key)");
+    expect(text).toContain("Music     NetEase API reachable (anonymous playback, not logged in)");
+    expect(text).toContain("Context   Calendar off, Weather off");
+    expect(text).not.toContain("Music     NetEase connected (anonymous)");
     expect(text).toContain(process.platform === "darwin"
       ? "Voice     Vale, built-in macOS"
       : "Voice     Text-only DJ copy; configure voice for spoken DJ audio");
@@ -110,13 +113,47 @@ describe("status report", () => {
     expect(formatStatusReport(report)).toContain("LLM       gpt-4.1-mini (local secret)");
   });
 
+  it("uses shared colored section labels for TTY status output", () => {
+    const text = formatStatusReport({
+      config: { path: "/tmp/config.json", present: true },
+      database: { path: "/tmp/pockedio.sqlite", present: true, migrated: true, schemaVersion: 1 },
+      runtime: { currentPlayback: null, scheduledJobs: "none" },
+      netease: {
+        baseUrl: "http://127.0.0.1:3000",
+        reachable: true,
+        authMode: "anonymous",
+        qualityLevel: "exhigh",
+        cookiePresent: false
+      },
+      llm: {
+        provider: "OpenAI-compatible",
+        model: "gpt-4.1-mini",
+        apiKeyEnv: "OPENAI_API_KEY",
+        apiKeyPresent: false,
+        apiKeySource: "missing"
+      },
+      fishAudio: { pythonPath: "", scriptPath: "", modelDir: "", pathsPresent: false, missing: [] },
+      voice: { summary: "Text-only DJ copy", showFishMissing: false },
+      calendar: { enabled: false },
+      weather: { enabled: false },
+      taste: { path: "/tmp/taste.md", present: false },
+      personas: { path: "/tmp/personas.json", present: true },
+      latestSessionTimestamp: null,
+      contextHeartbeat: null
+    }, { color: true, width: 96 });
+
+    expect(text).toMatch(/\u001b\[[0-9;]*38;5;116mRUNTIME\u001b\[0m/);
+    expect(text).toMatch(/\u001b\[[0-9;]*38;5;116mSETUP\u001b\[0m/);
+    expect(stripAnsi(text)).toContain("Playback   none");
+  });
+
   it("formats status as runtime, integrations, and memory surfaces", () => {
     const text = formatStatusReport({
       config: { path: "/tmp/config.json", present: true },
       database: { path: "/tmp/pockedio.sqlite", present: true, migrated: true, schemaVersion: 1 },
       runtime: {
         currentPlayback: "Title - Artist",
-        scheduledJobs: "Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled; mood checks hourly while serve runs"
+        scheduledJobs: "Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled; mood checks hourly while serve runs; serve not running"
       },
       netease: {
         baseUrl: "http://127.0.0.1:3000",
@@ -168,19 +205,24 @@ describe("status report", () => {
       }
     });
 
-    expect(text).toContain("Runtime");
+    expect(text).toContain("RUNTIME");
     expect(text).toContain("Playback   Title - Artist");
     expect(text).toContain("Schedule   Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled");
-    expect(text).toContain("Setup");
-    expect(text).toContain("Music     NetEase connected (account, exhigh)");
+    expect(text).toContain("serve not running");
+    expect(text).toContain("SETUP");
+    expect(text).toContain("Music     NetEase account connected (exhigh)");
     expect(text).toContain("LLM       deepseek-chat (shell env)");
     expect(text).toContain("Voice     Mina, Fish TTS ready");
     expect(text).toContain("Context   Calendar on, Weather Shanghai");
-    expect(text).toContain("Memory");
+    expect(text).toContain("MEMORY");
     expect(text).toContain("Session    2026-05-19T02:00:00.000Z");
     expect(text).toContain("Heartbeat completed 2026-05-19T01:00:02.000Z (3 calendar; 2 diary, 1 new)");
-    expect(text).toContain("Data");
+    expect(text).toContain("LOCAL DATA");
     expect(text).toContain("Local     /tmp");
     expect(text).toContain("External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used.");
   });
 });
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/g, "");
+}

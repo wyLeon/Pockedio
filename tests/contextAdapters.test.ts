@@ -4,12 +4,14 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig, saveConfig } from "../src/config/load.js";
 import type { PockedioConfig } from "../src/config/schema.js";
-import { normalizeCalendarWarning, readCalendarContext, requestCalendarPermission } from "../src/context/calendar.js";
+import { buildCalendarState, normalizeCalendarWarning, readCalendarContext, requestCalendarPermission } from "../src/context/calendar.js";
 import { buildContext } from "../src/context/contextBuilder.js";
-import { readDiaryContext, readDiaryContextWithLlmSummary, refreshDiaryHistoryMemory } from "../src/context/diary.js";
+import { rankDiaryMemoryItems, readDiaryContext, readDiaryContextWithLlmSummary, refreshDiaryHistoryMemory } from "../src/context/diary.js";
 import { formatRefreshContextResult, refreshContext } from "../src/context/refreshContext.js";
 import { readWeatherContext } from "../src/context/weather.js";
 import { withDatabase } from "../src/db/database.js";
+import { runMigrations } from "../src/db/migrations.js";
+import { MemoryStore } from "../src/memory/store.js";
 
 const tempDirs: string[] = [];
 
@@ -73,7 +75,7 @@ describe("calendar adapter", () => {
     expect(context.listeningHint).toContain("meeting-heavy context");
   });
 
-  it("builds distinct Apple Calendar windows for today, setup, and scheduled DJ reads", async () => {
+  it("builds distinct Apple Calendar windows for today, setup, interactive, and scheduled DJ reads", async () => {
     const scripts: string[] = [];
     const runner = async (script: string) => {
       scripts.push(script);
@@ -88,6 +90,8 @@ describe("calendar adapter", () => {
     await readCalendarContext(true, 1, runner, "today");
     await readCalendarContext(true, 1, runner, "last7Days");
     await readCalendarContext(true, 1, runner, "last7DaysAndToday");
+    await readCalendarContext(true, 1, runner, "todayAndNext24Hours");
+    await readCalendarContext(true, 1, runner, "last7DaysTodayAndNext3Days");
 
     expect(scripts.join("\n")).not.toContain("≥");
     expect(scripts[0]).toContain("set endOfWindow to startOfWindow + (24 * 60 * 60)");
@@ -95,6 +99,52 @@ describe("calendar adapter", () => {
     expect(scripts[1]).toContain("set endOfWindow to current date");
     expect(scripts[2]).toContain("set startOfWindow to startOfWindow - (7 * 24 * 60 * 60)");
     expect(scripts[2]).toContain("set endOfWindow to startOfToday + (24 * 60 * 60)");
+    expect(scripts[3]).toContain("set endOfWindow to current date + (24 * 60 * 60)");
+    expect(scripts[4]).toContain("set startOfWindow to startOfWindow - (7 * 24 * 60 * 60)");
+    expect(scripts[4]).toContain("set endOfWindow to startOfToday + (4 * 24 * 60 * 60)");
+    expect(scripts[4]).toContain("allday event of evt");
+  });
+
+  it("derives current, upcoming, future, and recent calendar state", () => {
+    const state = buildCalendarState([
+      {
+        calendarName: "Work",
+        title: "Yesterday Review",
+        startTime: "2026-05-18T09:00:00+08:00",
+        endTime: "2026-05-18T10:00:00+08:00",
+        isAllDay: false
+      },
+      {
+        calendarName: "Work",
+        title: "Design Sync",
+        startTime: "2026-05-19T09:00:00+08:00",
+        endTime: "2026-05-19T10:00:00+08:00",
+        isAllDay: false
+      },
+      {
+        calendarName: "Personal",
+        title: "Gym",
+        startTime: "2026-05-19T18:00:00+08:00",
+        endTime: "2026-05-19T19:00:00+08:00",
+        isAllDay: false
+      },
+      {
+        calendarName: "Work",
+        title: "Tomorrow Planning",
+        startTime: "2026-05-20T09:00:00+08:00",
+        endTime: "2026-05-20T10:00:00+08:00",
+        isAllDay: false
+      }
+    ], new Date("2026-05-19T09:30:00+08:00"));
+
+    expect(state.nowStatus).toBe("in_event");
+    expect(state.currentEvent?.title).toBe("Design Sync");
+    expect(state.nextEvent?.title).toBe("Gym");
+    expect(state.minutesUntilNext).toBe(510);
+    expect(state.todayEventCount).toBe(2);
+    expect(state.tags).toEqual(expect.arrayContaining(["meeting", "workout"]));
+    expect(state.nextDaysHighlights.some((highlight) => highlight.includes("Tomorrow Planning"))).toBe(true);
+    expect(state.recentSchedulePattern).toContain("1 recent event");
   });
 
   it("normalizes macOS calendar permission errors into actionable setup guidance", async () => {
@@ -197,6 +247,22 @@ describe("diary adapter", () => {
       summary: "Latest diary file: newer.md, modified 2026-05-17T00:00:00.000Z.",
       listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
     });
+  });
+
+  it("ignores future-dated diary files for current context", () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const current = path.join(diaryDir, "2026-05-20.md");
+    const future = path.join(diaryDir, "2099-01-01.md");
+    fs.writeFileSync(current, "current private text");
+    fs.writeFileSync(future, "future planned task text");
+    const currentDate = new Date("2026-05-20T00:00:00.000Z");
+    const futureMtime = new Date("2099-01-01T00:00:00.000Z");
+    fs.utimesSync(current, currentDate, currentDate);
+    fs.utimesSync(future, futureMtime, futureMtime);
+    const config = makeConfig({ diary: { enabled: true, path: diaryDir } });
+
+    expect(readDiaryContext(config)?.filePath).toBe(current);
   });
 
   it("generates and caches an LLM diary summary for the latest diary file", async () => {
@@ -376,15 +442,44 @@ describe("diary adapter", () => {
       memoryQuery: "rainy focus station",
       calendarRunner: async () => ({ stdout: "", stderr: "", timedOut: false, code: 0 })
     });
+    const moodContext = await buildContext(config, {
+      llm,
+      memoryQuery: "I feel exhausted and need a station",
+      calendarRunner: async () => ({ stdout: "", stderr: "", timedOut: false, code: 0 })
+    });
 
     expect(reused.summariesReused).toBe(2);
     expect(context.memorySummaries[0]?.content).toContain("Rainy writing day");
+    expect(moodContext.memorySummaries[0]?.content).toContain("Tired workday");
+  });
+
+  it("ranks diary memories by mood-tag intent even when query words do not match literally", () => {
+    const ranked = rankDiaryMemoryItems([
+      {
+        id: "rainy",
+        kind: "diary",
+        sourceSessionId: null,
+        content: "Diary memory: Rainy writing day. Listening fit: soft focus music.",
+        metadata: { moodTags: ["calm"], lifeContextTags: ["work"] },
+        createdAt: "2026-05-02T10:00:00.000Z"
+      },
+      {
+        id: "tired",
+        kind: "diary",
+        sourceSessionId: null,
+        content: "Diary memory: Tired workday. Listening fit: warm recovery music.",
+        metadata: { moodTags: ["tired"], lifeContextTags: ["recovery"] },
+        createdAt: "2026-05-01T10:00:00.000Z"
+      }
+    ], "I feel exhausted and need something gentle", 1);
+
+    expect(ranked[0]?.id).toBe("tired");
   });
 });
 
 describe("context builder", () => {
   it("includes MBTI personality context when configured", async () => {
-    const config = makeConfig({ personality: { mbti: "INTJ" } });
+    const config = makeConfig({ personality: { mbti: "INTJ" }, calendar: { enabled: true } });
     const context = await buildContext(config, {
       now: new Date("2026-05-17T09:00:00+08:00"),
       calendarRunner: async () => ({
@@ -428,25 +523,71 @@ describe("context builder", () => {
 
   it("stores today's calendar events during normal context building", async () => {
     const config = makeConfig({ calendar: { enabled: true } });
+    const scripts: string[] = [];
     const context = await buildContext(config, {
       now: new Date("2026-05-19T09:00:00+08:00"),
-      calendarRunner: async () => ({
-        stdout: "Personal | Gym | Tue May 19 07:30:00 2026 | Tue May 19 08:30:00 2026 | false\n",
-        stderr: "",
-        timedOut: false,
-        code: 0
-      }),
+      calendarRunner: async (script) => {
+        scripts.push(script);
+        return {
+          stdout: "Personal | Gym | Tue May 19 07:30:00 2026 | Tue May 19 08:30:00 2026 | false\n",
+          stderr: "",
+          timedOut: false,
+          code: 0
+        };
+      },
       fetchImpl: async () => {
         throw new Error("weather offline");
       }
     });
 
     expect(context.calendar.available).toBe(true);
+    expect(context.calendar.state.nowStatus).toBe("after_last_event");
+    expect(scripts[0]).toContain("set endOfWindow to current date + (24 * 60 * 60)");
     const db = await import("../src/db/database.js");
     const rows = db.withDatabase(config, (database) => database.prepare(`
       SELECT title, source FROM calendar_events
     `).all());
     expect(rows).toEqual([{ title: "Gym", source: "interactive" }]);
+  });
+
+  it("retrieves agenda memory only for calendar-like queries", async () => {
+    const config = makeConfig({ calendar: { enabled: false } });
+    runMigrations(config);
+    withDatabase(config, (database) => {
+      const store = new MemoryStore(database);
+      store.addMemoryItem("summary", "Session memory summary: quiet piano for reading.", {
+        source: "session",
+        musicTags: ["quiet piano"],
+        contextTags: ["reading"],
+        useCases: ["reading"]
+      });
+      store.addMemoryItem("summary", "Session memory summary: upbeat workout pop.", {
+        source: "session",
+        musicTags: ["upbeat pop"],
+        contextTags: ["workout"],
+        useCases: ["workout"]
+      });
+      store.addMemoryItem("agenda", "Agenda memory: meeting-heavy week.", { source: "calendar" });
+    });
+
+    const generic = await buildContext(config, {
+      now: new Date("2026-05-19T09:00:00+08:00"),
+      memoryQuery: "play something gentle",
+      fetchImpl: async () => {
+        throw new Error("weather offline");
+      }
+    });
+    const calendarLike = await buildContext(config, {
+      now: new Date("2026-05-19T09:00:00+08:00"),
+      memoryQuery: "what should I play for my week ahead?",
+      fetchImpl: async () => {
+        throw new Error("weather offline");
+      }
+    });
+
+    expect(generic.memorySummaries.some((memory) => memory.kind === "agenda")).toBe(false);
+    expect(calendarLike.memorySummaries.some((memory) => memory.kind === "agenda")).toBe(true);
+    expect(calendarLike.memorySummaries[0]?.content).toContain("quiet piano");
   });
 
   it("consolidates calendar and diary context into durable memory on refresh", async () => {
@@ -488,14 +629,19 @@ describe("context builder", () => {
     expect(result.diary).toMatchObject({ available: true, latestFile: entry, memoriesUpdated: 1 });
 
     const rows = withDatabase(config, (database) => database.prepare(`
-      SELECT kind, content
+      SELECT kind, content, metadata_json as metadataJson
       FROM memory_items
       WHERE kind IN ('agenda', 'diary')
       ORDER BY kind
-    `).all()) as Array<{ kind: string; content: string }>;
+    `).all()) as Array<{ kind: string; content: string; metadataJson: string }>;
 
     expect(rows).toHaveLength(2);
-    expect(rows.find((row) => row.kind === "agenda")?.content).toContain("Planning Review");
+    const agenda = rows.find((row) => row.kind === "agenda");
+    expect(agenda?.content).toContain("Planning Review");
+    expect(JSON.parse(agenda?.metadataJson ?? "{}")).toMatchObject({
+      tags: expect.arrayContaining(["meeting"]),
+      nowStatus: "before_next_event"
+    });
     expect(rows.find((row) => row.kind === "diary")?.content).toContain("Meeting-heavy day");
   }, 10_000);
 

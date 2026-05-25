@@ -37,7 +37,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(readiness.items.find((item) => item.label === "LLM")?.value).toBe("Configured: shell env");
     expect(readiness.items.find((item) => item.label === "Voice")?.value).toBe("Vale, built-in macOS");
     expect(readiness.items.find((item) => item.label === "Taste")?.value).toBe("Imported");
-    expect(readiness.items.find((item) => item.label === "Calendar")?.value).toBe("Enabled");
+    expect(readiness.items.find((item) => item.label === "Calendar")?.value).toBe("Disabled");
     expect(readiness.items.some((item) => item.label === "Freshness")).toBe(false);
   });
 
@@ -95,6 +95,22 @@ describe("MOLE-inspired welcome hub", () => {
     expect(text).toContain("↑↓ Select  |  Enter Open");
   });
 
+  it("renders hub surfaces with the shared colored terminal language when enabled", () => {
+    const { config, env } = makeConfig();
+    const readiness = buildWelcomeReadiness({ config, env, platform: "darwin" });
+    const hub = renderWelcomeHub(readiness, { selectedAction: "session", color: true, width: 96 });
+    const setup = renderSetupConnectionsSurface({ config, env, platform: "darwin" }, { color: true, width: 96 });
+
+    expect(stripAnsi(hub)).toContain("pockedio");
+    expect(stripAnsi(hub)).toContain("██████████");
+    expect(stripAnsi(hub)).toContain("SESSION FLOW");
+    expect(hub).toMatch(/\u001b\[[0-9;]*38;5;116mREADINESS\u001b\[0m/);
+    expect(hub).toMatch(/\u001b\[[0-9;]*48;5;23m/);
+    expect(stripAnsi(hub)).toContain("▌ > 1. Enter DJ Session");
+    expect(setup).toMatch(/\u001b\[[0-9;]*38;5;116mSTATUS\u001b\[0m/);
+    expect(setup).toMatch(/\u001b\[[0-9;]*48;5;23m/);
+  });
+
   it("routes hub shortcuts to shallow entry actions", () => {
     expect(resolveWelcomeHubAction("enter")).toBe("session");
     expect(resolveWelcomeHubAction("setup")).toBe("setup");
@@ -119,22 +135,30 @@ describe("MOLE-inspired welcome hub", () => {
     const { config, env } = makeConfig();
 
     const setup = renderSetupConnectionsSurface({ config, env, platform: "darwin" });
-    expect(setup).toContain("Setup & Connections");
+    expect(setup).toContain("SETUP & CONNECTIONS");
+    expect(setup).toContain("Pockedio is almost ready");
+    expect(setup).toContain("STATUS");
     expect(setup).toContain("Music");
     expect(setup).toContain("LLM");
     expect(setup).toContain("Voice");
     expect(setup).toContain("Context");
-    expect(setup).toContain("> 1. Run full setup");
+    expect(setup).toContain("Scheduled");
+    expect(setup).toContain("ACTIONS");
+    expect(setup).toContain("▌ > 1. Run full setup");
     expect(setup).toContain("Configure LLM");
     expect(setup).toContain("Configure Voice");
     expect(setup).toContain("Configure Context");
 
     const llm = renderLlmSetupSurface({ config, env });
-    expect(llm).toContain("LLM");
+    expect(llm).toContain("LLM SETUP");
+    expect(llm).toContain("LLM needs an API key");
+    expect(llm).toContain("CURRENT");
     expect(llm).toContain("Provider        OpenAI-compatible");
     expect(llm).toContain("Model           gpt-4.1-mini");
     expect(llm).toContain("API key         Missing: OPENAI_API_KEY");
-    expect(llm).toContain("> 1. Use OpenAI");
+    expect(llm).toContain("SUPPORT");
+    expect(llm).toContain("ACTIONS");
+    expect(llm).toContain("▌ > 1. Use OpenAI");
     expect(llm).toContain("2. Use DeepSeek");
     expect(llm).toContain("3. Use OpenRouter");
     expect(llm).toContain("4. Use local vLLM");
@@ -154,9 +178,10 @@ describe("MOLE-inspired welcome hub", () => {
     const { config, env } = makeConfig();
     const setup = renderSetupConnectionsSurface({ config, env, platform: "darwin" }, { selectedAction: "voice_setup" });
 
-    expect(setup).toContain("  1. Run full setup");
-    expect(setup).toContain("> 3. Configure Voice");
-    expect(setup).toContain("  6. Configure Scheduler");
+    expect(setup).toContain("    1. Run full setup");
+    expect(setup).toContain("▌ > 3. Configure Voice");
+    expect(setup).toContain("\x1B[7m▌ > 3. Configure Voice");
+    expect(setup).toContain("    6. Configure Scheduled DJ");
     expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
     expect(resolveSetupConnectionsAction("1")).toBe("full_setup");
     expect(resolveSetupConnectionsAction("2")).toBe("llm_setup");
@@ -173,16 +198,17 @@ describe("MOLE-inspired welcome hub", () => {
     const contextConfig = {
       ...config,
       weather: { enabled: true, location: "Guangzhou" },
-      diary: { enabled: false, path: "~/Diary" }
+      diary: { enabled: false, path: undefined }
     };
     const context = renderContextSetupSurface({ config: contextConfig }, { selectedAction: "weather" });
 
-    expect(context).toContain("Context");
-    expect(context).toContain("Calendar        Enabled");
+    expect(context).toContain("CONTEXT SETUP");
+    expect(context).toContain("Calendar        Not enabled");
     expect(context).toContain("Weather         Guangzhou");
     expect(context).toContain("Diary           Not enabled");
-    expect(context).toContain("  1. Configure Calendar");
-    expect(context).toContain("> 2. Configure Weather");
+    expect(context).not.toContain("~/Diary");
+    expect(context).toContain("    1. Configure Calendar");
+    expect(context).toContain("▌ > 2. Configure Weather");
     expect(context).toContain("3. Configure Diary");
     expect(context).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit");
     expect(resolveContextSetupAction("1")).toBe("calendar");
@@ -201,9 +227,9 @@ describe("MOLE-inspired welcome hub", () => {
     const { config, env } = makeConfig();
     const llm = renderLlmSetupSurface({ config, env }, { selectedAction: "local_vllm" });
 
-    expect(llm).toContain("  1. Use OpenAI");
-    expect(llm).toContain("> 4. Use local vLLM");
-    expect(llm).toContain("Current config");
+    expect(llm).toContain("    1. Use OpenAI");
+    expect(llm).toContain("▌ > 4. Use local vLLM");
+    expect(llm).toContain("CURRENT");
     expect(llm).toContain("OpenAI-compatible");
     expect(llm).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
     expect(resolveLlmSetupAction("1")).toBe("openai");
@@ -220,11 +246,12 @@ describe("MOLE-inspired welcome hub", () => {
     const { config, env } = makeConfig();
     const openai = renderLlmProviderSurface({ config, env }, "openai", { selectedAction: "paste_key" });
 
-    expect(openai).toContain("OpenAI");
-    expect(openai).toContain("Model       gpt-4.1-mini");
-    expect(openai).toContain("API key     Missing: OPENAI_API_KEY");
-    expect(openai).toContain("Base URL    OpenAI default");
-    expect(openai).toContain("> 1. Paste API key");
+    expect(openai).toContain("OPENAI SETUP");
+    expect(openai).toContain("CURRENT");
+    expect(openai).toContain("Model           gpt-4.1-mini");
+    expect(openai).toContain("API key         Missing: OPENAI_API_KEY");
+    expect(openai).toContain("Base URL        OpenAI default");
+    expect(openai).toContain("▌ > 1. Paste API key");
     expect(openai).toContain("2. Use shell env");
     expect(openai).toContain("3. Change model");
     expect(openai).toContain("4. Test connection");
@@ -242,11 +269,11 @@ describe("MOLE-inspired welcome hub", () => {
     const { config, env } = makeConfig();
     const vllm = renderLlmProviderSurface({ config, env }, "local_vllm", { selectedAction: "discover_models" });
 
-    expect(vllm).toContain("Local vLLM");
-    expect(vllm).toContain("Base URL    http://127.0.0.1:8000/v1");
-    expect(vllm).toContain("API key     Optional: VLLM_API_KEY");
+    expect(vllm).toContain("LOCAL VLLM SETUP");
+    expect(vllm).toContain("Base URL        http://127.0.0.1:8000/v1");
+    expect(vllm).toContain("API key         Optional: VLLM_API_KEY");
     expect(vllm).toContain("1. Check server");
-    expect(vllm).toContain("> 2. Discover models");
+    expect(vllm).toContain("▌ > 2. Discover models");
     expect(vllm).toContain("3. Paste API key");
     expect(vllm).toContain("4. Set model manually");
     expect(vllm).toContain("5. Set base URL");
@@ -273,17 +300,17 @@ describe("MOLE-inspired welcome hub", () => {
 
     const vllm = renderLlmProviderSurface({ config: configuredVllm, env }, "local_vllm");
 
-    expect(vllm).toContain("Model       mock-vllm-model");
-    expect(vllm).toContain("Base URL    http://127.0.0.1:18000/v1");
+    expect(vllm).toContain("Model           mock-vllm-model");
+    expect(vllm).toContain("Base URL        http://127.0.0.1:18000/v1");
   });
 
   it("renders custom LLM provider details with API key env configuration", () => {
     const { config, env } = makeConfig();
     const custom = renderLlmProviderSurface({ config, env }, "custom", { selectedAction: "change_api_key_env" });
 
-    expect(custom).toContain("Custom OpenAI-compatible");
+    expect(custom).toContain("CUSTOM OPENAI-COMPATIBLE SETUP");
     expect(custom).toContain("4. Change base URL");
-    expect(custom).toContain("> 5. Set API key env");
+    expect(custom).toContain("▌ > 5. Set API key env");
     expect(custom).toContain("6. Test connection");
     expect(custom).not.toContain("7. Back");
     expect(resolveLlmProviderAction("5", "custom")).toBe("change_api_key_env");
@@ -303,7 +330,7 @@ describe("MOLE-inspired welcome hub", () => {
     };
 
     expect(inferLlmSetupAction(deepseekConfig)).toBe("deepseek");
-    expect(renderLlmSetupSurface({ config: deepseekConfig, env })).toContain("> 2. Use DeepSeek");
+    expect(renderLlmSetupSurface({ config: deepseekConfig, env })).toContain("▌ > 2. Use DeepSeek");
   });
 
   it("updates LLM setup selection from keyboard input", () => {
@@ -335,8 +362,8 @@ describe("MOLE-inspired welcome hub", () => {
     const { config } = makeConfig();
     const voice = renderVoiceSetupSurface({ config, platform: "darwin" }, { selectedAction: "fish_tts" });
 
-    expect(voice).toContain("  1. Choose DJ voice");
-    expect(voice).toContain("> 2. Configure Fish TTS");
+    expect(voice).toContain("    1. Choose DJ voice");
+    expect(voice).toContain("▌ > 2. Configure Fish TTS");
     expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit");
     expect(resolveVoiceSetupAction("1")).toBe("choose_voice");
     expect(resolveVoiceSetupAction("2")).toBe("fish_tts");
@@ -353,12 +380,12 @@ describe("MOLE-inspired welcome hub", () => {
     const { config } = makeConfig();
     const chooser = renderDjVoiceChooserSurface({ config, platform: "darwin" }, { selectedVoice: "fish:mina" });
 
-    expect(chooser).toContain("Choose DJ voice");
-    expect(chooser).toContain("Sample");
-    expect(chooser).toContain("Built-in voices");
-    expect(chooser).toContain("  4. Vale      ready, current");
-    expect(chooser).toContain("Advanced Fish voices");
-    expect(chooser).toContain("> 6. Mina      needs Fish TTS setup");
+    expect(chooser).toContain("CHOOSE DJ VOICE");
+    expect(chooser).toContain("SAMPLE");
+    expect(chooser).toContain("BUILT-IN VOICES");
+    expect(chooser).toContain("   4. Vale      ready, current");
+    expect(chooser).toContain("FISH VOICES");
+    expect(chooser).toContain("▌ > 6. Mina      needs Fish TTS setup");
     expect(chooser).toContain("Space Preview  |  Enter Save  |  F Fish setup  |  B Back");
     expect(applyDjVoiceChooserKey("macos:vale", { name: "down" })).toEqual({ selectedVoice: "macos:sol" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "space" })).toEqual({ selectedVoice: "macos:vale", submit: "preview" });
@@ -395,14 +422,14 @@ describe("MOLE-inspired welcome hub", () => {
     const result = importTaste("tests/fixtures/taste-normalized.csv", config);
 
     const taste = renderTasteMemorySurface({ config });
-    expect(taste).toContain("Taste & Memory");
+    expect(taste).toContain("TASTE & MEMORY");
     expect(taste).toContain("Imported lists  3 playlists, 3 tracks");
     expect(taste).toContain("Taste profile   Needs refresh");
-    expect(taste).toContain("> 1. Import playlist");
+    expect(taste).toContain("▌ > 1. Import playlist");
     expect(taste).not.toContain("Start station");
 
     const imported = renderTasteImportResultSurface(result);
-    expect(imported).toContain("Imported playlist");
+    expect(imported).toContain("IMPORTED PLAYLIST");
     expect(imported).toContain("Tracks        3");
     expect(imported).not.toContain("Taste profile needs refresh");
     expect(imported).not.toContain("Rebuild taste profile");
@@ -410,9 +437,9 @@ describe("MOLE-inspired welcome hub", () => {
     expect(imported).toContain("Press Enter to return to Taste & Memory.");
 
     const summary = renderTasteSummarySurface({ config });
-    expect(summary).toContain("Taste Summary");
+    expect(summary).toContain("TASTE SUMMARY");
     expect(summary).toContain("Imported      3 playlists, 3 tracks");
-    expect(summary).toContain("Top artists");
+    expect(summary).toContain("TOP ARTISTS");
     expect(summary).toContain("1. Brian Eno (1)");
     expect(summary).toContain("- ambient reset");
     expect(summary).toContain("- Blue in Green - Miles Davis");
@@ -422,8 +449,8 @@ describe("MOLE-inspired welcome hub", () => {
     const { config } = makeConfig();
     const taste = renderTasteMemorySurface({ config }, { selectedAction: "show_summary" });
 
-    expect(taste).toContain("  1. Import playlist");
-    expect(taste).toContain("> 2. Show taste summary");
+    expect(taste).toContain("    1. Import playlist");
+    expect(taste).toContain("▌ > 2. Show taste summary");
     expect(taste).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B Back  |  Q Quit");
     expect(resolveTasteMemoryAction("1")).toBe("import");
     expect(resolveTasteMemoryAction("2")).toBe("show_summary");
@@ -435,3 +462,7 @@ describe("MOLE-inspired welcome hub", () => {
     });
   });
 });
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/g, "");
+}

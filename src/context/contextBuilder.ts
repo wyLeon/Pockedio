@@ -42,10 +42,10 @@ export async function buildContext(
   runMigrations(config);
   const store = new MemoryStore(config);
   try {
-    const calendarWindow = options.calendarWindow ?? "today";
-    const calendarTimeout = calendarWindow === "today" ? 20_000 : 60_000;
+    const calendarWindow = options.calendarWindow ?? "todayAndNext24Hours";
+    const calendarTimeout = calendarWindow === "today" || calendarWindow === "todayAndNext24Hours" ? 20_000 : 60_000;
     const [calendar, weather] = await Promise.all([
-      readCalendarContext(config.calendar.enabled, calendarTimeout, options.calendarRunner, calendarWindow),
+      readCalendarContext(config.calendar.enabled, calendarTimeout, options.calendarRunner, calendarWindow, now),
       config.weather.enabled
         ? readWeatherContext(config.weather.location, options.fetchImpl)
         : Promise.resolve(null)
@@ -78,14 +78,26 @@ export async function buildContext(
     if (options.consolidateMemory) {
       consolidateContextMemory(store, context);
     }
+    const sessionMemories = store.getRankedSessionMemories(options.memoryQuery, 5);
+    const agendaMemories = shouldIncludeAgendaMemory(options.memoryQuery)
+      ? store.getRecentMemoryItems(["agenda"], 3)
+      : [];
     context.memorySummaries = [
       ...rankDiaryMemoryItems(store.getRecentMemoryItems(["diary"], 80), options.memoryQuery, 5),
-      ...store.getRecentMemoryItems(["summary", "agenda"], 5)
+      ...sessionMemories,
+      ...agendaMemories
     ].slice(0, 5);
     return context;
   } finally {
     store.close();
   }
+}
+
+function shouldIncludeAgendaMemory(query: string | undefined): boolean {
+  if (!query) {
+    return false;
+  }
+  return /\b(calendar|schedule|agenda|meeting|meetings|today|tomorrow|this week|next week|week ahead|upcoming|morning|afternoon|evening)\b/i.test(query);
 }
 
 export function getTimeOfDay(date: Date): PockedioContext["timeOfDay"] {

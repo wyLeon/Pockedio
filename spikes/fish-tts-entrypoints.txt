@@ -1,7 +1,0 @@
-fish_speech False
-
-FishAudio S2 Pro MLX runtime candidate:
-- Runtime: .cache/mlx-speech
-- Entrypoint: .cache/mlx-speech/scripts/generate/fish_s2_pro.py
-- Model: ~/.cache/huggingface/hub/models--appautomaton--fishaudio-s2-pro-8bit-mlx/snapshots/29ab46393de21f696a82050d8594a677a5797f7e
-- Output: spikes/fish-tts-sample.wav
