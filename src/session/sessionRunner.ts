@@ -4,6 +4,7 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import fs from "node:fs";
 import { loadConfig } from "../config/load.js";
 import type { PockedioConfig } from "../config/schema.js";
+import { formatCalendarStateForPrompt } from "../context/calendar.js";
 import { buildContext, type ContextBuilderOptions, type PockedioContext } from "../context/contextBuilder.js";
 import { createWikidataMusicFreshnessProvider, type MusicFreshnessProvider, type MusicFreshnessSource } from "../context/musicFreshness.js";
 import { runMigrations } from "../db/migrations.js";
@@ -17,7 +18,7 @@ import { shouldUseSpokenDjAudio } from "../dj/voiceRules.js";
 import { createLlmClient } from "../llm/openaiClient.js";
 import type { LlmClient } from "../llm/llmClient.js";
 import { MemoryStore, type FavoriteTrackCandidate, type FeedbackAction, type TasteSignalInput } from "../memory/store.js";
-import { summarizeSession } from "../memory/sessionSummary.js";
+import { summarizeSession, summarizeSessionWithLlm } from "../memory/sessionSummary.js";
 import { buildFeedbackTasteSignals } from "../memory/tasteSignals.js";
 import {
   playFile as playAudioFile,
@@ -213,7 +214,7 @@ export function formatInteractiveStartupGuide(displayName = "Pockedio", setupNot
     renderTuiCommandRow("queue", "show queue", 11, options),
     renderTuiCommandRow("stop", "stop playback", 11, options),
     renderTuiCommandRow("menu", "return to main menu", 11, options),
-    renderTuiCommandRow("Ctrl+C", "exit, or cancel while processing", 11, options),
+    renderTuiCommandRow("q", "quit while processing", 11, options),
     "",
     renderTuiSectionLabel("SETUP", { ...options, accent: "playback" }),
     renderTuiCommandRow("setup", "open setup and connections", 11, options),
@@ -297,9 +298,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     input.playbackState.startUrlPlayback = input.startUrlPlayback
       ?? input.playbackState.startUrlPlayback
       ?? startUrlPlayback;
-    input.playbackState.writeOutput = input.writeOutput
-      ?? input.playbackState.writeOutput
-      ?? writeOutput;
+    if (!input.playbackState.writeOutput && input.writeOutput) {
+      input.playbackState.writeOutput = input.writeOutput;
+    }
     input.playbackState.startDuckedIntroPlayback = input.startDuckedIntroPlayback
       ?? input.playbackState.startDuckedIntroPlayback
       ?? startDuckedIntroPlayback;
@@ -690,7 +691,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (intent.type === "session_memory_update") {
-      const result = summarizeSession(store, sessionId);
+      const result = await summarizeSessionWithLlm(store, sessionId, llm, signal);
       const response = result.summaryId
         ? [
             "Updated session memory.",
@@ -774,7 +775,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (intent.type === "music_recommendation") {
-      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, { memoryQuery: userText }), signal);
+      const context = await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, buildContextOptionsForUserText(userText)), signal);
       store.addContextSnapshot(sessionId, {
         calendarSummary: context.calendar?.summary,
         weather: context.weather,
@@ -925,7 +926,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     const conversationContext = shouldReadConversationContext(userText)
-      ? await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, { memoryQuery: userText }), signal)
+      ? await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, buildContextOptionsForUserText(userText)), signal)
       : undefined;
     if (conversationContext) {
       store.addContextSnapshot(sessionId, {
@@ -957,7 +958,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       }
     }
     if (shouldEndSession) {
-      summarizeSession(store, sessionId);
+      await summarizeSessionWithLlm(store, sessionId, llm, signal);
       store.endSession(sessionId);
     }
     store.close();
@@ -1077,7 +1078,7 @@ function createInteractiveStatusWriter(output: typeof defaultOutput): StatusWrit
 
   const frames = ["|", "/", "-", "\\"];
   return (text) => {
-    const displayText = `${text}  Ctrl+C to cancel`;
+    const displayText = formatInteractiveStatusDisplayText(text);
     let index = 0;
     const render = () => {
       output.write(`\r${frames[index % frames.length]} ${displayText}`);
@@ -1090,6 +1091,10 @@ function createInteractiveStatusWriter(output: typeof defaultOutput): StatusWrit
       output.write(`\r${" ".repeat(displayText.length + 4)}\r`);
     };
   };
+}
+
+export function formatInteractiveStatusDisplayText(text: string): string {
+  return `${text}  press q to quit`;
 }
 
 function createTurnScopedStatusWriter(baseWriter: StatusWriter, initialText?: string): { writeStatus: StatusWriter; finish: () => void } {
@@ -1988,6 +1993,7 @@ async function generateStationIntroResponse(input: {
     formatLocalTimeContextInstruction(input.context),
     `Calendar summary: ${input.context.calendar?.summary ?? "not available"}`,
     `Calendar listening hint: ${input.context.calendar?.listeningHint ?? "not available"}`,
+    formatCalendarStateForPrompt(input.context.calendar?.state),
     `Weather summary: ${input.context.weather?.summary ?? "not available"}`,
     `Weather listening hint: ${input.context.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${input.context.diary?.summary ?? "not available"}`,
@@ -2057,6 +2063,7 @@ async function generateMusicRecommendationResponse(input: {
     formatLocalTimeContextInstruction(input.context),
     `Calendar summary: ${input.context?.calendar?.summary ?? "not available"}`,
     `Calendar listening hint: ${input.context?.calendar?.listeningHint ?? "not available"}`,
+    formatCalendarStateForPrompt(input.context?.calendar?.state),
     `Weather summary: ${input.context?.weather?.summary ?? "not available"}`,
     `Weather listening hint: ${input.context?.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${input.context?.diary?.summary ?? "not available"}`,
@@ -2585,7 +2592,9 @@ function formatConversationCalendarContext(context: Partial<PockedioContext> | u
   }
   return [
     `Calendar summary: ${context.calendar.summary}`,
-    `Calendar listening hint: ${context.calendar.listeningHint}`
+    `Calendar listening hint: ${context.calendar.listeningHint}`,
+    formatCalendarStateForPrompt(context.calendar.state),
+    "Use calendar only as schedule evidence. Treat future events as upcoming and recent events as past pattern; do not invent tasks, pressure, or feelings."
   ].join("\n");
 }
 
@@ -2609,9 +2618,21 @@ function shouldReadConversationContext(text: string): boolean {
   return isContextualCalendarConversation(text) || isContextualPersonalConversation(text);
 }
 
+function buildContextOptionsForUserText(text: string): ContextBuilderOptions {
+  const calendarWindow = shouldUseWiderCalendarWindow(text) ? "last7DaysTodayAndNext3Days" : undefined;
+  return {
+    memoryQuery: text,
+    ...(calendarWindow ? { calendarWindow } : {})
+  };
+}
+
+function shouldUseWiderCalendarWindow(text: string): boolean {
+  return /\b(tomorrow|next few days|next\s+\d+\s+days|this week|next week|week ahead|my week|schedule ahead|upcoming)\b/i.test(text);
+}
+
 function isContextualCalendarConversation(text: string): boolean {
   const normalized = text.trim().toLowerCase();
-  return /\b(today|this morning|this afternoon|tonight|my day|my schedule|calendar|meeting|meetings|focus block|work block|get through|afternoon|evening|morning)\b/.test(normalized)
+  return /\b(today|tomorrow|next few days|this week|next week|upcoming|this morning|this afternoon|tonight|my day|my schedule|calendar|meeting|meetings|focus block|work block|get through|afternoon|evening|morning)\b/.test(normalized)
     && /\b(how|what|help|suggest|fit|fits|should|listen|music|feel|look|plan|through)\b/.test(normalized);
 }
 
@@ -2866,6 +2887,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
       const controller = new AbortController();
       interruptState.activeTurnController = controller;
       const turnStatus = createTurnScopedStatusWriter(statusWriter, formatInitialInteractiveTurnStatus(line, playbackState));
+      const stopProcessingQuitKeypress = watchProcessingQuitKeypress(defaultInput, interruptState);
       let result: SessionTurnResult;
       try {
         result = await runSessionTurn({
@@ -2882,11 +2904,15 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
         if (isCancellationError(error)) {
           recordCancelledTurn(config, sessionId);
           turnStatus.finish();
+          if (interruptState.exiting) {
+            break;
+          }
           console.log("Cancelled.");
           continue;
         }
         throw error;
       } finally {
+        stopProcessingQuitKeypress();
         turnStatus.finish();
         interruptState.activeTurnController = undefined;
       }
@@ -2977,16 +3003,50 @@ export function restoreInputAfterInlinePrompt(input: InlinePromptInput, previous
   input.resume();
 }
 
+export function watchProcessingQuitKeypress(input: typeof defaultInput, state: InteractiveInterruptState): () => void {
+  if (!input.isTTY) {
+    return () => undefined;
+  }
+
+  const previousRawMode = input.isRaw;
+  let stopped = false;
+  const onKeypress = (_value: string, key: Key) => {
+    if (key.name === "q" && !key.ctrl && !key.meta) {
+      handleInteractiveProcessingQuit(state);
+    }
+  };
+
+  emitKeypressEvents(input);
+  input.resume();
+  input.setRawMode(true);
+  input.on("keypress", onKeypress);
+
+  return () => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    input.off("keypress", onKeypress);
+    restoreInputAfterInlinePrompt(input, previousRawMode);
+    input.pause();
+  };
+}
+
+export function handleInteractiveProcessingQuit(state: InteractiveInterruptState): void {
+  const activeTurnController = state.activeTurnController;
+  if (activeTurnController && !activeTurnController.signal.aborted) {
+    activeTurnController.abort();
+  }
+  state.exiting = true;
+  stopPlaybackForSessionExit(state.playbackState);
+  state.closeReadline();
+}
+
 export function handleInteractiveInterrupt(state: InteractiveInterruptState, now: NowProvider = () => new Date()): void {
   const activeTurnController = state.activeTurnController;
   if (activeTurnController) {
     if (state.playbackState.activePlayback) {
-      if (!activeTurnController.signal.aborted) {
-        activeTurnController.abort();
-      }
-      state.exiting = true;
-      stopPlaybackForSessionExit(state.playbackState);
-      state.closeReadline();
+      handleInteractiveProcessingQuit(state);
       return;
     }
     if (!activeTurnController.signal.aborted) {

@@ -223,8 +223,9 @@ describe("generateStation", () => {
     expect(observedPrompt).toContain("Taste feedback signals:");
     expect(observedPrompt).toContain("positive_seed: track: Blue in Green - Miles Davis: weight 3");
     expect(observedPrompt).toContain("Generated profile says late-night piano is durable.");
-    expect(observedPrompt).toContain("Session memory summaries:");
+    expect(observedPrompt).toContain("Relevant DJ memories:");
     expect(observedPrompt).toContain("User likes patient winter piano.");
+    expect(observedPrompt).toContain("Avoid guidance from memory:");
     expect(observedPrompt).toContain("Local time context: device-local daypart=afternoon");
     expect(observedPrompt).toContain("Treat the device-local daypart as authoritative");
     expect(observedPrompt).toContain("Calendar listening hint:");

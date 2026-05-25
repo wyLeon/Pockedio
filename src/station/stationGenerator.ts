@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { createLlmClient } from "../llm/openaiClient.js";
 import type { LlmClient } from "../llm/llmClient.js";
 import type { PockedioConfig } from "../config/schema.js";
+import { formatCalendarStateForPrompt } from "../context/calendar.js";
 import type { PockedioContext } from "../context/contextBuilder.js";
 import type { MusicProvider, MusicTrackCandidate, PlayableTrack } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
@@ -180,10 +181,12 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     `User request: ${input.request}`,
     `Taste summary: ${tasteSummary}`,
     `Generated taste profile: ${input.context?.tasteProfile?.summary ?? "No generated taste profile yet."}`,
-    `Session memory summaries: ${formatMemorySummariesForPrompt(context?.memorySummaries ?? [])}`,
+    `Relevant DJ memories: ${formatMemorySummariesForPrompt(context?.memorySummaries ?? [])}`,
+    `Avoid guidance from memory: ${formatMemoryAvoidGuidanceForPrompt(context?.memorySummaries ?? [])}`,
     formatStationLocalTimeContext(context),
     `Calendar summary: ${context?.calendar?.summary ?? "not available"}`,
     `Calendar listening hint: ${context?.calendar?.listeningHint ?? "not available"}`,
+    formatCalendarStateForPrompt(context?.calendar?.state),
     `Weather summary: ${context?.weather?.summary ?? "not available"}`,
     `Weather listening hint: ${context?.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${context?.diary?.summary ?? "not available"}`,
@@ -249,9 +252,29 @@ function isExplicitlyRequestedTrack(track: StationTrackIdentity, request: string
 
 function formatMemorySummariesForPrompt(summaries: PockedioContext["memorySummaries"]): string {
   if (summaries.length === 0) {
-    return "No session memory summaries yet.";
+    return "No relevant DJ memories yet.";
   }
   return summaries.slice(0, 5).map((summary) => summary.content.replace(/\s+/g, " ").trim()).join(" | ");
+}
+
+function formatMemoryAvoidGuidanceForPrompt(summaries: PockedioContext["memorySummaries"]): string {
+  const avoidTags = summaries
+    .flatMap((summary) => metadataStringArray(summary.metadata, "avoidTags"))
+    .filter(Boolean);
+  if (avoidTags.length === 0) {
+    return "No memory-derived avoid guidance.";
+  }
+  return [...new Set(avoidTags)].slice(0, 8).join(", ");
+}
+
+function metadataStringArray(metadata: unknown, key: string): string[] {
+  if (!metadata || typeof metadata !== "object") {
+    return [];
+  }
+  const value = (metadata as Record<string, unknown>)[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function parseStationTracks(value: StationJsonResponse): PlannedStationTrack[] {

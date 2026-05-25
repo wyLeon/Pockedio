@@ -153,7 +153,7 @@ describe("status report", () => {
       database: { path: "/tmp/pockedio.sqlite", present: true, migrated: true, schemaVersion: 1 },
       runtime: {
         currentPlayback: "Title - Artist",
-        scheduledJobs: "Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled; mood checks hourly while serve runs"
+        scheduledJobs: "Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled; mood checks hourly while serve runs; serve not running"
       },
       netease: {
         baseUrl: "http://127.0.0.1:3000",
@@ -208,6 +208,7 @@ describe("status report", () => {
     expect(text).toContain("RUNTIME");
     expect(text).toContain("Playback   Title - Artist");
     expect(text).toContain("Schedule   Morning DJ weekdays 08:30 (prepare 12 min before); Evening DJ disabled");
+    expect(text).toContain("serve not running");
     expect(text).toContain("SETUP");
     expect(text).toContain("Music     NetEase account connected (exhigh)");
     expect(text).toContain("LLM       deepseek-chat (shell env)");

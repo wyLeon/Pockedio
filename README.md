@@ -186,6 +186,10 @@ pockedio status
 pockedio serve
 ```
 
+`pockedio serve` must stay running for scheduled DJ prompts and mood checks to fire.
+If it is not running at the scheduled minute, Pockedio will not wake up by itself.
+Use `pockedio status` to confirm whether the scheduler process is currently alive.
+
 Development smoke commands:
 
 ```bash

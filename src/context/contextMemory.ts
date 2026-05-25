@@ -47,6 +47,9 @@ function consolidateAgendaMemory(
     source: "calendar",
     day,
     eventCount: context.calendar.events.length,
+    nowStatus: context.calendar.state.nowStatus,
+    tags: context.calendar.state.tags,
+    nextDaysHighlights: context.calendar.state.nextDaysHighlights,
     generatedAt: context.now,
     confidence: context.calendar.events.length > 0 ? "medium" : "low"
   });

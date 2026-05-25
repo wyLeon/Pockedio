@@ -8,7 +8,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { clearInteractiveSubmittedInputEcho, createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveLivePrompt, formatInteractiveLivePromptBox, formatInteractiveLivePromptRule, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatInteractiveSubmittedUserTurn, formatRuntimeDjDisplayName, formatStartupSetupNote, handleInteractiveInterrupt, questionWithInteractiveFrame, restoreInputAfterInlinePrompt, runSessionTurn, stopPlaybackForSessionExit, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { clearInteractiveSubmittedInputEcho, createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveLivePrompt, formatInteractiveLivePromptBox, formatInteractiveLivePromptRule, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatInteractiveStatusDisplayText, formatInteractiveSubmittedUserTurn, formatRuntimeDjDisplayName, formatStartupSetupNote, handleInteractiveInterrupt, questionWithInteractiveFrame, restoreInputAfterInlinePrompt, runSessionTurn, stopPlaybackForSessionExit, watchProcessingQuitKeypress, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
@@ -206,7 +206,7 @@ describe("runSessionTurn", () => {
     expect(guide).toContain("stop");
     expect(guide).toContain("menu        return to main menu");
     expect(guide).toContain("what's playing?");
-    expect(guide).toContain("Ctrl+C      exit, or cancel while processing");
+    expect(guide).toContain("q           quit while processing");
     expect(guide).not.toContain("████");
   });
 
@@ -357,6 +357,10 @@ describe("runSessionTurn", () => {
         synthesize: async () => ({ ok: true, audioPath: "/tmp/intro.wav", latencyMs: 1 })
       }
     })).toBe("Starting DJ program...");
+  });
+
+  it("formats processing status with q as the quit key", () => {
+    expect(formatInteractiveStatusDisplayText("Thinking...")).toBe("Thinking...  press q to quit");
   });
 
   it("clears the interactive status before printing turn output", () => {
@@ -1951,6 +1955,60 @@ describe("runSessionTurn", () => {
     expect(state.suppressIdleInterruptUntil).toBe(0);
   });
 
+  it("lets q quit while a turn is processing", async () => {
+    const input = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      isRaw: boolean;
+      setRawMode: (value: boolean) => void;
+      resume: () => typeof input;
+      pause: () => typeof input;
+    };
+    const playbackState: InteractivePlaybackState = {};
+    const activeTurnController = new AbortController();
+    let stopped = false;
+    let closed = false;
+    let paused = false;
+    input.isTTY = true;
+    input.isRaw = false;
+    input.setRawMode = (value: boolean) => {
+      input.isRaw = value;
+    };
+    input.resume = () => input;
+    input.pause = () => {
+      paused = true;
+      return input;
+    };
+    playbackState.activePlayback = {
+      target: "track-1",
+      done: new Promise(() => undefined),
+      stop: () => {
+        stopped = true;
+      }
+    };
+    const state: InteractiveInterruptState = {
+      activeTurnController,
+      playbackState,
+      exiting: false,
+      suppressIdleInterruptUntil: 0,
+      closeReadline: () => {
+        closed = true;
+      }
+    };
+
+    const cleanup = watchProcessingQuitKeypress(input as never, state);
+    expect(input.isRaw).toBe(true);
+    input.emit("keypress", "q", { name: "q" });
+    cleanup();
+
+    expect(activeTurnController.signal.aborted).toBe(true);
+    expect(stopped).toBe(true);
+    expect(closed).toBe(true);
+    expect(playbackState.activePlayback).toBeUndefined();
+    expect(state.exiting).toBe(true);
+    expect(input.isRaw).toBe(false);
+    expect(paused).toBe(true);
+  });
+
   it("cancels pending DJ voice preparation before closing on idle Ctrl+C", async () => {
     const playbackState: InteractivePlaybackState = {};
     let cancelled = false;
@@ -2161,6 +2219,41 @@ describe("runSessionTurn", () => {
     expect(output.at(-1)).toBe("That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.");
     expect(playbackState.pendingStationRequest).toBe("play something for deep work");
     expect(playbackState.pendingStationNeedsChoice).toBe(true);
+  });
+
+  it("keeps the prompt-safe background writer after a station turn starts playback", async () => {
+    const config = makeConfig();
+    const turnOutput: string[] = [];
+    const backgroundOutput: string[] = [];
+    const playbackState: InteractivePlaybackState = {
+      writeOutput: (text) => backgroundOutput.push(text)
+    };
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null }) => void> = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => turnOutput.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+        stop: () => undefined
+      })
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      finishers[index]?.({ ok: true, target: `track-${index + 1}`, exitCode: 0, signal: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(backgroundOutput.at(-1)).toBe("That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.");
+    expect(turnOutput.at(-1)).not.toBe("That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.");
   });
 
   it("asks for normal or DJ mode before continuing a completed station", async () => {
@@ -3029,6 +3122,123 @@ describe("runSessionTurn", () => {
     expect(summary.content).toContain("winter evenings in university");
   });
 
+  it("stores LLM-extracted structured DJ memory for useful session signals", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const llm: LlmClient = {
+      generateJson: async (prompt) => {
+        if (prompt.includes("Extract reusable DJ memory")) {
+          return {
+            ok: true,
+            value: {
+              durable: true,
+              summary: "User likes quiet piano for night reading and wants busy percussion avoided.",
+              musicTags: ["quiet piano", "spacious"],
+              contextTags: ["reading", "night"],
+              avoidTags: ["busy percussion"],
+              useCases: ["reading"],
+              confidence: "high"
+            }
+          };
+        }
+        return { ok: false, errorCode: "llm_unavailable", error: "unused" };
+      },
+      generateText: async () => ({ ok: true, value: "That sounds like a quiet reading lane." })
+    };
+
+    await runSessionTurn({
+      input: "This kind of quiet piano helps me read at night, but busy percussion distracts me.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      endSession: true
+    });
+
+    const memory = withDatabase(config, (db) => db.prepare(`
+      SELECT content, metadata_json as metadataJson
+      FROM memory_items
+      WHERE kind = 'summary'
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `).get()) as { content: string; metadataJson: string };
+    expect(memory.content).toContain("quiet piano for night reading");
+    expect(JSON.parse(memory.metadataJson)).toMatchObject({
+      generatedBy: "llm_session_memory_extractor",
+      musicTags: ["quiet piano", "spacious"],
+      contextTags: ["reading", "night"],
+      avoidTags: ["busy percussion"],
+      useCases: ["reading"],
+      confidence: "high"
+    });
+  });
+
+  it("uses LLM extraction when manually updating session memory", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const sessionId = "manual-llm-memory-session";
+    const llm: LlmClient = {
+      generateJson: async (prompt) => {
+        if (prompt.includes("Extract reusable DJ memory")) {
+          return {
+            ok: true,
+            value: {
+              durable: true,
+              summary: "User wants spacious evening jazz for decompression.",
+              musicTags: ["spacious jazz"],
+              contextTags: ["evening", "decompression"],
+              avoidTags: ["sharp percussion"],
+              useCases: ["recovery"],
+              confidence: "high"
+            }
+          };
+        }
+        return { ok: false, errorCode: "llm_unavailable", error: "unused" };
+      },
+      generateText: async () => ({ ok: true, value: "I’ll keep that evening decompression lane in mind." })
+    };
+
+    withDatabase(config, (db) => {
+      db.prepare(`
+        INSERT INTO sessions (id, started_at, trigger_type, trigger_text)
+        VALUES (?, ?, ?, ?)
+      `).run(sessionId, new Date().toISOString(), "conversation", "interactive session");
+    });
+
+    await runSessionTurn({
+      input: "Spacious evening jazz helps me decompress, but sharp percussion is too much.",
+      config,
+      sessionId,
+      endSession: false,
+      playbackState,
+      provider: new FakeProvider(),
+      llm
+    });
+
+    await runSessionTurn({
+      input: "summarize this session",
+      config,
+      sessionId,
+      endSession: false,
+      playbackState,
+      provider: new FakeProvider(),
+      llm
+    });
+
+    const memory = withDatabase(config, (db) => db.prepare(`
+      SELECT content, metadata_json as metadataJson
+      FROM memory_items
+      WHERE kind = 'summary'
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `).get()) as { content: string; metadataJson: string };
+    expect(memory.content).toContain("spacious evening jazz");
+    expect(JSON.parse(memory.metadataJson)).toMatchObject({
+      generatedBy: "llm_session_memory_extractor",
+      avoidTags: ["sharp percussion"]
+    });
+  });
+
   it("does not promote generic playback requests into durable session memory", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -3240,7 +3450,25 @@ describe("runSessionTurn", () => {
           available: true,
           events: [],
           summary: "Calendar has 3 events for today: Design Sync; Planning Review; 1:1.",
-          listeningHint: "Calendar listening hint for today: meeting-heavy context suggests focus before events and decompression after them."
+          listeningHint: "Calendar listening hint for today: meeting-heavy context suggests focus before events and decompression after them.",
+          state: {
+            nowStatus: "before_next_event",
+            currentEvent: null,
+            nextEvent: {
+              title: "Design Sync",
+              startTime: "2026-05-19T14:00:00+08:00",
+              endTime: "2026-05-19T15:00:00+08:00",
+              calendarName: "Work",
+              isAllDay: false,
+              tags: ["meeting"]
+            },
+            minutesUntilNext: 30,
+            freeWindowMinutes: 30,
+            todayEventCount: 3,
+            nextDaysHighlights: [],
+            recentSchedulePattern: "No recent calendar events found.",
+            tags: ["meeting"]
+          }
         },
         personality: config.personality
       })
@@ -3251,6 +3479,45 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain("meeting-heavy");
     expect(prompts[0]).toContain("Calendar summary:");
     expect(prompts[0]).toContain("Calendar listening hint:");
+    expect(prompts[0]).toContain("Calendar state:");
+    expect(prompts[0]).toContain("Use calendar only as schedule evidence");
+  });
+
+  it("uses a wider calendar window for future schedule questions", async () => {
+    const config = makeConfig();
+    const calendarWindows: unknown[] = [];
+    await runSessionTurn({
+      input: "What should I listen to tomorrow morning?",
+      config,
+      playbackState: {},
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Tomorrow has planning, so keep it focused."),
+      buildContext: async (_config, options) => {
+        calendarWindows.push(options?.calendarWindow);
+        return {
+          calendar: {
+            available: true,
+            events: [],
+            summary: "Calendar has 1 event for the next few days: Tomorrow Planning.",
+            listeningHint: "Calendar listening hint for the next few days: some scheduled context favors clear transitions.",
+            state: {
+              nowStatus: "free",
+              currentEvent: null,
+              nextEvent: null,
+              minutesUntilNext: null,
+              freeWindowMinutes: null,
+              todayEventCount: 0,
+              nextDaysHighlights: ["Tomorrow Planning at 2026-05-20T09:00:00+08:00"],
+              recentSchedulePattern: "No recent calendar events found.",
+              tags: ["meeting"]
+            }
+          },
+          personality: config.personality
+        };
+      }
+    });
+
+    expect(calendarWindows).toEqual(["last7DaysTodayAndNext3Days"]);
   });
 
   it("uses diary context for personal mood conversation without starting playback", async () => {

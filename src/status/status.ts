@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import Database from "better-sqlite3";
 import { loadConfig } from "../config/load.js";
 import { hasLocalLlmApiKey } from "../config/llmSecrets.js";
@@ -108,7 +109,7 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
     config: configStatus,
     runtime: {
       currentPlayback: getCurrentPlayback(config),
-      scheduledJobs: formatScheduledJobs(config)
+      scheduledJobs: formatScheduledJobs(config, isSchedulerServeRunning())
     },
     database,
     llm: {
@@ -297,11 +298,12 @@ function getCurrentPlayback(config: PockedioConfig): string | null {
   }
 }
 
-function formatScheduledJobs(config: PockedioConfig): string {
+function formatScheduledJobs(config: PockedioConfig, serveRunning = false): string {
   return [
     formatScheduledProgramStatus("Morning DJ", config.dj.schedule.morning),
     formatScheduledProgramStatus("Evening DJ", config.dj.schedule.evening),
-    "mood checks hourly while serve runs"
+    "mood checks hourly while serve runs",
+    serveRunning ? "serve running" : "serve not running"
   ].join("; ");
 }
 
@@ -313,6 +315,31 @@ function formatScheduledProgramStatus(
     return `${label} disabled`;
   }
   return `${label} weekdays ${schedule.playTime} (prepare ${schedule.prepareMinutesBefore} min before)`;
+}
+
+function isSchedulerServeRunning(): boolean {
+  const result = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" });
+  if (result.status !== 0 || !result.stdout) {
+    return false;
+  }
+  return result.stdout
+    .split("\n")
+    .some((line) => isPockedioServeProcessLine(line, process.pid));
+}
+
+function isPockedioServeProcessLine(line: string, currentPid: number): boolean {
+  const match = line.trim().match(/^(\d+)\s+(.+)$/);
+  if (!match) {
+    return false;
+  }
+  const pid = Number(match[1]);
+  const command = match[2];
+  if (pid === currentPid) {
+    return false;
+  }
+  return /\bpockedio\s+serve\b/.test(command)
+    || /\btsx\s+src\/cli\.ts\s+serve\b/.test(command)
+    || /\/dist\/cli\.js\s+serve\b/.test(command);
 }
 
 export function formatStatusReport(report: StatusReport, options: TuiRenderOptions = {}): string {

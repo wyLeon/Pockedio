@@ -1,3 +1,4 @@
+import type { LlmClient } from "../llm/llmClient.js";
 import { MemoryStore, type MessageRecord } from "./store.js";
 
 export type SessionSummaryResult = {
@@ -9,6 +10,17 @@ export type SessionSummaryResult = {
 export type SessionSummaryDraft = {
   summary: string;
   durable: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+type ExtractedSessionMemory = {
+  durable?: boolean;
+  summary?: string;
+  musicTags?: unknown;
+  contextTags?: unknown;
+  avoidTags?: unknown;
+  useCases?: unknown;
+  confidence?: unknown;
 };
 
 const memoryUpdatePattern = /\b(summarize this session|update memory|save this memory|refresh memory|session memory)\b/i;
@@ -20,9 +32,23 @@ const feedbackPattern = /\b(more like this|less like this|favorite this|save thi
 export function summarizeSession(store: MemoryStore, sessionId: string): SessionSummaryResult {
   const messages = store.getSessionMessages(sessionId);
   const draft = buildDeterministicSessionSummary({ messages });
+  return storeSessionSummaryDraft(store, sessionId, messages.length, draft);
+}
+
+export async function summarizeSessionWithLlm(store: MemoryStore, sessionId: string, llm: LlmClient, signal?: AbortSignal): Promise<SessionSummaryResult> {
+  const messages = store.getSessionMessages(sessionId);
+  if (signal?.aborted) {
+    return storeSessionSummaryDraft(store, sessionId, messages.length, buildDeterministicSessionSummary({ messages }));
+  }
+  const extracted = await extractSessionMemoryWithLlm(messages, llm, signal);
+  const draft = extracted ?? buildDeterministicSessionSummary({ messages });
+  return storeSessionSummaryDraft(store, sessionId, messages.length, draft);
+}
+
+function storeSessionSummaryDraft(store: MemoryStore, sessionId: string, messageCount: number, draft: SessionSummaryDraft): SessionSummaryResult {
   const result: SessionSummaryResult = {
     summary: draft.summary,
-    messageCount: messages.length
+    messageCount
   };
 
   if (!draft.durable) {
@@ -30,8 +56,9 @@ export function summarizeSession(store: MemoryStore, sessionId: string): Session
   }
 
   result.summaryId = store.addSessionSummary(sessionId, draft.summary, {
-    generatedBy: "deterministic_session_summary",
-    messageCount: messages.length
+    generatedBy: draft.metadata?.generatedBy ?? "deterministic_session_summary",
+    messageCount,
+    ...(draft.metadata ?? {})
   });
   return result;
 }
@@ -66,8 +93,74 @@ export function buildDeterministicSessionSummary(input: { messages: MessageRecor
 
   return {
     summary: lines.join("\n"),
-    durable
+    durable,
+    metadata: durable ? {
+      source: "session",
+      confidence: "low"
+    } : undefined
   };
+}
+
+async function extractSessionMemoryWithLlm(messages: MessageRecord[], llm: LlmClient, signal?: AbortSignal): Promise<SessionSummaryDraft | null> {
+  const userMessages = messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content.trim())
+    .filter(Boolean)
+    .slice(-12);
+  if (userMessages.length === 0) {
+    return null;
+  }
+
+  const prompt = [
+    "Extract reusable DJ memory from this Pockedio session.",
+    "Return JSON with durable, summary, musicTags, contextTags, avoidTags, useCases, and confidence.",
+    "Only mark durable=true for reusable listening preference, feedback, or context signals.",
+    "Do not store generic playback requests. Do not quote private text beyond a compact summary.",
+    "",
+    userMessages.map((message) => `User: ${message}`).join("\n")
+  ].join("\n");
+  let result;
+  try {
+    result = await llm.generateJson<ExtractedSessionMemory>(prompt, "DJ session memory extraction JSON", { signal });
+  } catch {
+    return null;
+  }
+  if (!result.ok) {
+    return null;
+  }
+
+  const value = result.value;
+  const summary = typeof value.summary === "string" ? value.summary.trim() : "";
+  if (!value.durable || !summary) {
+    return {
+      durable: false,
+      summary: "Session memory summary:\n- No durable preference signals found."
+    };
+  }
+
+  return {
+    durable: true,
+    summary: `Session memory summary:\n- ${summary}`,
+    metadata: {
+      generatedBy: "llm_session_memory_extractor",
+      source: "session",
+      musicTags: stringArray(value.musicTags).slice(0, 8),
+      contextTags: stringArray(value.contextTags).slice(0, 8),
+      avoidTags: stringArray(value.avoidTags).slice(0, 8),
+      useCases: stringArray(value.useCases).slice(0, 6),
+      confidence: normalizeConfidence(value.confidence)
+    }
+  };
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
+    : [];
+}
+
+function normalizeConfidence(value: unknown): "low" | "medium" | "high" {
+  return value === "high" || value === "medium" || value === "low" ? value : "medium";
 }
 
 function uniqueLimited(values: string[], limit: number): string[] {

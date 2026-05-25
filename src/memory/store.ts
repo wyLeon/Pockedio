@@ -404,6 +404,21 @@ export class MemoryStore {
     }));
   }
 
+  getRankedSessionMemories(query: string | undefined, limit: number): MemorySummaryRecord[] {
+    const memories = this.getRecentMemoryItems(["summary"], Math.max(limit * 8, 20));
+    if (!query?.trim()) {
+      return memories.slice(0, limit);
+    }
+    return memories
+      .map((memory, index) => ({
+        memory,
+        score: scoreSessionMemory(memory, query) - index * 0.001
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((item) => item.memory);
+  }
+
   addContextSnapshot(sessionId: string, context: ContextSnapshotInput): string {
     const id = randomUUID();
     this.db.prepare(`
@@ -589,6 +604,42 @@ function parseJson(value: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+function scoreSessionMemory(memory: MemorySummaryRecord, query: string): number {
+  const queryTerms = tokenize(query);
+  const metadataText = flattenMetadataText(memory.metadata);
+  const memoryTerms = tokenize(`${memory.content} ${metadataText}`);
+  let score = 0;
+  for (const term of queryTerms) {
+    if (memoryTerms.includes(term)) {
+      score += 3;
+    }
+  }
+  if (/\b(read|reading|book|diary|journal)\b/i.test(query) && /\b(read|reading|book|diary|journal)\b/i.test(`${memory.content} ${metadataText}`)) {
+    score += 6;
+  }
+  if (/\b(focus|work|meeting|deep)\b/i.test(query) && /\b(focus|work|meeting|deep)\b/i.test(`${memory.content} ${metadataText}`)) {
+    score += 5;
+  }
+  if (/\b(night|evening|late)\b/i.test(query) && /\b(night|evening|late)\b/i.test(`${memory.content} ${metadataText}`)) {
+    score += 4;
+  }
+  return score;
+}
+
+function tokenize(value: string): string[] {
+  return value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function flattenMetadataText(metadata: unknown): string {
+  if (!metadata || typeof metadata !== "object") {
+    return "";
+  }
+  return Object.values(metadata as Record<string, unknown>)
+    .flatMap((value) => Array.isArray(value) ? value : [value])
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
 }
 
 function calendarDedupeKey(event: CalendarEventInput): string {
