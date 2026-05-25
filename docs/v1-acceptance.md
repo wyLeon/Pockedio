@@ -8,10 +8,11 @@ This checklist maps the approved v1 design criteria to implementation and verifi
 - [x] `npm test`
 - [x] `npm run build`
 
-Latest automated pass on 2026-05-22:
+Latest automated pass on 2026-05-25:
 
-- `npm test`: 302 tests passed.
+- `npm test`: 363 tests passed.
 - `npm run build`: passed.
+- `npm run typecheck`: passed.
 
 ## Manual Setup
 
@@ -97,8 +98,8 @@ Latest automated pass on 2026-05-22:
 
 ## Current Evidence
 
-- Automated verification passed on 2026-05-22:
-  - `npm test`: 302 tests passed.
+- Automated verification passed on 2026-05-25:
+  - `npm test`: 363 tests passed.
   - `npm run build`: passed.
   - `npm run typecheck`: passed.
 - Automated coverage includes config, database, personas, taste import, provider adapters, context adapters, voice rules, intent parsing, station generation, session runner, scheduler, and status command tests.
@@ -108,10 +109,11 @@ Latest automated pass on 2026-05-22:
   - Contribution and security guidance.
   - `.env.example` with placeholders only.
   - GitHub Actions CI for typecheck, tests, and build.
-- Fresh-clone release smoke passed on 2026-05-22 with Node v24.12.0:
-  - `npm ci`, `npm run typecheck`, `npm test`, and `npm run build` passed from `/tmp/pockedio-release-smoke`.
+- Fresh-clone release smoke passed on 2026-05-25 with Node v24.12.0:
+  - `npm ci --prefer-offline --no-audit --progress=false`, `npm run typecheck`, `npm test`, and `npm run build` passed from `/tmp/pockedio-release-smoke-oss`.
+  - An earlier exact `npm ci` attempt stalled during package fetch through the local proxy without a project error; rerun exact `npm ci` on a clean network before tagging if release evidence must be strict.
   - Node v18.20.8 produced expected engine warnings and failed native install for `better-sqlite3`; the public requirement remains Node 22+.
-  - `node dist/cli.js status` worked with isolated `POCKEDIO_HOME=/tmp/pockedio-release-home`.
+  - `node dist/cli.js status` worked with isolated `POCKEDIO_HOME=/tmp/pockedio-clean-test`.
   - Fresh status showed default voice as `Vale, built-in macOS`, not mandatory Fish TTS.
   - PTY `node dist/cli.js setup` skip path completed all optional setup gates and returned cleanly.
   - Main hub opened, Setup & Connections opened, Context > Diary opened, `Esc` returned from diary path input, and `B` returned to Setup & Connections.
@@ -137,7 +139,7 @@ Latest automated pass on 2026-05-22:
   - Member-only preview/full-length comparison for NetEase account playback.
   - Ear-level FishAudio QA by the user, since this smoke pass verified generation/playback plumbing but not subjective audio quality.
 - Real-config smoke pass on 2026-05-21:
-  - `pockedio status` reported NetEase reachable with account-backed `exhigh` playback, FishAudio paths present, Calendar enabled, weather set to `guangzhou`, and the database migrated after the interactive run.
+  - `pockedio status` reported NetEase reachable with account-backed `exhigh` playback, FishAudio paths present, Calendar enabled, weather configured, and the database migrated after the interactive run.
   - Conversational fallback: `I'm tired today.` stayed conversational and did not start playback.
   - Explicit playback: `play something for deep work` generated five tracks and started NetEase playback with `Weightless Part 1 - Marconi Union`.
   - Current-track questions worked during playback: `who is the singer?` and `tell me about this song` answered against the active track.
@@ -155,11 +157,11 @@ Latest automated pass on 2026-05-22:
   - Public CLI command `play 江南 by 林俊杰` started the full `04:27` track, then `stop` marked the interactive playback row as `skipped`.
   - `exit` closed the interactive session cleanly and no playback/audio child processes remained.
 - FishAudio DJ audio QA on 2026-05-21:
-  - Confirmed configured DJ reference: Mina, English, standard program, reference WAV `~/.pockedio/audio/previews/mina.wav`, `6.22s`, mono 44.1kHz Int16.
+  - Confirmed configured DJ reference: Mina, English, standard program, local preview WAV, `6.22s`, mono 44.1kHz Int16.
   - Real CLI DJ attempt reached pending `dj`, but live station generation stayed on `Building a station...` for more than a minute and required Ctrl+C cancellation; this should be tracked as a station-generation/LLM timeout issue, separate from FishAudio.
-  - Controlled FishAudio/`afplay` harness played a real opening WAV: `~/.pockedio/audio/dj/1779343963684-d53e8bf0-3f24-4653-9ccf-59177382b771.wav`, `12.03s`, recorded `played`.
-  - Controlled harness waited for and played a real mid-program transition WAV: `~/.pockedio/audio/dj/1779344050688-293eb4b2-a9b1-4f6b-a9fd-ee49e11bef5b.wav`, `10.36s`, recorded `played`.
-  - Closing-focused harness played a real opening WAV and generated/played a real closing WAV: `~/.pockedio/audio/dj/1779344246545-6558f28b-23f6-4cac-a2b9-da4b9670505e.wav`, `7.76s`, recorded `played`.
+  - Controlled FishAudio/`afplay` harness played a real opening WAV, `12.03s`, recorded `played`.
+  - Controlled harness waited for and played a real mid-program transition WAV, `10.36s`, recorded `played`.
+  - Closing-focused harness played a real opening WAV and generated/played a real closing WAV, `7.76s`, recorded `played`.
   - Final closing surface appeared before the station-complete prompt: `That station’s done. Press Enter to continue this vibe, or tell me where to take it next.`
   - No `afplay`, FishAudio, MLX, or CLI child processes remained after the harnesses.
 - Scheduled DJ consent behavior added on 2026-05-21:

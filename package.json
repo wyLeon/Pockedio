@@ -8,6 +8,14 @@
   "bin": {
     "pockedio": "dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "docs/privacy.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wyLeon/Pockedio.git"

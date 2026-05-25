@@ -10,6 +10,8 @@ Pockedio is an early open-source release. Install from source for now. The npm p
 
 The current release target is a working local developer/user setup, not a hosted service.
 
+See [CHANGELOG.md](CHANGELOG.md) for public release notes.
+
 ## What It Does
 
 - Opens a terminal setup and session entry screen.
@@ -223,6 +225,8 @@ External services may receive data when enabled:
 
 Pockedio does not run a hosted backend, create user accounts, or store your memory remotely.
 
+See [docs/privacy.md](docs/privacy.md) for the full local data and external-service privacy notes.
+
 ## Development
 
 ```bash
@@ -260,6 +264,8 @@ See [docs/open-source-release-checklist.md](docs/open-source-release-checklist.m
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Please also follow the project [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Security
 

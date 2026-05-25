@@ -13,6 +13,8 @@ Not in scope for the first public release:
 - multi-user account system
 - mandatory Fish TTS install
 
+`package.json` intentionally keeps `"private": true` for the source-install release. Remove it only when the project is ready for npm publication.
+
 ## Required Checks
 
 - [ ] Working tree contains only intentional changes.
@@ -20,6 +22,7 @@ Not in scope for the first public release:
 - [ ] `npm run typecheck` passes.
 - [ ] `npm test` passes.
 - [ ] `npm run build` passes.
+- [ ] `npm pack --dry-run` contains only the intended future package surface.
 - [ ] Fresh-clone manual smoke uses a disposable home, for example `POCKEDIO_HOME=/tmp/pockedio-clean-test`.
 - [ ] `POCKEDIO_HOME=/tmp/pockedio-clean-test node dist/cli.js status` runs and shows `Local     /tmp/pockedio-clean-test`.
 - [ ] `POCKEDIO_HOME=/tmp/pockedio-clean-test node dist/cli.js setup` can configure LLM, voice, NetEase, context, and scheduler.
@@ -39,6 +42,7 @@ Not in scope for the first public release:
 - [ ] No NetEase cookies are present.
 - [ ] No local `~/.pockedio/` files are copied into the repo.
 - [ ] No personal absolute paths are required for setup.
+- [ ] No generated audio, spike outputs, environment dumps, or machine-local paths are tracked.
 - [ ] README examples use placeholders only.
 - [ ] Clean-release test output does not list real favorites, diary context, imported taste, or prior sessions from the user's normal `~/.pockedio`.
 
@@ -48,7 +52,28 @@ Suggested local scan:
 git ls-files | grep -E '(^|/)(\\.env|config\\.json|pockedio\\.sqlite|.*cookie.*|.*secret.*)$' || true
 rg -n --hidden --glob '!node_modules/**' --glob '!package-lock.json' 'sk-[A-Za-z0-9_-]{20,}|OPENAI_API_KEY=.+|DEEPSEEK_API_KEY=.+|OPENROUTER_API_KEY=.+|MUSIC_U=' .
 rg -n --hidden --glob '!node_modules/**' --glob '!package-lock.json' 'api[_-]?key\\s*[:=]\\s*[^[:space:]]{12,}' .
+rg -n --hidden --glob '!node_modules/**' --glob '!package-lock.json' '(/Users/|~/.pockedio|~/.openclaw|\\.wav$|MUSIC_U=)' .
 ```
+
+## Community Profile
+
+- [ ] `README.md` explains purpose, setup, requirements, local data, and limitations.
+- [ ] `LICENSE` is present.
+- [ ] `CONTRIBUTING.md` is present.
+- [ ] `SECURITY.md` is present.
+- [ ] `CODE_OF_CONDUCT.md` is present.
+- [ ] GitHub issue templates are present.
+- [ ] GitHub pull request template is present.
+
+## npm Publication Gate
+
+Do not publish to npm until all of these are true:
+
+- [ ] `"private": true` is intentionally removed.
+- [ ] `npm pack --dry-run` is reviewed.
+- [ ] The package includes only runtime files and public docs.
+- [ ] A tag and changelog entry exist for the exact package version.
+- [ ] Installation from the packed tarball works in a clean directory.
 
 ## Release Steps
 
