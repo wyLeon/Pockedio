@@ -4,6 +4,8 @@ This document defines a unified terminal UI language for Pockedio. It is designe
 
 The goal is not to make the CLI look like a web app. The goal is to make Pockedio feel like a calm, high-end music player inside a terminal.
 
+The current interactive session and playback surface are the reference implementation. New setup, selection, scheduled DJ, memory, and status pages should reuse these primitives instead of inventing page-specific visual styles.
+
 ## Principles
 
 1. **Music first**
@@ -13,7 +15,7 @@ The goal is not to make the CLI look like a web app. The goal is to make Pockedi
    Use terminal cells, rows, dividers, rails, Unicode blocks, and ANSI color. Avoid browser-only effects such as radial glow, blur, smooth cursor-follow gradients, and floating cards.
 
 3. **One system, multiple states**
-   Favorite lists, loading, playback, and scheduled DJ arrival are not separate styles. They are states built from the same row, section, status, and queue components.
+   Conversation, submitted user turns, favorite lists, loading, playback, and scheduled DJ arrival are not separate styles. They are states built from the same prompt, row, section, status, and queue components.
 
 4. **Quiet premium**
    Pockedio should feel restrained and intentional: high contrast where the user must decide, muted detail elsewhere, warm accents for Mina/DJ moments.
@@ -85,6 +87,73 @@ Rules:
 
 ## Core Components
 
+### `TuiPrompt`
+
+The active input prompt is a single live marker:
+
+```text
+›
+```
+
+Rules:
+
+- Use `›` only for active input and submitted user turns.
+- Do not use `>` for new interactive surfaces.
+- Do not add helper text beside the prompt in normal conversation mode.
+
+### `TuiSubmittedUserTurn`
+
+After Enter, the user's submitted input becomes a transcript item. It is not left as raw terminal echo.
+
+No-color fallback:
+
+```text
+› favorite the first song
+```
+
+TTY/color form:
+
+```text
+▌ ›  favorite the first song
+```
+
+Rules:
+
+- Clear the raw readline echo before rendering the submitted block in TTY mode.
+- Keep the submitted block visually quieter than playback rows but stronger than plain prose.
+- Do not render a submitted block for empty Enter.
+- Normalize copied prompt markers, so `› favorite 1` is displayed once as `› favorite 1`.
+
+### `TuiReply`
+
+Normal Mina replies use bullet-led prose, not a `MINA reply` label:
+
+```text
+● This song is a live recording with a quiet emotional center.
+```
+
+Rules:
+
+- Use this for conversation, questions, confirmations, refusals, and lightweight recommendations.
+- Wrap continuation lines with a small hanging indent.
+- Do not use the DJ note band for normal replies.
+- Do not use playback-colored rows for normal replies.
+
+### `TuiDjNote`
+
+DJ mode, station intros, playback notes, and spoken-program copy use a labeled note band:
+
+```text
+MINA  DJ note
+This opens the set with warm, low-pressure motion.
+```
+
+Rules:
+
+- Use only when the content is DJ/program/playback narration.
+- Keep it distinct from normal Mina replies.
+- Prefer gold accent.
+
 ### `TuiFrame`
 
 The top-level terminal screen container. In a normal REPL, this may be a compact block of lines. In alternate-screen mode, it owns the full redraw.
@@ -101,7 +170,6 @@ An uppercase label that separates groups:
 
 ```text
 NOW PLAYING
-NEXT HANDOFF
 QUEUE
 CHOOSE
 ```
@@ -196,6 +264,31 @@ Example:
 
 ## State Designs
 
+### Conversation State
+
+Use during the normal REPL session.
+
+Design:
+
+```text
+▌ ›  Want some comforting music to soothe me.
+
+● Given the humid afternoon heat in Guangzhou and your need for comfort, try the gentle
+  ambient washes of Music for Airports by Brian Eno. Shall I build this station or play it for you?
+
+Press Enter to play it, type "dj" for a spoken DJ version, or tell me how to adjust it.
+
+›
+```
+
+Rules:
+
+- The live prompt and submitted turn are separate states.
+- The submitted turn is the official transcript item.
+- Mina's response uses `TuiReply` unless playback or DJ narration starts.
+- Follow-up hints are plain prose, not selected rows.
+- Keep enough vertical space between submitted user turns, replies, and the next prompt.
+
 ### Selection And List State
 
 Use for:
@@ -215,6 +308,78 @@ Design:
 - compact action hints
 
 Primary accent: green.
+
+### Setup Page Template
+
+Use for setup, provider, context, memory, voice, FishAudio, and scheduled DJ pages.
+
+Design:
+
+```text
+VOICE SETUP
+
+● Built-in macOS voice is ready. Fish TTS can add Mina or Nova later.
+
+CURRENT
+Provider        Built-in macOS voice
+Voice           Vale
+Advanced        Fish TTS not configured
+
+ACTIONS
+▌ > 1. Choose DJ voice              preview Mina, Nova, or built-in voices
+    2. Configure Fish TTS           enable generated Mina or Nova audio
+    3. Use text-only DJ copy        keep DJ notes without spoken audio
+
+↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit
+```
+
+Rules:
+
+- Title is uppercase and names the exact surface.
+- Put one `●` summary line below the title.
+- Use `CURRENT`, `STATUS`, `RESULT`, `UPDATED`, or `ACTIONS` section labels.
+- Use the same selected-row grammar as playback and queue rows: `▌ >`.
+- Keep setup descriptions concise. The action row should explain outcome, not teach the whole feature.
+- Do not mix old title-case section labels such as `Actions:` or `Current config` into new setup pages.
+
+### Status Page Template
+
+Use for diagnostic status output.
+
+Design:
+
+```text
+POCKEDIO STATUS
+
+● Current runtime, setup, memory, and local data state.
+
+RUNTIME
+Playback   none
+Session    2026-05-24T07:26:21.563Z
+Schedule   Morning DJ weekdays 08:45
+
+SETUP
+Music     NetEase API reachable
+LLM       gpt-4.1-mini
+Voice     Mina, Fish TTS ready
+Context   Calendar off, Weather Guangzhou
+
+MEMORY
+Config    ok
+Database  ok
+Taste     ok
+
+LOCAL DATA
+Local     /Users/example/.pockedio
+External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used.
+```
+
+Rules:
+
+- Status is for diagnosis, not onboarding.
+- Keep section names uppercase.
+- Keep row labels aligned and stable so users can scan repeated checks.
+- Details and warnings come after the main report.
 
 ### Loading State
 
@@ -254,12 +419,11 @@ Design:
 
 ```text
 NOW PLAYING
-2/5  Blue in Green - Miles Davis                  02:18 / 05:37
-▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱  late-night modal jazz, low brightness
+2/5  Blue in Green - Miles Davis
+[========>...........] 02:18 / 05:37
 
-NEXT HANDOFF
-3/5  My Little Brown Book - John Coltrane         ready
-why  keeps the room slow, adds tenor warmth
+MINA  DJ note
+Blue in Green keeps the room slow and reflective.
 
 QUEUE
 1    Autumn Leaves - Bill Evans                   played
@@ -272,8 +436,9 @@ QUEUE
 Rules:
 
 - The current song is the strongest visual element.
-- The next song is visible and prepared, but secondary.
-- Explain the handoff briefly when useful.
+- The next song is visible in the queue, but secondary.
+- Do not add a separate `UP NEXT` or `NEXT HANDOFF` section in the default playback surface.
+- Explain the current track in the DJ note area, not inside the queue.
 - Keep DJ voice separate from normal playback unless DJ mode is active.
 
 Primary accent: cyan.
@@ -311,15 +476,31 @@ Primary accent: gold for arrival, green for selected action.
 2. Keep all color tokens in one place.
 3. Keep row layout width-aware.
 4. Provide a no-color fallback for non-TTY output.
-5. Support reduced motion by disabling spinner animation or lowering frame rate.
-6. Never rely on mouse input for core flows.
-7. Use plain text output for logs, pipes, and tests.
+5. Clear live status/loading rows before final replies in normal REPL mode.
+6. Clear raw readline echo before rendering `TuiSubmittedUserTurn` in TTY mode.
+7. Support reduced motion by disabling spinner animation or lowering frame rate.
+8. Never rely on mouse input for core flows.
+9. Use plain text output for logs, pipes, and tests.
+10. New pages should first ask: can this be expressed with `TuiPrompt`, `TuiSubmittedUserTurn`, `TuiReply`, `TuiDjNote`, `TuiSectionLabel`, and `TuiRow`?
 
 ## MVP Order
 
-1. Playback state: five-song arc, current/next/queue.
-2. Selection state: favorite list and queue browser.
-3. Loading state: named stages with premium Mina/DJ tone.
-4. Scheduled DJ arrival: choice state with expiration and preview.
+1. Playback state: five-song arc, current/queue/DJ note.
+2. Conversation state: live prompt, submitted user turn, Mina reply, pending-station hint.
+3. Selection state: favorite list, queue browser, setup choices.
+4. Loading state: named stages with premium Mina/DJ tone.
+5. Scheduled DJ arrival: choice state with expiration and preview.
 
 This order improves real daily use before polishing rarer states.
+
+## Alignment Checklist
+
+Use this checklist before adding or changing any CLI page:
+
+- Does the page use `›` for live input?
+- If the user submits text, is it re-rendered as `TuiSubmittedUserTurn` rather than left as raw echo?
+- Is Mina speaking as a normal reply (`●`) or as DJ narration (`MINA DJ note`), and is that distinction intentional?
+- Are selected rows using the same left rail and selected-row grammar?
+- Are section labels uppercase and drawn from the shared accent roles?
+- Are loading rows specific, cancellable when possible, and cleared before the final response?
+- Does non-TTY output remain readable without ANSI color?

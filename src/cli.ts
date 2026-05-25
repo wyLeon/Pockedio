@@ -61,6 +61,15 @@ import {
   type VoiceSetupAction,
   type WelcomeHubAction
 } from "./tui/welcomeHub.js";
+import {
+  renderTuiBulletLine,
+  renderTuiFooter,
+  renderTuiKeyValue,
+  renderTuiPageTitle,
+  renderTuiRow,
+  renderTuiSectionLabel,
+  type TuiRenderOptions
+} from "./tui/terminalRenderer.js";
 
 const program = new Command();
 
@@ -80,7 +89,7 @@ program
       noHub: options.hub === false
     });
     if (mode === "session") {
-      await runInteractiveSession();
+      await runSessionThenMaybeHub();
       return;
     }
     await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config })));
@@ -171,7 +180,7 @@ program.parseAsync(process.argv).catch((error: unknown) => {
 
 async function runWelcomeHubAction(action: WelcomeHubAction): Promise<void> {
   if (action === "session") {
-    await runInteractiveSession();
+    await runSessionThenMaybeHub();
     return;
   }
   if (action === "setup") {
@@ -195,8 +204,25 @@ async function runWelcomeHubAction(action: WelcomeHubAction): Promise<void> {
   }
 }
 
+async function runSessionThenMaybeHub(): Promise<void> {
+  clearTerminalForSession();
+  const outcome = await runInteractiveSession();
+  if (outcome === "menu") {
+    await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config: loadConfig() })));
+  }
+}
+
+function clearTerminalForSession(): void {
+  if (defaultOutput.isTTY) {
+    defaultOutput.write("\x1B[H\x1B[2J\x1B[3J");
+  }
+}
+
 async function showInteractiveStatus(): Promise<void> {
-  await pauseWithMessage(formatStatusReport(await getStatusReport()));
+  await pauseWithMessage(formatStatusReport(await getStatusReport(), {
+    color: Boolean(defaultOutput.isTTY),
+    width: defaultOutput.columns
+  }));
   await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config: loadConfig() })));
 }
 
@@ -260,7 +286,9 @@ async function runFullSetup(): Promise<void> {
       return confirmFullSetupOptionalStep("Enter the DJ session now and try Pockedio?", true);
     },
     pause: pauseWithMessage,
-    enterSession: runInteractiveSession
+    enterSession: async () => {
+      await runInteractiveSession();
+    }
   });
 }
 
@@ -328,7 +356,10 @@ async function importNetEasePlaylistFromSetup(): Promise<"done" | "back"> {
   const result = await withCliProgress("Importing NetEase playlist...", () =>
     importTasteFromNetEasePlaylist(input.trim(), loadConfig())
   );
-  await pauseWithMessage(renderTasteImportResultSurface(result));
+  await pauseWithMessage(renderTasteImportResultSurface(result, {
+    color: Boolean(defaultOutput.isTTY),
+    width: defaultOutput.columns
+  }));
   return "done";
 }
 
@@ -486,7 +517,7 @@ async function saveDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
 async function configureFishTts(): Promise<"back" | "quit"> {
   while (true) {
     const config = loadConfig();
-    const answer = await promptFishNumberedSurface(4, (selected) => renderFishTtsSetupSurface(config, selected));
+    const answer = await promptFishNumberedSurface(4, (selected, options) => renderFishTtsSetupSurface(config, selected, options));
     if (answer === "back" || answer === "quit") {
       return answer;
     }
@@ -559,7 +590,7 @@ async function installFishTtsLocally(): Promise<void> {
 async function useExistingFishTtsInstall(): Promise<void> {
   while (true) {
     const detection = await withCliProgress("Searching Fish TTS install...", async () => detectFishTtsInstall(loadConfig(), getPockedioHome()));
-    const answer = await promptFishNumberedSurface(3, (selected) => renderUseExistingFishTtsSurface(detection, selected));
+    const answer = await promptFishNumberedSurface(3, (selected, options) => renderUseExistingFishTtsSurface(detection, selected, options));
     if (answer === "back" || answer === "quit") {
       return;
     }
@@ -590,7 +621,7 @@ async function useExistingFishTtsInstall(): Promise<void> {
 async function editFishTtsPathsManually(): Promise<void> {
   while (true) {
     const config = loadConfig();
-    const answer = await promptFishNumberedSurface(6, (selected) => renderFishTtsManualPathSurface(config, selected));
+    const answer = await promptFishNumberedSurface(6, (selected, options) => renderFishTtsManualPathSurface(config, selected, options));
     if (answer === "back" || answer === "quit") {
       return;
     }
@@ -644,7 +675,7 @@ async function testFishTtsSetup(): Promise<"choose" | "return" | "keep"> {
     return "return";
   }
   await previewGeneratedFishAudio(result.audioPath);
-  const answer = await promptFishNumberedSurface(3, (selected) => renderFishTtsSuccessSurface(selected));
+  const answer = await promptFishNumberedSurface(3, (selected, options) => renderFishTtsSuccessSurface(selected, options));
   if (answer === 1) {
     return "choose";
   }
@@ -697,86 +728,89 @@ function parseDjVoiceChoice(choice: DjVoiceChoiceId):
   return { provider, voice: voice as ReturnType<typeof loadConfig>["tts"]["macosVoice"] };
 }
 
-function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, selected = 1): string {
+function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, selected = 1, options: TuiRenderOptions = {}): string {
   const detection = detectFishTtsInstall(config, getPockedioHome());
   const actions = [
-    "Install Fish TTS locally",
-    "Use existing Fish TTS install",
-    "Edit paths manually",
-    "Test Fish TTS"
+    { label: "Install Fish TTS locally", description: "clone runtime and download model" },
+    { label: "Use existing Fish TTS install", description: "detect local runtime paths" },
+    { label: "Edit paths manually", description: "set runtime, script, and model paths" },
+    { label: "Test Fish TTS", description: "generate and play a voice sample" }
   ];
   return [
-    "Configure Fish TTS",
+    renderTuiPageTitle("FISH TTS SETUP", options),
     "",
-    "Fish TTS unlocks Mina and Nova.",
-    "This is optional. Built-in voices work without it.",
+    renderTuiBulletLine("Fish TTS unlocks generated Mina and Nova voice. Built-in voices still work without it.", options),
     "",
-    "Status",
-    `  Runtime     ${detection.pythonPath && detection.scriptPath ? "Found" : "Missing"}`,
-    `  Model       ${detection.modelDir ? "Found" : "Missing"}`,
-    `  References  ${fs.existsSync(detection.minaReferencePath) ? "Mina ready" : "Mina missing"}, ${fs.existsSync(detection.novaReferencePath) ? "Nova ready" : "Nova missing"}`,
+    renderTuiSectionLabel("STATUS", { ...options, accent: "playback" }),
+    renderTuiKeyValue("Runtime", detection.pythonPath && detection.scriptPath ? "Found" : "Missing", 15, options),
+    renderTuiKeyValue("Model", detection.modelDir ? "Found" : "Missing", 15, options),
+    renderTuiKeyValue("References", `${fs.existsSync(detection.minaReferencePath) ? "Mina ready" : "Mina missing"}, ${fs.existsSync(detection.novaReferencePath) ? "Nova ready" : "Nova missing"}`, 15, options),
     "",
-    "Actions",
-    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit"
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
   ].join("\n");
 }
 
-function renderUseExistingFishTtsSurface(detection: ReturnType<typeof detectFishTtsInstall>, selected = 1): string {
+function renderUseExistingFishTtsSurface(detection: ReturnType<typeof detectFishTtsInstall>, selected = 1, options: TuiRenderOptions = {}): string {
   const actions = [
-    "Use detected setup",
-    "Edit paths",
-    "Search again"
+    { label: "Use detected setup", description: "save the found runtime paths" },
+    { label: "Edit paths", description: "correct anything that was missed" },
+    { label: "Search again", description: "rescan common local locations" }
   ];
   return [
-    "Use existing Fish TTS install",
+    renderTuiPageTitle("USE EXISTING FISH TTS", options),
     "",
-    "Searching common locations...",
+    renderTuiBulletLine("Pockedio found these Fish TTS paths from common local locations.", options),
     "",
-    "Found:",
-    formatDetectedFishSetup(detection),
+    renderTuiSectionLabel("FOUND", { ...options, accent: "playback" }),
+    ...formatDetectedFishSetup(detection).split("\n").map((line) => formatFishDetectedLine(line, options)),
     "",
-    "Actions",
-    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    "↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit"
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit", options)
   ].join("\n");
 }
 
-function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>, selected = 1): string {
+function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>, selected = 1, options: TuiRenderOptions = {}): string {
   const detection = detectFishTtsInstall(config, getPockedioHome());
   const actions = [
-    `Python path       ${config.fishAudio.pythonPath}`,
-    `Fish script path  ${config.fishAudio.scriptPath}`,
-    `Model directory   ${config.fishAudio.modelDir}`,
-    `Mina reference    ${fs.existsSync(detection.minaReferencePath) ? "Available" : "Missing"}`,
-    `Nova reference    ${fs.existsSync(detection.novaReferencePath) ? "Available" : "Missing"}`,
-    "Test Fish TTS"
+    { label: "Python path", description: config.fishAudio.pythonPath },
+    { label: "Fish script path", description: config.fishAudio.scriptPath },
+    { label: "Model directory", description: config.fishAudio.modelDir },
+    { label: "Mina reference", description: fs.existsSync(detection.minaReferencePath) ? "Available" : "Missing" },
+    { label: "Nova reference", description: fs.existsSync(detection.novaReferencePath) ? "Available" : "Missing" },
+    { label: "Test Fish TTS", description: "generate and play a voice sample" }
   ];
   return [
-    "Edit Fish TTS paths manually",
+    renderTuiPageTitle("FISH TTS PATHS", options),
     "",
-    "Actions",
-    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
+    renderTuiBulletLine("Edit only the path that is wrong, then test Fish TTS.", options),
     "",
-    "↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit"
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit", options)
   ].join("\n");
 }
 
-function renderFishTtsSuccessSurface(selected = 1): string {
+function renderFishTtsSuccessSurface(selected = 1, options: TuiRenderOptions = {}): string {
   const actions = [
-    "Choose Mina or Nova",
-    "Return to Voice Setup",
-    "Keep current voice"
+    { label: "Choose Mina or Nova", description: "save a generated Fish voice" },
+    { label: "Return to Voice Setup", description: "review voice settings" },
+    { label: "Keep current voice", description: "leave the active voice unchanged" }
   ];
   return [
-    "Fish TTS test passed.",
+    renderTuiPageTitle("FISH TTS READY", options),
     "",
-    "What next?",
-    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action)),
+    renderTuiBulletLine("Generated voice playback works. You can now choose Mina or Nova.", options),
     "",
-    "↑↓ Select  |  Enter Open  |  1-3 Open"
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open", options)
   ].join("\n");
 }
 
@@ -824,8 +858,27 @@ function formatCommand(command: string, args: string[]): string {
   return [command, ...args.map((arg) => /\s/.test(arg) ? JSON.stringify(arg) : arg)].join(" ");
 }
 
-function formatPromptAction(selected: boolean, index: number, label: string): string {
-  const line = `${selected ? ">" : " "} ${index}. ${label}`;
+function formatFishDetectedLine(line: string, options: TuiRenderOptions): string {
+  const match = line.match(/^(.+?)\s{2,}(.+)$/);
+  if (!match) {
+    return line;
+  }
+  return renderTuiKeyValue(match[1]!.trim(), match[2]!.trim(), 15, options);
+}
+
+function formatPromptAction(selected: boolean, index: number, label: string, description = "", options: TuiRenderOptions = {}): string {
+  if (options.color) {
+    return renderTuiRow({
+      marker: selected ? ">" : " ",
+      label: `${index}.`,
+      text: description ? `${label.padEnd(29)} ${description}` : label,
+      selected,
+      accent: selected ? "playback" : "dim"
+    }, options);
+  }
+  const marker = selected ? "▌ >" : "   ";
+  const actionLabel = `${index}. ${label}`.padEnd(32);
+  const line = description ? `${marker} ${actionLabel} ${description}` : `${marker} ${index}. ${label}`;
   return selected ? `\x1B[7m${line}\x1B[0m` : line;
 }
 
@@ -909,12 +962,18 @@ async function runTasteMemoryAction(action: TasteMemoryAction): Promise<TasteMem
     }
     if (input.trim()) {
       const result = await withCliProgress("Importing NetEase playlist...", () => importTasteFromNetEasePlaylist(input.trim(), loadConfig()));
-      await pauseWithMessage(renderTasteImportResultSurface(result));
+      await pauseWithMessage(renderTasteImportResultSurface(result, {
+        color: Boolean(defaultOutput.isTTY),
+        width: defaultOutput.columns
+      }));
     }
     return "continue";
   }
   if (action === "show_summary") {
-    await pauseWithMessage(renderTasteSummarySurface({ config: loadConfig() }));
+    await pauseWithMessage(renderTasteSummarySurface({ config: loadConfig() }, {
+      color: Boolean(defaultOutput.isTTY),
+      width: defaultOutput.columns
+    }));
     return "continue";
   }
   if (action === "back") {
@@ -1337,7 +1396,7 @@ function clearCurrentLine(): void {
   defaultOutput.write("\r\x1B[2K");
 }
 
-function promptFishNumberedSurface(max: number, renderSurface: (selected: number) => string): Promise<number | "back" | "quit"> {
+function promptFishNumberedSurface(max: number, renderSurface: (selected: number, options: TuiRenderOptions) => string): Promise<number | "back" | "quit"> {
   return new Promise((resolve) => {
     let selected = 1;
     const previousRawMode = defaultInput.isRaw;
@@ -1345,7 +1404,10 @@ function promptFishNumberedSurface(max: number, renderSurface: (selected: number
     const render = () => {
       defaultOutput.write("\x1B[?25l");
       defaultOutput.write("\x1B[H\x1B[2J");
-      defaultOutput.write(renderSurface(selected));
+      defaultOutput.write(renderSurface(selected, {
+        color: Boolean(defaultOutput.isTTY),
+        width: defaultOutput.columns
+      }));
     };
     const cleanup = (choice: number | "back" | "quit") => {
       defaultInput.off("keypress", onKeypress);

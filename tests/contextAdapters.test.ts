@@ -199,6 +199,22 @@ describe("diary adapter", () => {
     });
   });
 
+  it("ignores future-dated diary files for current context", () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const current = path.join(diaryDir, "2026-05-20.md");
+    const future = path.join(diaryDir, "2099-01-01.md");
+    fs.writeFileSync(current, "current private text");
+    fs.writeFileSync(future, "future planned task text");
+    const currentDate = new Date("2026-05-20T00:00:00.000Z");
+    const futureMtime = new Date("2099-01-01T00:00:00.000Z");
+    fs.utimesSync(current, currentDate, currentDate);
+    fs.utimesSync(future, futureMtime, futureMtime);
+    const config = makeConfig({ diary: { enabled: true, path: diaryDir } });
+
+    expect(readDiaryContext(config)?.filePath).toBe(current);
+  });
+
   it("generates and caches an LLM diary summary for the latest diary file", async () => {
     const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
     tempDirs.push(diaryDir);

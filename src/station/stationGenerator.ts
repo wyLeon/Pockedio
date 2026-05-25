@@ -13,9 +13,15 @@ export type GenerateStationInput = {
   request: string;
   config: PockedioConfig;
   context?: Partial<PockedioContext>;
+  avoidTracks?: StationTrackIdentity[];
   provider?: MusicProvider;
   llm?: StationLlmClient;
   signal?: AbortSignal;
+};
+
+export type StationTrackIdentity = {
+  title: string;
+  artist: string;
 };
 
 type StationJsonResponse = {
@@ -53,7 +59,14 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
   const plan = await planTracks(input, llm, tasteSummary);
   throwIfAborted(input.signal);
   const plannedTracks = applyTasteSignalConstraints(plan.tracks, input, tasteSummary);
-  const tracks = await Promise.all(plannedTracks.map((track, index) => resolveTrack(track, index + 1, provider, input.request, input.signal)));
+  const avoidKeys = buildAvoidTrackKeys(input.avoidTracks ?? [], input.request);
+  const usedKeys = new Set<string>();
+  const tracks: StationTrack[] = [];
+  for (const [index, track] of plannedTracks.entries()) {
+    const resolved = await resolveTrack(track, index + 1, provider, input.request, avoidKeys, usedKeys, input.signal);
+    tracks.push(resolved);
+    usedKeys.add(normalizeSongKey(resolved.title, resolved.artist));
+  }
 
   return {
     request: input.request,
@@ -168,7 +181,7 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     `Taste summary: ${tasteSummary}`,
     `Generated taste profile: ${input.context?.tasteProfile?.summary ?? "No generated taste profile yet."}`,
     `Session memory summaries: ${formatMemorySummariesForPrompt(context?.memorySummaries ?? [])}`,
-    `Time context: ${context?.timeOfDay ?? "unknown"} ${context?.now ?? ""}`.trim(),
+    formatStationLocalTimeContext(context),
     `Calendar summary: ${context?.calendar?.summary ?? "not available"}`,
     `Calendar listening hint: ${context?.calendar?.listeningHint ?? "not available"}`,
     `Weather summary: ${context?.weather?.summary ?? "not available"}`,
@@ -178,8 +191,20 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     `Personality profile: ${JSON.stringify(context?.personality ?? input.config.personality)}`,
     `Recent feedback/session summary: ${JSON.stringify(context?.recentSessions ?? [])}`,
     `Taste feedback signals: ${formatTasteSignalsForPrompt(context?.tasteSignals ?? [])}`,
+    `Recently played tracks to avoid unless explicitly requested: ${formatAvoidTracksForPrompt(input.avoidTracks ?? [])}`,
     "Return only JSON."
   ].join("\n");
+}
+
+function formatStationLocalTimeContext(context: GenerateStationInput["context"]): string {
+  if (!context?.timeOfDay && !context?.now) {
+    return "Local time context: not available. Do not invent a specific daypart unless the user states one.";
+  }
+  const parts = [
+    context.timeOfDay ? `device-local daypart=${context.timeOfDay}` : "",
+    context.now ? `timestamp=${context.now}` : ""
+  ].filter(Boolean).join(", ");
+  return `Local time context: ${parts}. Treat the device-local daypart as authoritative; do not choose or describe tracks as morning, evening, or night if it conflicts.`;
 }
 
 function formatTasteSignalsForPrompt(signals: PockedioContext["tasteSignals"]): string {
@@ -192,6 +217,34 @@ function formatTasteSignalsForPrompt(signals: PockedioContext["tasteSignals"]): 
     signal.targetValue,
     `weight ${signal.weight}`
   ].join(": ")).join(" | ");
+}
+
+function formatAvoidTracksForPrompt(tracks: StationTrackIdentity[]): string {
+  if (tracks.length === 0) {
+    return "No recent track exclusions.";
+  }
+  return tracks
+    .slice(0, 25)
+    .map((track) => `${track.title} - ${track.artist}`)
+    .join(" | ");
+}
+
+function buildAvoidTrackKeys(tracks: StationTrackIdentity[], request = ""): Set<string> {
+  return new Set(tracks
+    .filter((track) => !isExplicitlyRequestedTrack(track, request))
+    .map((track) => normalizeSongKey(track.title, track.artist)));
+}
+
+function isExplicitlyRequestedTrack(track: StationTrackIdentity, request: string): boolean {
+  const normalizedRequest = normalizeComparableText(request);
+  if (!normalizedRequest) {
+    return false;
+  }
+  const title = normalizeComparableText(track.title);
+  const artist = normalizeComparableText(track.artist);
+  const label = normalizeComparableText(`${track.title} ${track.artist}`);
+  return normalizedRequest.includes(label)
+    || (title.length >= 4 && normalizedRequest.includes(title) && artist.length >= 4 && normalizedRequest.includes(artist));
 }
 
 function formatMemorySummariesForPrompt(summaries: PockedioContext["memorySummaries"]): string {
@@ -322,17 +375,19 @@ async function resolveTrack(
   position: number,
   provider: MusicProvider,
   request: string,
+  avoidKeys: Set<string>,
+  usedKeys: Set<string>,
   signal?: AbortSignal
 ): Promise<StationTrack> {
   const keyword = track.artist === providerSearchArtist ? track.title : `${track.title} ${track.artist}`.trim();
   try {
     throwIfAborted(signal);
-    const candidates = await provider.search({ keyword }, shouldUseStrictQuietScoring(request) ? 10 : 1);
+    const candidates = await provider.search({ keyword }, shouldUseStrictQuietScoring(request) || avoidKeys.size > 0 || usedKeys.size > 0 ? 10 : 1);
     throwIfAborted(signal);
     if (candidates.length === 0) {
       return unavailableStationTrack(track, position, "No provider search result.");
     }
-    const resolved = await resolveBestPlayableCandidate(track, position, candidates, provider, request, signal);
+    const resolved = await resolveBestPlayableCandidate(track, position, candidates, provider, request, avoidKeys, usedKeys, signal);
     if (resolved) {
       return resolved;
     }
@@ -351,29 +406,55 @@ async function resolveBestPlayableCandidate(
   candidates: MusicTrackCandidate[],
   provider: MusicProvider,
   request: string,
+  avoidKeys: Set<string>,
+  usedKeys: Set<string>,
   signal?: AbortSignal
 ): Promise<StationTrack | null> {
   if (!shouldUseStrictQuietScoring(request)) {
-    const candidate = candidates[0];
-    const playable = await provider.getPlayableUrl(candidate.providerTrackId);
-    throwIfAborted(signal);
-    return stationTrackFromCandidate(planned, position, candidate, playable);
+    let repeatedFallback: { candidate: MusicTrackCandidate; playable: PlayableTrack } | null = null;
+    for (const candidate of candidates) {
+      throwIfAborted(signal);
+      const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+      throwIfAborted(signal);
+      const key = normalizeSongKey(candidate.title, candidate.artists.join(", "));
+      if (!playable.available) {
+        continue;
+      }
+      if (avoidKeys.has(key) || usedKeys.has(key)) {
+        repeatedFallback ??= { candidate, playable };
+        continue;
+      }
+      return stationTrackFromCandidate(planned, position, candidate, playable);
+    }
+    return repeatedFallback ? stationTrackFromCandidate(planned, position, repeatedFallback.candidate, repeatedFallback.playable) : null;
   }
 
   let best: { candidate: MusicTrackCandidate; playable: PlayableTrack; score: number } | null = null;
+  let repeatedFallback: { candidate: MusicTrackCandidate; playable: PlayableTrack; score: number } | null = null;
   for (const candidate of candidates) {
     throwIfAborted(signal);
     const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+    throwIfAborted(signal);
     if (!playable.available) {
       continue;
     }
     const score = scoreCandidateForRequest(candidate, request);
+    const key = normalizeSongKey(candidate.title, candidate.artists.join(", "));
+    if (avoidKeys.has(key) || usedKeys.has(key)) {
+      if (!repeatedFallback || score > repeatedFallback.score) {
+        repeatedFallback = { candidate, playable, score };
+      }
+      continue;
+    }
     if (!best || score > best.score) {
       best = { candidate, playable, score };
     }
   }
 
-  return best ? stationTrackFromCandidate(planned, position, best.candidate, best.playable) : null;
+  if (best) {
+    return stationTrackFromCandidate(planned, position, best.candidate, best.playable);
+  }
+  return repeatedFallback ? stationTrackFromCandidate(planned, position, repeatedFallback.candidate, repeatedFallback.playable) : null;
 }
 
 function shouldUseStrictQuietScoring(request: string): boolean {

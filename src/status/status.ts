@@ -9,6 +9,13 @@ import type { PockedioConfig } from "../config/schema.js";
 import { getLatestContextRefreshRun, type ContextRefreshRunRecord } from "../context/heartbeat.js";
 import { schemaVersion } from "../db/migrations.js";
 import { NetEaseProvider } from "../providers/netease.js";
+import {
+  renderTuiBulletLine,
+  renderTuiKeyValue,
+  renderTuiPageTitle,
+  renderTuiSectionLabel,
+  type TuiRenderOptions
+} from "../tui/terminalRenderer.js";
 import { resolveRuntimePath } from "../tts/fishAudio.js";
 import { formatFishVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
 
@@ -308,31 +315,33 @@ function formatScheduledProgramStatus(
   return `${label} weekdays ${schedule.playTime} (prepare ${schedule.prepareMinutesBefore} min before)`;
 }
 
-export function formatStatusReport(report: StatusReport): string {
+export function formatStatusReport(report: StatusReport, options: TuiRenderOptions = {}): string {
   const lines = [
-    "Pockedio Status",
+    renderTuiPageTitle("POCKEDIO STATUS", options),
     "",
-    "Runtime",
-    `Playback   ${report.runtime.currentPlayback ?? "none"}`,
-    `Session    ${report.latestSessionTimestamp ?? "none"}`,
-    `Schedule   ${report.runtime.scheduledJobs}`,
+    renderTuiBulletLine("Current runtime, setup, memory, and local data state.", options),
     "",
-    "Setup",
-    `Music     ${formatNetEaseStatus(report.netease)}`,
-    `LLM       ${formatLlmStatus(report.llm)}`,
-    `Voice     ${report.voice.summary}`,
-    `Context   Calendar ${report.calendar.enabled ? "on" : "off"}, Weather ${report.weather.enabled ? report.weather.location : "off"}`,
+    renderTuiSectionLabel("RUNTIME", { ...options, accent: "playback" }),
+    formatStatusLine("Playback", report.runtime.currentPlayback ?? "none", options),
+    formatStatusLine("Session", report.latestSessionTimestamp ?? "none", options),
+    formatStatusLine("Schedule", report.runtime.scheduledJobs, options),
     "",
-    "Memory",
-    `Config    ${report.config.present ? "ok" : "missing"}`,
-    `Database  ${report.database.migrated ? "ok" : report.database.present ? "needs migration" : "missing"}`,
-    `Taste     ${report.taste.present ? "ok" : "missing"}`,
-    `Voices    ${report.personas.present ? "ok" : "missing"}`,
-    `Heartbeat ${formatContextHeartbeatStatus(report.contextHeartbeat)}`,
+    renderTuiSectionLabel("SETUP", { ...options, accent: "playback" }),
+    formatStatusLine("Music", formatNetEaseStatus(report.netease), options),
+    formatStatusLine("LLM", formatLlmStatus(report.llm), options),
+    formatStatusLine("Voice", report.voice.summary, options),
+    formatStatusLine("Context", `Calendar ${report.calendar.enabled ? "on" : "off"}, Weather ${report.weather.enabled ? report.weather.location : "off"}`, options),
     "",
-    "Data",
-    `Local     ${path.dirname(report.config.path)}`,
-    "External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used."
+    renderTuiSectionLabel("MEMORY", { ...options, accent: "playback" }),
+    formatStatusLine("Config", report.config.present ? "ok" : "missing", options),
+    formatStatusLine("Database", report.database.migrated ? "ok" : report.database.present ? "needs migration" : "missing", options),
+    formatStatusLine("Taste", report.taste.present ? "ok" : "missing", options),
+    formatStatusLine("Voices", report.personas.present ? "ok" : "missing", options),
+    formatStatusLine("Heartbeat", formatContextHeartbeatStatus(report.contextHeartbeat), options),
+    "",
+    renderTuiSectionLabel("LOCAL DATA", { ...options, accent: "playback" }),
+    formatStatusLine("Local", path.dirname(report.config.path), options),
+    formatStatusLine("External", "NetEase, configured LLM, weather, and diary summaries may leave this machine when used.", options)
   ];
   if (report.database.error) {
     lines.push(`Database detail: ${report.database.error}`);
@@ -345,6 +354,14 @@ export function formatStatusReport(report: StatusReport): string {
     lines.push(...report.fishAudio.missing.map((item) => `- ${item}`));
   }
   return lines.join("\n");
+}
+
+function formatStatusLine(label: string, value: string, options: TuiRenderOptions): string {
+  const width = ["Playback", "Session", "Schedule"].includes(label) ? 11 : 10;
+  if (!options.color) {
+    return `${label.padEnd(width)}${value}`;
+  }
+  return renderTuiKeyValue(label, value, width - 1, options);
 }
 
 function formatContextHeartbeatStatus(run: ContextRefreshRunRecord | null): string {
@@ -384,7 +401,10 @@ function formatLlmKeySource(source: StatusReport["llm"]["apiKeySource"]): string
 }
 
 export async function printStatus(): Promise<void> {
-  console.log(formatStatusReport(await getStatusReport()));
+  console.log(formatStatusReport(await getStatusReport(), {
+    color: Boolean(process.stdout.isTTY),
+    width: process.stdout.columns
+  }));
 }
 
 function isPockedioConfig(value: PockedioConfig | StatusReportOptions): value is PockedioConfig {

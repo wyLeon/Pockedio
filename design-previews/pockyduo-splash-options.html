@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pockedio Splash Options</title>
+  <style>
+    :root {
+      --page: #5f6d63;
+      --terminal: #141318;
+      --terminal-2: #19191b;
+      --paper: #f8f4e7;
+      --ink: #e9e5d8;
+      --muted: #8a8c87;
+      --cyan: #86dce2;
+      --teal: #00746d;
+      --teal-deep: #005f5a;
+      --gold: #d4b451;
+      --gold-deep: #6c6c00;
+      --charcoal: #2e302d;
+      --rail: #93e4e8;
+      --shadow: rgba(15, 18, 18, 0.42);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .page {
+      padding: 28px;
+      display: grid;
+      gap: 26px;
+    }
+
+    .intro {
+      max-width: 1040px;
+      color: var(--paper);
+    }
+
+    .intro h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+
+    .intro p {
+      margin: 0;
+      color: rgba(248, 244, 231, 0.78);
+      line-height: 1.5;
+      font-size: 15px;
+    }
+
+    .options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 22px;
+      align-items: start;
+    }
+
+    .caption {
+      margin: 0 0 10px;
+      color: var(--paper);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .caption strong {
+      color: var(--cyan);
+    }
+
+    .terminal {
+      min-height: 760px;
+      background: var(--terminal);
+      border: 1px solid rgba(248, 244, 231, 0.16);
+      border-radius: 12px;
+      box-shadow: 0 22px 56px var(--shadow);
+      overflow: hidden;
+      color: var(--ink);
+    }
+
+    .chrome {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(248, 244, 231, 0.08);
+    }
+
+    .dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      display: block;
+    }
+
+    .red { background: #ff5f57; }
+    .yellow { background: #ffbd2e; }
+    .green { background: #28c840; }
+
+    .screen {
+      padding: 30px 34px 34px;
+      min-height: 718px;
+    }
+
+    .splash-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 34px;
+      align-items: center;
+      margin: 28px 0 42px;
+    }
+
+    .splash-row.compact {
+      margin-top: 18px;
+      gap: 24px;
+    }
+
+    pre {
+      margin: 0;
+      font: inherit;
+      line-height: 1.08;
+      white-space: pre;
+    }
+
+    .pixel {
+      color: var(--gold);
+      font-weight: 800;
+      text-shadow: 0 0 0 var(--gold);
+      letter-spacing: 0;
+    }
+
+    .wordmark {
+      color: var(--gold);
+      font-weight: 800;
+      font-size: 28px;
+      margin-bottom: 14px;
+    }
+
+    .wordmark.large {
+      font-size: 34px;
+      letter-spacing: 0;
+    }
+
+    .tagline {
+      color: var(--cyan);
+      font-size: 18px;
+      line-height: 1.5;
+    }
+
+    .meta {
+      color: var(--muted);
+      line-height: 1.7;
+      margin-top: 16px;
+    }
+
+    .section {
+      color: var(--cyan);
+      font-weight: 800;
+      margin: 22px 0 10px;
+    }
+
+    .summary {
+      color: var(--ink);
+      line-height: 1.65;
+      margin: 18px 0 26px;
+    }
+
+    .summary .dotline {
+      color: #b6dcbf;
+      font-weight: 800;
+    }
+
+    .menu {
+      display: grid;
+      gap: 7px;
+      margin-top: 16px;
+      font-size: 18px;
+    }
+
+    .menu-row {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 26px;
+      align-items: center;
+      min-height: 34px;
+      color: var(--ink);
+    }
+
+    .menu-row.selected {
+      background: var(--teal);
+      color: var(--paper);
+      font-weight: 800;
+      padding: 0 12px;
+      border-left: 6px solid var(--rail);
+    }
+
+    .menu-row.dim {
+      color: #c2c1bb;
+    }
+
+    .band {
+      background: var(--gold-deep);
+      color: var(--paper);
+      font-weight: 800;
+      padding: 4px 10px;
+      border-left: 6px solid var(--gold);
+      margin: 20px 0 8px;
+    }
+
+    .footer {
+      border-top: 1px solid rgba(248, 244, 231, 0.34);
+      margin-top: 44px;
+      padding-top: 18px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .rule {
+      height: 1px;
+      background: rgba(248, 244, 231, 0.26);
+      margin: 30px 0;
+    }
+
+    .center {
+      text-align: center;
+    }
+
+    .center .pixel {
+      display: inline-block;
+      text-align: left;
+      margin: 8px auto 24px;
+    }
+
+    .center .summary {
+      max-width: 620px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 8px 20px;
+      color: var(--muted);
+      margin-top: 26px;
+    }
+
+    .status-grid strong {
+      color: var(--cyan);
+    }
+
+    @media (max-width: 1180px) {
+      .options {
+        grid-template-columns: 1fr;
+      }
+
+      .terminal {
+        min-height: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="intro">
+      <h1>pockedio Splash Screen Options</h1>
+      <p>Option B is selected as the direction: a terminal-native splash based on Claude Code and Mole, with a pixel music-note mark, a compact identity block, and immediate command context. The palette stays inside pockedio's current system: Mina gold, playback cyan, teal active rows, charcoal depth.</p>
+    </section>
+
+    <section class="options">
+      <article>
+        <p class="caption"><strong>Option A, Headphone Signal.</strong> Smallest and safest. Gold headphone icon plus a concise status block before the normal hub.</p>
+        <div class="terminal">
+          <div class="chrome"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+          <div class="screen">
+            <div class="splash-row compact">
+<pre class="pixel">   ██      ██
+ ████      ████
+██  ██    ██  ██
+██  ██    ██  ██
+██  ████████  ██
+██    ██      ██
+      ██
+      ██</pre>
+              <div>
+                <div class="wordmark">pockedio</div>
+                <div class="tagline">personal radio, ready in your terminal</div>
+                <div class="meta">v0.1.0<br>~/repos/Pockedio<br>Mina voice selected</div>
+              </div>
+            </div>
+
+            <div class="band">MINA  ready</div>
+            <div class="summary"><span class="dotline">●</span> Tell pockedio a mood, task, artist, song, or station. It will suggest a focused five-song set, then you choose whether to play, adjust, or make it a spoken DJ version.</div>
+
+            <div class="section">START WITH</div>
+            <div class="menu">
+              <div class="menu-row selected"><span>› want something calm</span><span>build a station</span></div>
+              <div class="menu-row dim"><span>  play my favorites</span><span>use saved taste</span></div>
+              <div class="menu-row dim"><span>  what's playing?</span><span>inspect current track</span></div>
+            </div>
+
+            <div class="footer">↑↓ Select  |  Enter Session  |  S Setup  |  Q Quit</div>
+          </div>
+        </div>
+      </article>
+
+      <article>
+        <p class="caption"><strong>Selected, Option B, Note Console.</strong> More musical. Uses a pixel music-note mark and a stronger command menu, closer to Mole's utility splash.</p>
+        <div class="terminal">
+          <div class="chrome"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+          <div class="screen">
+            <div class="splash-row">
+<pre class="pixel">        ████
+        ████
+        ████
+        ████
+   ██████████
+  ██      ████
+  ██      ████
+   ████████</pre>
+              <div>
+                <div class="wordmark large">pockedio</div>
+                <div class="tagline">music tuned to the moment</div>
+                <div class="meta">music + context<br>taste + memory<br>spoken DJ when ready</div>
+              </div>
+            </div>
+
+            <div class="section">SESSION FLOW</div>
+            <div class="menu">
+              <div class="menu-row selected"><span>1. Enter DJ Session</span><span>talk, ask, play, reshape</span></div>
+              <div class="menu-row dim"><span>2. Setup & Connections</span><span>music, LLM, voice, context</span></div>
+              <div class="menu-row dim"><span>3. Taste & Memory</span><span>import playlists, review signals</span></div>
+              <div class="menu-row dim"><span>4. Status</span><span>runtime, scheduler, health</span></div>
+            </div>
+
+            <div class="rule"></div>
+            <div class="status-grid">
+              <strong>Music</strong><span>NetEase anonymous</span>
+              <strong>LLM</strong><span>local secret ready</span>
+              <strong>Voice</strong><span>Mina, text and spoken DJ</span>
+              <strong>Schedule</strong><span>Morning DJ weekdays 08:45</span>
+            </div>
+
+            <div class="footer">↑↓ Select  |  Enter Open  |  M More  |  Q Quit</div>
+          </div>
+        </div>
+      </article>
+
+      <article>
+        <p class="caption"><strong>Option C, Listening Badge.</strong> Most atmospheric. A centered speaker and sound-wave badge that feels like a station ident before the app opens.</p>
+        <div class="terminal">
+          <div class="chrome"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+          <div class="screen center">
+<pre class="pixel">       ██
+      ████      ██
+  ████████   ██  ██
+ ██  ██████  ██  ██
+ ██  ██████   ██
+  ████████      ██
+      ████
+       ██</pre>
+            <div class="wordmark large">pockedio</div>
+            <div class="tagline">a pocket-sized AI radio for the moment you are in</div>
+
+            <div class="summary"><span class="dotline">●</span> Mina is listening. Start with a feeling, a task, a song, or an artist. pockedio will tune a short station and keep the controls close.</div>
+
+            <div class="section">READY SIGNALS</div>
+            <div class="menu">
+              <div class="menu-row selected"><span>› Enter</span><span>open the session</span></div>
+              <div class="menu-row dim"><span>  setup</span><span>connect NetEase, LLM, voice</span></div>
+              <div class="menu-row dim"><span>  status</span><span>check playback and schedule</span></div>
+            </div>
+
+            <div class="footer">Enter Session  |  S Setup  |  L LLM  |  V Voice  |  Q Quit</div>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

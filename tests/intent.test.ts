@@ -133,6 +133,10 @@ describe("parseIntent", () => {
       type: "feedback_favorite",
       confidence: "high"
     });
+    await expect(parseIntent("can you give me the full lyrics?")).resolves.toEqual({
+      type: "conversation",
+      confidence: "high"
+    });
     await expect(parseIntent("save this vibe")).resolves.toEqual({
       type: "feedback_save_vibe",
       confidence: "high"
@@ -248,9 +252,17 @@ describe("parseIntent", () => {
     expect(prompts[0]).toContain("Use previous for natural back-navigation wording");
   });
 
-  it("keeps stop as playback control and quit or exit as session exit", async () => {
+  it("keeps stop as playback control, menu as main menu, and quit or exit as session exit", async () => {
     await expect(parseIntent("stop")).resolves.toEqual({
       type: "stop",
+      confidence: "high"
+    });
+    await expect(parseIntent("menu")).resolves.toEqual({
+      type: "main_menu",
+      confidence: "high"
+    });
+    await expect(parseIntent("return to main menu")).resolves.toEqual({
+      type: "main_menu",
       confidence: "high"
     });
     await expect(parseIntent("quit")).resolves.toEqual({

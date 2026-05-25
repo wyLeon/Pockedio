@@ -1,13 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
 import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatRuntimeDjDisplayName, formatStartupSetupNote, handleInteractiveInterrupt, restoreInputAfterInlinePrompt, runSessionTurn, stopPlaybackForSessionExit, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { clearInteractiveSubmittedInputEcho, createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveLivePrompt, formatInteractiveLivePromptBox, formatInteractiveLivePromptRule, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatInteractiveSubmittedUserTurn, formatRuntimeDjDisplayName, formatStartupSetupNote, handleInteractiveInterrupt, questionWithInteractiveFrame, restoreInputAfterInlinePrompt, runSessionTurn, stopPlaybackForSessionExit, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
@@ -189,18 +190,44 @@ describe("runSessionTurn", () => {
   it("formats a concise startup guide for the interactive CLI", () => {
     const guide = formatInteractiveStartupGuide("Mina");
 
-    expect(guide).toContain("Mina is listening.");
-    expect(guide).toContain("What are we tuning for?");
-    expect(guide).toContain("I'm exhausted and want something calm.");
-    expect(guide).toContain("play something for deep work");
-    expect(guide).toContain("When I suggest a station:");
-    expect(guide).toContain("press Enter to play it");
-    expect(guide).toContain("type dj for a spoken DJ version");
+    expect(guide).toContain("POCKEDIO SESSION");
+    expect(guide).toContain("● Mina is listening.");
+    expect(guide).toContain("START WITH");
+    expect(guide).toContain("  › I'm exhausted and want something calm.");
+    expect(guide).toContain("  › play something for deep work");
+    expect(guide).toContain("  › what's playing?");
+    expect(guide).toContain("STATION FLOW");
+    expect(guide).toContain("Enter       play suggested station");
+    expect(guide).toContain("dj          spoken DJ version");
+    expect(guide).toContain("adjust      tell Mina how to change it");
+    expect(guide).toContain("SETUP");
     expect(guide).toContain("setup");
     expect(guide).toContain("next");
     expect(guide).toContain("stop");
+    expect(guide).toContain("menu        return to main menu");
     expect(guide).toContain("what's playing?");
-    expect(guide).toContain("Ctrl+C exits, or cancels while processing");
+    expect(guide).toContain("Ctrl+C      exit, or cancel while processing");
+    expect(guide).not.toContain("████");
+  });
+
+  it("does not render the hub splash symbol inside the colored session guide", () => {
+    const guide = formatInteractiveStartupGuide("Mina", "", { color: true, width: 96 });
+    const plain = stripAnsi(guide);
+
+    expect(plain).toContain("POCKEDIO SESSION");
+    expect(plain).toContain("Mina is listening");
+    expect(plain).toContain("  › I'm exhausted and want something calm.");
+    expect(plain).not.toContain("▌ ›");
+    expect(plain).not.toContain("████");
+    expect(plain).not.toContain("Music tuned to the moment.");
+  });
+
+  it("uses the selected DJ display name in the startup guide", () => {
+    const guide = formatInteractiveStartupGuide("Nova");
+
+    expect(guide).toContain("● Nova is listening.");
+    expect(guide).toContain("adjust      tell Nova how to change it");
+    expect(guide).not.toContain("tell Mina how to change it");
   });
 
   it("uses the selected voice as the interactive startup identity", () => {
@@ -227,8 +254,8 @@ describe("runSessionTurn", () => {
     const note = formatStartupSetupNote(config);
     const guide = formatInteractiveStartupGuide("Mina", note);
 
-    expect(note).toContain("Taste is not imported yet.");
-    expect(guide).toContain("Setup note:");
+    expect(note).toContain("Taste signals are not imported yet.");
+    expect(guide).toContain("SETUP NOTE");
     expect(guide).toContain("Run pockedio setup");
   });
 
@@ -363,8 +390,184 @@ describe("runSessionTurn", () => {
 
     writeOutput("Now playing: 3/5  Misty - Ella Fitzgerald");
 
-    expect(writes.join("")).toContain("Now playing: 3/5  Misty - Ella Fitzgerald\n");
-    expect(writes.join("")).toContain("› Who is the singer? The background of this song?");
+    const outputText = stripAnsi(writes.join(""));
+    expect(outputText).toContain("Now playing: 3/5  Misty - Ella Fitzgerald\n");
+    expect(outputText).toContain("› Who is the singer? The background of this song?");
+    expect(outputText).not.toContain("▌");
+    expect(outputText).toContain("─".repeat(32));
+  });
+
+  it("restores the live prompt cursor using CJK display width", () => {
+    const writes: string[] = [];
+    const output = {
+      isTTY: true,
+      columns: 32,
+      write: (chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }
+    };
+    const writeOutput = createPromptSafeOutputWriter(
+      { line: "我想听", cursor: 3 },
+      output,
+      () => true
+    );
+
+    writeOutput("Now playing: 3/5  Misty - Ella Fitzgerald");
+
+    expect(stripAnsi(writes.join(""))).toContain("› 我想听");
+    expect(stripAnsi(writes.join(""))).not.toContain("▌");
+    expect(writes.join("")).toContain("\u001b[9G");
+  });
+
+  it("formats submitted user turns separately from the live prompt", () => {
+    expect(formatInteractiveSubmittedUserTurn("› favorite the first song")).toBe("\n› favorite the first song\n\n");
+    expect(formatInteractiveSubmittedUserTurn("   ")).toBe("");
+
+    const colored = formatInteractiveSubmittedUserTurn("favorite 1", { color: true, width: 48 });
+    expect(colored).toMatch(/\u001b\[[0-9;]*48;5;/);
+    expect(colored.startsWith("\n")).toBe(true);
+    expect(stripAnsi(colored)).toContain("▌ ›  favorite 1");
+  });
+
+  it("renders live input as a ruled plain prompt area", () => {
+    expect(formatInteractiveLivePrompt()).toBe("› ");
+    expect(formatInteractiveLivePrompt({ color: true, width: 32 })).toContain("›");
+
+    const rule = stripAnsi(formatInteractiveLivePromptRule({ color: true, width: 32 }));
+    expect(rule).toBe("─".repeat(32));
+    expect(stripAnsi(formatInteractiveLivePromptBox("hello", { color: true, width: 32 })))
+      .toContain("› hello");
+    expect(stripAnsi(formatInteractiveLivePromptBox("hello", { color: true, width: 32 })))
+      .not.toContain("▌");
+    expect(stripAnsi(formatInteractiveLivePromptBox("hello", { color: true, width: 32 })))
+      .not.toContain("─");
+  });
+
+  it("does not clear previous output before the first live prompt render", async () => {
+    const writes: string[] = [];
+    const input = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      isRaw: boolean;
+      setRawMode: (value: boolean) => void;
+      resume: () => typeof input;
+      pause: () => typeof input;
+    };
+    input.isTTY = true;
+    input.isRaw = false;
+    input.setRawMode = (value: boolean) => {
+      input.isRaw = value;
+    };
+    input.resume = () => input;
+    input.pause = () => input;
+    const output = {
+      isTTY: true,
+      columns: 32,
+      write: (chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }
+    };
+    const promptView = { line: "", cursor: 0 };
+    const question = questionWithInteractiveFrame(
+      {} as never,
+      input as never,
+      output as never,
+      promptView,
+      () => undefined,
+      { color: true, width: 32 }
+    );
+
+    expect(writes.join("")).not.toContain("\u001b[2K");
+    expect(writes.join("")).not.toContain("\u001b[1G");
+    const plain = stripAnsi(writes.join(""));
+    expect(plain).toContain("› ");
+    expect(plain).not.toContain("▌");
+    expect(plain.match(/─{32}/g)).toHaveLength(2);
+    expect(writes.join("")).toContain("\u001b[3G");
+
+    input.emit("keypress", "\r", { name: "return" });
+    await expect(question).resolves.toBe("");
+  });
+
+  it("clears the live prompt frame when Ctrl+C exits from idle input", async () => {
+    const writes: string[] = [];
+    const input = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      isRaw: boolean;
+      setRawMode: (value: boolean) => void;
+      resume: () => typeof input;
+      pause: () => typeof input;
+    };
+    let interrupted = false;
+    let paused = false;
+    input.isTTY = true;
+    input.isRaw = false;
+    input.setRawMode = (value: boolean) => {
+      input.isRaw = value;
+    };
+    input.resume = () => input;
+    input.pause = () => {
+      paused = true;
+      return input;
+    };
+    const output = {
+      isTTY: true,
+      columns: 32,
+      write: (chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }
+    };
+    const question = questionWithInteractiveFrame(
+      {} as never,
+      input as never,
+      output as never,
+      { line: "", cursor: 0 },
+      () => {
+        interrupted = true;
+      },
+      { color: true, width: 32 }
+    );
+
+    input.emit("keypress", "\u0003", { name: "c", ctrl: true });
+
+    await expect(question).rejects.toThrow("readline was closed");
+    expect(interrupted).toBe(true);
+    expect(input.isRaw).toBe(false);
+    expect(paused).toBe(true);
+    expect(writes.join("")).toContain("\u001b[2K");
+    expect(writes.join("")).toContain("\u001b[1G");
+  });
+
+  it("clears the raw readline echo only for TTY submitted input", () => {
+    const writes: string[] = [];
+    const output = {
+      isTTY: true,
+      write: (chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }
+    };
+
+    clearInteractiveSubmittedInputEcho(output);
+
+    const joined = writes.join("");
+    expect(joined).toContain("\u001b[2K");
+    expect(joined).toContain("\u001b[1G");
+    expect(joined).toContain("\u001b[1A");
+    expect(joined).toContain("\u001b[2B");
+    expect(joined).toContain("\u001b[2A");
+
+    const nonTtyWrites: string[] = [];
+    clearInteractiveSubmittedInputEcho({
+      isTTY: false,
+      write: (chunk: string | Uint8Array) => {
+        nonTtyWrites.push(String(chunk));
+        return true;
+      }
+    });
+    expect(nonTtyWrites).toEqual([]);
   });
 
   it("plays a specific song directly instead of building a station", async () => {
@@ -662,6 +865,47 @@ describe("runSessionTurn", () => {
     expect(prompts[0]).toContain("Do not claim a different track count");
   });
 
+  it("keeps generated station intros aligned to the device-local daypart", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+
+    const result = await runSessionTurn({
+      input: "play something soft for my exhausted mood",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Tonight, soft songs will wrap around you."),
+      buildContext: async () => ({
+        now: "2026-05-25T06:30:00.000Z",
+        timeOfDay: "afternoon",
+        personality: config.personality
+      }),
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null })
+    });
+
+    expect(result.response).toContain("This afternoon, soft songs will wrap around you.");
+    expect(result.response).not.toContain("Tonight, soft songs");
+  });
+
+  it("preserves a generated daypart when the user explicitly asks for it", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Mina";
+
+    const result = await runSessionTurn({
+      input: "play something soft for tonight",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Tonight, soft songs will wrap around you."),
+      buildContext: async () => ({
+        now: "2026-05-25T06:30:00.000Z",
+        timeOfDay: "afternoon",
+        personality: config.personality
+      }),
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null })
+    });
+
+    expect(result.response).toContain("Tonight, soft songs will wrap around you.");
+  });
+
   it("keeps station intro copy in English by default when the user writes Chinese", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
@@ -706,7 +950,7 @@ describe("runSessionTurn", () => {
     expect(rendered).toContain("Now playing: 1/5");
     expect(rendered).not.toContain("Up next:");
     expect(rendered).toContain("> 1.");
-    expect(rendered).toContain("  2. something deep work instrumental - Test Artist  next");
+    expect(rendered).toContain("  2.  something deep work instrumental - Test Artist  next");
     expect(rendered).toContain("Pockedio's note:");
     expect(rendered).toContain("This opens the set with deterministic fallback");
     expect(rendered).not.toContain("I’m playing this because");
@@ -755,11 +999,58 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain("Now playing: 2/5");
     expect(result.response).not.toContain("Up next:");
     expect(result.response).toContain("> 2.");
-    expect(result.response).toContain("  3. something deep work calm - Test Artist  next");
+    expect(result.response).toContain("  3.  something deep work calm - Test Artist          next");
     expect(result.response).toContain("Pockedio's note:");
     expect(stopCalls).toBe(1);
     expect(started).toHaveLength(2);
     expect(playbackState.currentIndex).toBe(1);
+  });
+
+  it("next on the final track completes the station without reporting a player failure", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null; error?: string }) => void> = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+        stop: () => {
+          finishers.at(-1)?.({ ok: false, target: url, exitCode: 2, signal: null, error: "Process exited with code 2" });
+        }
+      })
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      finishers[index]?.({ ok: true, target: `track-${index + 1}`, exitCode: 0, signal: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const result = await runSessionTurn({
+      input: "next",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      writeOutput: (text) => output.push(text)
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(result.response).toBe("That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.");
+    expect(output.join("\n")).not.toContain("Playback stopped unexpectedly");
+    expect(output.join("\n")).not.toContain("No playable tracks remain");
+    expect(playbackState.pendingStationRequest).toBe("play something for deep work");
+    expect(playbackState.pendingStationNeedsChoice).toBe(true);
   });
 
   it("treats next one as a skip control during playback", async () => {
@@ -1178,6 +1469,43 @@ describe("runSessionTurn", () => {
     }
   });
 
+  it("returns to the main menu from the DJ session", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => {
+          stopCalls += 1;
+        }
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "menu",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("main_menu");
+    expect(result.shouldExit).toBe(true);
+    expect(result.shouldReturnToMenu).toBe(true);
+    expect(result.response).toBe("Returning to main menu.");
+    expect(stopCalls).toBe(1);
+    expect(playbackState.activePlayback).toBeUndefined();
+  });
+
   it("explains the mpv requirement when resume is requested without a paused handle", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -1586,6 +1914,82 @@ describe("runSessionTurn", () => {
     expect(state.exiting).toBe(true);
   });
 
+  it("stops active playback and closes when Ctrl+C lands during an active turn", async () => {
+    const playbackState: InteractivePlaybackState = {};
+    const activeTurnController = new AbortController();
+    let stopped = false;
+    let closed = false;
+    const events: string[] = [];
+    playbackState.activePlayback = {
+      target: "track-1",
+      done: new Promise(() => undefined),
+      stop: () => {
+        stopped = true;
+        events.push("stop");
+      }
+    };
+    const state: InteractiveInterruptState = {
+      activeTurnController,
+      playbackState,
+      exiting: false,
+      suppressIdleInterruptUntil: 0,
+      closeReadline: () => {
+        closed = true;
+        events.push("close");
+      }
+    };
+
+    handleInteractiveInterrupt(state, () => new Date(1_000));
+
+    expect(activeTurnController.signal.aborted).toBe(true);
+    expect(stopped).toBe(true);
+    expect(closed).toBe(true);
+    expect(events).toEqual(["stop", "close"]);
+    expect(playbackState.activePlayback).toBeUndefined();
+    expect(state.exiting).toBe(true);
+    expect(state.suppressIdleInterruptUntil).toBe(0);
+  });
+
+  it("cancels pending DJ voice preparation before closing on idle Ctrl+C", async () => {
+    const playbackState: InteractivePlaybackState = {};
+    let cancelled = false;
+    playbackState.djProgram = {
+      sessionId: "session-1",
+      requestText: "late afternoon set",
+      station: {} as never,
+      llm: fakeLlm(),
+      synthesize: async () => ({ ok: false, latencyMs: 0, error: "unused" }),
+      playFile: async () => ({ ok: false, target: "unused", exitCode: null, signal: null }),
+      preparations: new Map([[
+        4,
+        {
+          ready: false,
+          cancel: () => {
+            cancelled = true;
+          },
+          intro: {
+            ready: false,
+            rawText: "still rendering"
+          }
+        } as never
+      ]]),
+      quietTrackIndexes: new Set(),
+      spokenTrackIndexes: new Set()
+    };
+    const state: InteractiveInterruptState = {
+      playbackState,
+      exiting: false,
+      suppressIdleInterruptUntil: 0,
+      closeReadline: () => undefined
+    };
+
+    handleInteractiveInterrupt(state, () => new Date(1_000));
+
+    expect(cancelled).toBe(true);
+    expect(playbackState.djProgram.preparations.size).toBe(0);
+    expect(state.exiting).toBe(true);
+  });
+
   it("announces the next track when playback auto-advances", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -1958,6 +2362,102 @@ describe("runSessionTurn", () => {
     ]);
   });
 
+  it("reshapes the remaining queue for grief-informed tone changes during playback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    let stationPlanCalls = 0;
+    const llm: LlmClient = {
+      generateJson: async () => {
+        stationPlanCalls += 1;
+        if (stationPlanCalls === 1) {
+          return { ok: false as const, errorCode: "llm_unavailable" as const, error: "use fallback first" };
+        }
+        return {
+          ok: true as const,
+          value: {
+            tracks: [
+              { title: "Quiet Table", artist: "Comfort Artist", rationale: "gentler tone" },
+              { title: "Small Light", artist: "Comfort Artist", rationale: "gentler tone" },
+              { title: "Low Window", artist: "Comfort Artist", rationale: "gentler tone" },
+              { title: "After Rain", artist: "Comfort Artist", rationale: "gentler tone" },
+              { title: "Still Room", artist: "Comfort Artist", rationale: "gentler tone" }
+            ]
+          }
+        };
+      },
+      generateText: async () => ({ ok: true as const, value: "I hear you. I’ll soften the rest of the queue." })
+    };
+
+    await runSessionTurn({
+      input: "play something bright for Monday",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "still in the depression of my gradpa's pass, change the tone.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    expect(result.intent.type).toBe("feedback_change_vibe");
+    expect(result.response).toContain("I’ll change the tone from here.");
+    expect(result.response).toContain("reshaped the rest of the queue");
+    expect(playbackState.storedTracks?.slice(1).map((entry) => entry.track.title)).toEqual([
+      "Quiet Table Comfort Artist",
+      "Small Light Comfort Artist",
+      "Low Window Comfort Artist",
+      "After Rain Comfort Artist"
+    ]);
+  });
+
+  it("does not treat station tone changes as standalone DJ voice requests", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const llm: LlmClient = {
+      generateJson: async () => ({ ok: true as const, value: { type: "explicit_dj_audio_request", confidence: "high" } }),
+      generateText: async () => ({ ok: true as const, value: "I’ll move the station toward something gentler." })
+    };
+
+    await runSessionTurn({
+      input: "play something bright for Monday",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "change the station tone",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    expect(result.intent.type).toBe("feedback_change_vibe");
+    expect(result.response).not.toContain("DJ voice belongs to a station");
+    expect(result.response).toContain("I’ll change the tone from here.");
+  });
+
   it("confirms favorites with human-facing current-track copy", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -2071,6 +2571,57 @@ describe("runSessionTurn", () => {
     expect(result.intent.type).toBe("feedback_favorite");
     expect(result.response).toContain(`Saved "${firstTrack!.title}" as a favorite.`);
     expect(result.response).not.toContain("Your favorite songs:");
+
+    const favoriteSignals = withDatabase(config, (db) => db.prepare(`
+      SELECT target_value as targetValue
+      FROM taste_signals
+      WHERE signal_type = 'favorite'
+    `).all());
+    expect(favoriteSignals).toEqual([{ targetValue: `${firstTrack!.title} - ${firstTrack!.artist}` }]);
+  });
+
+  it("favorites a referenced queue position instead of falling back to the current track", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+    await runSessionTurn({
+      input: "next",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(playbackState.currentIndex).toBe(1);
+    const firstTrack = playbackState.storedTracks?.[0]?.track;
+    const currentTrack = playbackState.storedTracks?.[1]?.track;
+    expect(firstTrack?.title).toBeTruthy();
+    expect(currentTrack?.title).toBeTruthy();
+
+    const result = await runSessionTurn({
+      input: "favorite the first song of this track",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("feedback_favorite");
+    expect(result.response).toContain(`Saved "${firstTrack!.title}" as a favorite.`);
+    expect(result.response).not.toContain(`Saved "${currentTrack!.title}" as a favorite.`);
 
     const favoriteSignals = withDatabase(config, (db) => db.prepare(`
       SELECT target_value as targetValue
@@ -2811,6 +3362,65 @@ describe("runSessionTurn", () => {
     expect(prompts[0]).toContain("Test Artist");
   });
 
+  it("keeps current-track lyric requests conversational instead of starting a station", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const prompts: string[] = [];
+    const started: string[] = [];
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    const currentIndex = playbackState.currentIndex;
+    const currentTrackId = playbackState.currentTrackId;
+    const result = await runSessionTurn({
+      input: "can you give me the full lyrics?",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I can’t provide the full lyrics, but I can summarize the song’s mood.", prompts),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.station).toBeUndefined();
+    expect(result.response).toContain("full lyrics");
+    expect(started).toHaveLength(1);
+    expect(stopCalls).toBe(0);
+    expect(playbackState.currentIndex).toBe(currentIndex);
+    expect(playbackState.currentTrackId).toBe(currentTrackId);
+    expect(playbackState.pendingStationRequest).toBeUndefined();
+    expect(prompts[0]).toContain("For lyric requests, do not provide full copyrighted lyrics");
+    expect(prompts[0]).toContain("Current track:");
+  });
+
   it("routes artist background questions during playback to grounded LLM conversation", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -3492,6 +4102,7 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain("Want me to build");
     expect(result.response).toContain('type "dj"');
     expect(prompts[0]).toContain("Recommend one clear listening direction");
+    expect(prompts[0]).toContain("Do not claim the user has current tasks");
     expect(statuses).toEqual(["Thinking...", "Reading your context...", "Preparing recommendation..."]);
   });
 
@@ -3544,6 +4155,8 @@ describe("runSessionTurn", () => {
       provider: new FakeProvider(),
       llm: conversationalLlm("Mina is here. I hear the exhaustion. I would build a soft relaxation station with ambient piano and warm instrumental tracks. Want me to play that station?", prompts),
       buildContext: async () => ({
+        now: "2026-05-24T06:05:00.000Z",
+        timeOfDay: "afternoon",
         personality: config.personality,
         weather: {
           location: "Guangzhou",
@@ -3573,6 +4186,8 @@ describe("runSessionTurn", () => {
     expect(playbackState.pendingStationRequest).toBe("I'm exhausted now, want some relaxation.");
     expect(result.response).toContain("Want me to play");
     expect(result.response).toContain("Press Enter to play it");
+    expect(prompts[0]).toContain("Local time context: device-local daypart=afternoon");
+    expect(prompts[0]).toContain("Treat the device-local daypart as authoritative");
     expect(prompts[0]).toContain("Weather summary: Guangzhou, 95% humidity");
   });
 
@@ -4008,7 +4623,8 @@ describe("runSessionTurn", () => {
     });
 
     expect(result.intent.type).toBe("pending_station_dj_program");
-    expect(result.response).toBe("DJ program is ready.\n\nPress Enter to start it, or tell me how to adjust it.");
+    expect(result.response).toBe("● DJ program is ready.\n\n● Press Enter to start it, or tell me how to adjust it.");
+    expect(result.response).not.toContain("DJ note");
     expect(result.response).not.toContain("Pockedio here.");
     expect(result.response).not.toContain("Now playing:");
     expect(started).toHaveLength(0);
@@ -4213,7 +4829,8 @@ describe("runSessionTurn", () => {
 
     expect(result.intent.type).toBe("playback_request");
     expect(events[0]).toBe("stop-current");
-    expect(result.response).toBe("DJ program is ready.\n\nPress Enter to start it, or tell me how to adjust it.");
+    expect(result.response).toBe("● DJ program is ready.\n\n● Press Enter to start it, or tell me how to adjust it.");
+    expect(result.response).not.toContain("DJ note");
     expect(result.response).not.toContain("Press Enter to play it");
     expect(result.response).not.toContain('type "dj"');
     expect(prompts.some((prompt) => prompt.includes("You are Lumen, Pockedio's spoken DJ."))).toBe(true);
@@ -4762,6 +5379,58 @@ describe("runSessionTurn", () => {
     expect(playbackState.pendingStationRequest).toBeUndefined();
   });
 
+  it("starts a replacement station when the user asks to build another station to change the vibe", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play something bright for Monday",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "Build another station to change the vibe.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.response).toContain("Now playing: 1/5");
+    expect(result.response).not.toBe("Understood. I’ll shift the mood from here.");
+    expect(started).toHaveLength(2);
+    expect(stopCalls).toBe(1);
+    expect(playbackState.station?.request).toBe("Build another station to change the vibe.");
+  });
+
   it("starts artist-only stations without unrelated artists or duplicate songs", async () => {
     const config = makeConfig();
     const provider = new ArtistStationProvider();
@@ -4920,3 +5589,7 @@ describe("runSessionTurn", () => {
     expect(rows.count).toBeGreaterThanOrEqual(3);
   });
 });
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/g, "");
+}

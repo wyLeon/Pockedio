@@ -14,6 +14,15 @@ import { readDiaryContext, type DiaryContext } from "../context/diary.js";
 import { readWeatherContext, type WeatherContext } from "../context/weather.js";
 import type { TasteImportResult } from "../taste/importTaste.js";
 import { importTasteFromNetEasePlaylist } from "../taste/neteasePlaylist.js";
+import {
+  renderTuiBulletLine,
+  renderTuiFooter,
+  renderTuiKeyValue,
+  renderTuiPageTitle,
+  renderTuiRow,
+  renderTuiSectionLabel,
+  type TuiRenderOptions
+} from "../tui/terminalRenderer.js";
 import { ensureRuntimeDirs, loadConfig, saveConfig } from "./load.js";
 import { clearNetEaseCookie, saveNetEaseCookie } from "./neteaseAuth.js";
 import {
@@ -185,13 +194,11 @@ export async function runCalendarSetup(): Promise<SetupRunResult> {
   const current = loadConfig();
   const calendarAction = await promptSetupMenu<"enable" | "disable">({
     title: [
-      "Calendar",
+      "CALENDAR SETUP",
       "",
-      "Privacy",
-      "  Calendar context stays local.",
-      "  Pockedio stores event title and time only.",
+      "● Calendar context stays local. Pockedio stores event title and time only.",
       "",
-      "Actions"
+      "ACTIONS"
     ].join("\n"),
     entries: [
       { name: "Enable Apple Calendar context", value: "enable" },
@@ -236,14 +243,15 @@ export async function runWeatherSetup(): Promise<SetupRunResult> {
   const current = loadConfig();
   const weatherAction = await promptSetupMenu<"enable" | "disable" | "change_location" | "test">({
     title: [
-      "Weather",
+      "WEATHER SETUP",
       "",
-      "Weather context is optional and used lightly for station tone.",
+      "● Weather context is optional and used lightly for station tone.",
       "",
-      `Current location  ${current.weather.location}`,
-      `Status            ${current.weather.enabled ? "Enabled" : "Not enabled"}`,
+      "CURRENT",
+      `Location         ${current.weather.location}`,
+      `Status           ${current.weather.enabled ? "Enabled" : "Not enabled"}`,
       "",
-      "Actions"
+      "ACTIONS"
     ].join("\n"),
     entries: [
       { name: "Enable weather context", value: "enable" },
@@ -304,17 +312,17 @@ export async function runDiarySetup(): Promise<SetupRunResult> {
   const current = loadConfig();
   const diaryAction = await promptSetupMenu<"enable" | "disable" | "change_path" | "test">({
     title: [
-      "Diary",
+      "DIARY SETUP",
       "",
-      "Diary access is explicit and local-first.",
-      "If your LLM is remote, summary generation may send a diary excerpt.",
+      "● Diary access is explicit and local-first. Remote LLMs may receive excerpts for summaries.",
       "",
       diaryPathCopyHint,
       "",
-      `Current path  ${formatDiaryPathForSetup(current.diary.path)}`,
-      `Status        ${current.diary.enabled ? "Enabled" : "Not enabled"}`,
+      "CURRENT",
+      `Path             ${formatDiaryPathForSetup(current.diary.path)}`,
+      `Status           ${current.diary.enabled ? "Enabled" : "Not enabled"}`,
       "",
-      "Actions"
+      "ACTIONS"
     ].join("\n"),
     entries: [
       { name: "Enable diary context", value: "enable" },
@@ -376,15 +384,15 @@ export async function runSchedulerSetup(): Promise<SetupRunResult> {
   const current = loadConfig();
   const schedulerAction = await promptSetupMenu<SchedulerSetupAction>({
     title: [
-      "Schedule DJ",
+      "SCHEDULED DJ SETUP",
       "",
-      "Optional weekday DJ programs can be prepared before the time you choose.",
+      "● Weekday DJ programs can be prepared before the time you choose, then wait for confirmation.",
       "",
-      "Current",
-      `  Morning           ${formatScheduledDjProgramSummary("morning", current)}`,
-      `  Evening           ${formatScheduledDjProgramSummary("evening", current)}`,
+      "CURRENT",
+      `Morning          ${formatScheduledDjProgramSummary("morning", current)}`,
+      `Evening          ${formatScheduledDjProgramSummary("evening", current)}`,
       "",
-      "Actions"
+      "ACTIONS"
     ].join("\n"),
     entries: [
       { name: "Configure Morning DJ", value: "morning" },
@@ -409,11 +417,12 @@ export async function runSchedulerSetup(): Promise<SetupRunResult> {
 
   const programAction = await promptSetupMenu<ScheduledDjProgramAction>({
     title: [
-      `${formatScheduledDjKind(schedulerAction)} DJ`,
+      `${formatScheduledDjKind(schedulerAction).toUpperCase()} DJ`,
       "",
-      `Current           ${formatScheduledDjProgramSummary(schedulerAction, current)}`,
+      "CURRENT",
+      `Program          ${formatScheduledDjProgramSummary(schedulerAction, current)}`,
       "",
-      "Actions"
+      "ACTIONS"
     ].join("\n"),
     entries: [
       { name: `Enable ${formatScheduledDjKind(schedulerAction)} DJ`, value: "enable" },
@@ -817,11 +826,11 @@ async function promptForStandaloneNetEaseSetup(
   while (true) {
     const neteaseSetupMethod = await promptSetupMenu<NetEaseSetupMethod>({
       title: [
-        "NetEase playback",
+        "NETEASE PLAYBACK",
         "",
-        "Connecting your account can reduce unavailable tracks and preview-only playback.",
+        "● Connecting your account can reduce unavailable tracks and preview-only playback.",
         "",
-        "Connect NetEase account now?"
+        "ACTIONS"
       ].join("\n"),
       entries: getNetEaseSetupMethodChoices(),
       defaultValue: inferCurrentNetEaseSetupMethod(current)
@@ -835,7 +844,13 @@ async function promptForStandaloneNetEaseSetup(
     }
 
     const neteaseQualityLevel = await promptSetupMenu<NetEaseQualityLevel>({
-      title: "Preferred playback quality",
+      title: [
+        "PLAYBACK QUALITY",
+        "",
+        "● Pick the best quality your NetEase account can reliably play.",
+        "",
+        "ACTIONS"
+      ].join("\n"),
       entries: getNetEaseQualityMenuChoices(),
       defaultValue: current.netease.qualityLevel === "standard" ? "exhigh" : current.netease.qualityLevel
     });
@@ -880,14 +895,18 @@ function promptSetupMenu<TValue extends string>(options: {
     const previousRawMode = defaultInput.isRaw;
 
     const render = () => {
+      const renderOptions = {
+        color: Boolean(defaultOutput.isTTY),
+        width: defaultOutput.columns
+      };
       defaultOutput.write("\x1B[?25l");
       defaultOutput.write("\x1B[H\x1B[2J");
       defaultOutput.write([
-        options.title,
+        formatSetupMenuTitle(options.title, renderOptions),
         "",
-        ...options.entries.map((entry, index) => formatSetupMenuEntry(selected === index, index + 1, entry.name)),
+        ...options.entries.map((entry, index) => formatSetupMenuEntry(selected === index, index + 1, entry.name, renderOptions)),
         "",
-        `↑↓ Select  |  Enter Open  |  1-${options.entries.length} Open  |  B Back  |  Q Quit`
+        renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${options.entries.length} Open  |  B Back  |  Q Quit`, renderOptions)
       ].join("\n"));
     };
     const cleanup = (choice: TValue | "back" | "quit") => {
@@ -1786,8 +1805,44 @@ function inferCurrentScheduledDjChoice(current: PockedioConfig): ScheduledDjSetu
   return "not_now";
 }
 
-function formatSetupMenuEntry(selected: boolean, index: number, name: string): string {
-  const line = `${selected ? ">" : " "} ${index}. ${name}`;
+export function formatSetupMenuTitle(title: string, options: TuiRenderOptions = {}): string {
+  if (!options.color) {
+    return title;
+  }
+  let firstHeading = true;
+  return title.split("\n").map((line) => {
+    if (!line.trim()) {
+      return line;
+    }
+    if (line.startsWith("● ")) {
+      return renderTuiBulletLine(line.slice(2), options);
+    }
+    if (/^[A-Z][A-Z0-9 &-]+$/.test(line)) {
+      if (firstHeading) {
+        firstHeading = false;
+        return renderTuiPageTitle(line, options);
+      }
+      return renderTuiSectionLabel(line, { ...options, accent: "playback" });
+    }
+    const keyValue = line.match(/^([A-Za-z][A-Za-z ]+?)\s{2,}(.+)$/);
+    if (keyValue) {
+      return renderTuiKeyValue(keyValue[1]!.trim(), keyValue[2]!.trim(), 15, options);
+    }
+    return line;
+  }).join("\n");
+}
+
+export function formatSetupMenuEntry(selected: boolean, index: number, name: string, options: TuiRenderOptions = {}): string {
+  if (options.color) {
+    return renderTuiRow({
+      marker: selected ? ">" : " ",
+      label: `${index}.`,
+      text: name,
+      selected,
+      accent: selected ? "playback" : "dim"
+    }, options);
+  }
+  const line = `${selected ? "▌ >" : "   "} ${index}. ${name}`;
   return selected ? `\x1B[7m${line}\x1B[0m` : line;
 }
 

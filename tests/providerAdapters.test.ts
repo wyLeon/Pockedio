@@ -4,7 +4,7 @@ import { ensureRuntimeDirs, loadConfig } from "../src/config/load.js";
 import { saveNetEaseCookie } from "../src/config/neteaseAuth.js";
 import { startDuckedUrlWithIntro as startDefaultDuckedUrlWithIntro, startUrlPlayback as startDefaultUrlPlayback } from "../src/player/defaultPlayer.js";
 import { buildFfplayArgs } from "../src/player/ffplay.js";
-import { buildMpvArgs, createMpvIpcPath } from "../src/player/mpv.js";
+import { buildMpvArgs, createMpvIpcPath, fadePlaybackVolume } from "../src/player/mpv.js";
 import { playFile, playUrl, startDuckedUrlWithIntro, startUrlPlayback, type PlaybackHandle, type ProcessRunner, type ProcessStarter } from "../src/player/afplay.js";
 import { findStalePockedioPlaybackPids } from "../src/player/stalePlayback.js";
 import { NetEaseProvider } from "../src/providers/netease.js";
@@ -261,6 +261,52 @@ describe("streaming player routing", () => {
       "--volume=18",
       "https://example.com/song.mp3"
     ]);
+  });
+
+  it("fades mpv volume up after a spoken DJ intro", async () => {
+    const volumes: number[] = [];
+    const waits: number[] = [];
+    const handle: PlaybackHandle = {
+      target: "https://example.com/song.mp3",
+      done: Promise.resolve({ ok: true, target: "https://example.com/song.mp3", exitCode: 0, signal: null }),
+      stop: () => undefined,
+      setVolume: (volume) => {
+        volumes.push(volume);
+        return true;
+      }
+    };
+
+    await expect(fadePlaybackVolume(handle, 18, 100, {
+      durationMs: 1_200,
+      steps: 4,
+      sleep: async (ms) => {
+        waits.push(ms);
+      }
+    })).resolves.toBe(true);
+
+    expect(waits).toEqual([300, 300, 300, 300]);
+    expect(volumes).toEqual([39, 59, 80, 100]);
+  });
+
+  it("reports mpv fade failure so callers can fall back to full volume", async () => {
+    const volumes: number[] = [];
+    const handle: PlaybackHandle = {
+      target: "https://example.com/song.mp3",
+      done: Promise.resolve({ ok: true, target: "https://example.com/song.mp3", exitCode: 0, signal: null }),
+      stop: () => undefined,
+      setVolume: (volume) => {
+        volumes.push(volume);
+        return volume < 60;
+      }
+    };
+
+    await expect(fadePlaybackVolume(handle, 18, 100, {
+      durationMs: 0,
+      steps: 4,
+      sleep: async () => undefined
+    })).resolves.toBe(false);
+
+    expect(volumes).toEqual([39, 59, 80]);
   });
 
   it("passes remote URLs directly to ffplay", () => {

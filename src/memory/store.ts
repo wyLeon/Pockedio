@@ -67,6 +67,11 @@ export type RecentSessionSummary = {
   triggerText: string;
 };
 
+export type RecentPlayedTrack = {
+  title: string;
+  artist: string;
+};
+
 export type MessageRecord = {
   role: MessageRole;
   content: string;
@@ -201,6 +206,17 @@ export class MemoryStore {
       SET playback_status = ?, failure_reason = ?
       WHERE id = ?
     `).run(status, failureReason ?? null, trackId);
+  }
+
+  getRecentPlayedTracks(limit: number): RecentPlayedTrack[] {
+    return this.db.prepare(`
+      SELECT st.title, st.artist
+      FROM station_tracks st
+      INNER JOIN sessions s ON s.id = st.session_id
+      WHERE st.playback_status IN ('played', 'playing', 'skipped')
+      ORDER BY s.started_at DESC, st.position DESC, st.rowid DESC
+      LIMIT ?
+    `).all(limit) as RecentPlayedTrack[];
   }
 
   addFeedback(sessionId: string, trackId: string | null, action: FeedbackAction, note?: string): string {

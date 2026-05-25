@@ -13,6 +13,16 @@ import {
   macosVoiceOptions,
   voicePreviewText
 } from "../tts/voiceSetup.js";
+import {
+  renderTuiAccentText,
+  renderTuiBulletLine,
+  renderTuiFooter,
+  renderTuiKeyValue,
+  renderTuiPageTitle,
+  renderTuiRow,
+  renderTuiSectionLabel,
+  type TuiRenderOptions
+} from "./terminalRenderer.js";
 
 export type WelcomeReadinessItem = {
   label: "Music" | "LLM" | "Voice" | "Taste" | "Calendar";
@@ -63,6 +73,10 @@ export type WelcomeReadinessOptions = {
   platform?: NodeJS.Platform;
 };
 
+type HubRenderOptions<TAction extends string = string> = TuiRenderOptions & {
+  selectedAction?: TAction;
+};
+
 const welcomeHubEntries: Array<{ action: WelcomeHubAction; label: string; description: string }> = [
   { action: "session", label: "Enter DJ Session", description: "Talk, ask, play, reshape, queue, DJ mode" },
   { action: "setup", label: "Setup & Connections", description: "Music, LLM, voice, context" },
@@ -70,13 +84,13 @@ const welcomeHubEntries: Array<{ action: WelcomeHubAction; label: string; descri
   { action: "status", label: "Status", description: "Playback, scheduler, health, version" }
 ];
 
-const setupConnectionsEntries: Array<{ action: SetupConnectionsAction; label: string }> = [
-  { action: "full_setup", label: "Run full setup" },
-  { action: "llm_setup", label: "Configure LLM" },
-  { action: "voice_setup", label: "Configure Voice" },
-  { action: "netease_setup", label: "Configure NetEase" },
-  { action: "context_setup", label: "Configure Context" },
-  { action: "scheduler_setup", label: "Configure Scheduler" }
+const setupConnectionsEntries: Array<{ action: SetupConnectionsAction; label: string; description: string }> = [
+  { action: "full_setup", label: "Run full setup", description: "review everything from the beginning" },
+  { action: "llm_setup", label: "Configure LLM", description: "model, base URL, API key, local vLLM" },
+  { action: "voice_setup", label: "Configure Voice", description: "Mina, Nova, macOS voice, text-only" },
+  { action: "netease_setup", label: "Configure NetEase", description: "QR, cookie, quality level" },
+  { action: "context_setup", label: "Configure Context", description: "calendar, weather, diary" },
+  { action: "scheduler_setup", label: "Configure Scheduled DJ", description: "morning and evening programs" }
 ];
 
 const llmSetupEntries: Array<{ action: LlmSetupAction; label: string; description: string }> = [
@@ -88,45 +102,45 @@ const llmSetupEntries: Array<{ action: LlmSetupAction; label: string; descriptio
   { action: "test_connection", label: "Test current setup", description: "Make a minimal LLM call with the current config" }
 ];
 
-const hostedLlmProviderEntries: Array<{ action: LlmProviderAction; label: string }> = [
-  { action: "paste_key", label: "Paste API key" },
-  { action: "use_shell_env", label: "Use shell env" },
-  { action: "change_model", label: "Change model" },
-  { action: "test_connection", label: "Test connection" }
+const hostedLlmProviderEntries: Array<{ action: LlmProviderAction; label: string; description: string }> = [
+  { action: "paste_key", label: "Paste API key", description: "store a local secret for Pockedio" },
+  { action: "use_shell_env", label: "Use shell env", description: "read the key from your terminal environment" },
+  { action: "change_model", label: "Change model", description: "override the default model name" },
+  { action: "test_connection", label: "Test connection", description: "make a minimal model call" }
 ];
 
-const customLlmProviderEntries: Array<{ action: LlmProviderAction; label: string }> = [
-  { action: "paste_key", label: "Paste API key" },
-  { action: "use_shell_env", label: "Use shell env" },
-  { action: "change_model", label: "Change model" },
-  { action: "change_base_url", label: "Change base URL" },
-  { action: "change_api_key_env", label: "Set API key env" },
-  { action: "test_connection", label: "Test connection" }
+const customLlmProviderEntries: Array<{ action: LlmProviderAction; label: string; description: string }> = [
+  { action: "paste_key", label: "Paste API key", description: "store a local secret for Pockedio" },
+  { action: "use_shell_env", label: "Use shell env", description: "read the key from your terminal environment" },
+  { action: "change_model", label: "Change model", description: "set any OpenAI-compatible model" },
+  { action: "change_base_url", label: "Change base URL", description: "point to a compatible API endpoint" },
+  { action: "change_api_key_env", label: "Set API key env", description: "choose which environment variable to read" },
+  { action: "test_connection", label: "Test connection", description: "make a minimal model call" }
 ];
 
-const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string }> = [
-  { action: "check_server", label: "Check server" },
-  { action: "discover_models", label: "Discover models" },
-  { action: "paste_key", label: "Paste API key" },
-  { action: "change_model", label: "Set model manually" },
-  { action: "change_base_url", label: "Set base URL" }
+const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string; description: string }> = [
+  { action: "check_server", label: "Check server", description: "verify the local OpenAI-compatible endpoint" },
+  { action: "discover_models", label: "Discover models", description: "list models from the local server" },
+  { action: "paste_key", label: "Paste API key", description: "optional if your server requires a key" },
+  { action: "change_model", label: "Set model manually", description: "enter a model name directly" },
+  { action: "change_base_url", label: "Set base URL", description: "change the local endpoint URL" }
 ];
 
-const voiceSetupEntries: Array<{ action: VoiceSetupAction; label: string }> = [
-  { action: "choose_voice", label: "Choose DJ voice" },
-  { action: "fish_tts", label: "Configure Fish TTS" },
-  { action: "text_only", label: "Use text-only DJ copy" }
+const voiceSetupEntries: Array<{ action: VoiceSetupAction; label: string; description: string }> = [
+  { action: "choose_voice", label: "Choose DJ voice", description: "preview Mina, Nova, or built-in voices" },
+  { action: "fish_tts", label: "Configure Fish TTS", description: "enable generated Mina or Nova audio" },
+  { action: "text_only", label: "Use text-only DJ copy", description: "keep DJ notes without spoken audio" }
 ];
 
-const contextSetupEntries: Array<{ action: ContextSetupAction; label: string }> = [
-  { action: "calendar", label: "Configure Calendar" },
-  { action: "weather", label: "Configure Weather" },
-  { action: "diary", label: "Configure Diary" }
+const contextSetupEntries: Array<{ action: ContextSetupAction; label: string; description: string }> = [
+  { action: "calendar", label: "Configure Calendar", description: "local schedule signals for timing and mood" },
+  { action: "weather", label: "Configure Weather", description: "city weather for station tone" },
+  { action: "diary", label: "Configure Diary", description: "local-first personal context summaries" }
 ];
 
-const tasteMemoryEntries: Array<{ action: TasteMemoryAction; label: string }> = [
-  { action: "import", label: "Import playlist" },
-  { action: "show_summary", label: "Show taste summary" }
+const tasteMemoryEntries: Array<{ action: TasteMemoryAction; label: string; description: string }> = [
+  { action: "import", label: "Import playlist", description: "refresh taste signals from NetEase" },
+  { action: "show_summary", label: "Show taste summary", description: "review artists, playlists, and sample tracks" }
 ];
 
 export function buildWelcomeReadiness(options: WelcomeReadinessOptions): WelcomeReadiness {
@@ -145,95 +159,154 @@ export function buildWelcomeReadiness(options: WelcomeReadinessOptions): Welcome
 
 export function renderWelcomeHub(
   readiness: WelcomeReadiness,
-  options: { selectedAction?: WelcomeHubAction } = {}
+  options: HubRenderOptions<WelcomeHubAction> = {}
 ): string {
   const selectedAction = options.selectedAction ?? "session";
+  if (options.color) {
+    return [
+      renderPockedioSplash(options),
+      "",
+      renderTuiSectionLabel("SESSION FLOW", { ...options, accent: "playback" }),
+      ...welcomeHubEntries.map((entry, index) => formatHubEntry(entry.action === selectedAction, index + 1, entry.label, entry.description, options)),
+      "",
+      renderTuiSectionLabel("READINESS", { ...options, accent: "playback" }),
+      ...readiness.items.map((item) => formatReadinessItem(item, options)),
+      "",
+      renderTuiFooter("↑↓ Select  |  Enter Open  |  S Setup  |  L LLM  |  V Voice  |  Q Quit", options)
+    ].join("\n");
+  }
   return [
-    "Pockedio",
+    renderTuiPageTitle("Pockedio", options),
     "",
-    "Personal AI DJ for context-aware listening",
+    renderTuiBulletLine("Personal AI DJ for context-aware listening", options),
     "",
-    ...welcomeHubEntries.map((entry, index) => formatHubEntry(entry.action === selectedAction, index + 1, entry.label, entry.description)),
+    ...welcomeHubEntries.map((entry, index) => formatHubEntry(entry.action === selectedAction, index + 1, entry.label, entry.description, options)),
     "",
-    "Readiness",
-    ...readiness.items.map(formatReadinessItem),
+    options.color ? renderTuiSectionLabel("Readiness", { ...options, accent: "playback" }) : "Readiness",
+    ...readiness.items.map((item) => formatReadinessItem(item, options)),
     "",
-    "↑↓ Select  |  Enter Open  |  S Setup  |  L LLM  |  V Voice  |  Q Quit"
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  S Setup  |  L LLM  |  V Voice  |  Q Quit", options)
+  ].join("\n");
+}
+
+function renderPockedioSplash(options: TuiRenderOptions): string {
+  const note = [
+    "        ████",
+    "        ████",
+    "        ████",
+    "        ████",
+    "   ██████████",
+    "  ██      ████",
+    "  ██      ████",
+    "   ████████"
+  ].join("\n");
+  return [
+    renderTuiAccentText(note, { ...options, accent: "dj" }),
+    "",
+    renderTuiAccentText("pockedio", { ...options, accent: "dj" }),
+    renderTuiBulletLine("Music tuned to the moment.", options)
   ].join("\n");
 }
 
 export function renderSetupConnectionsSurface(
   options: WelcomeReadinessOptions,
-  renderOptions: { selectedAction?: SetupConnectionsAction } = {}
+  renderOptions: HubRenderOptions<SetupConnectionsAction> = {}
 ): string {
   const readiness = buildWelcomeReadiness(options);
   const byLabel = new Map(readiness.items.map((item) => [item.label, item]));
   const selectedAction = renderOptions.selectedAction ?? "full_setup";
   return [
-    "Setup & Connections",
+    renderTuiPageTitle("SETUP & CONNECTIONS", renderOptions),
     "",
-    formatSetupLine("Music", byLabel.get("Music")?.value ?? "Unknown"),
-    formatSetupLine("LLM", byLabel.get("LLM")?.value ?? "Unknown"),
-    formatSetupLine("Voice", byLabel.get("Voice")?.value ?? "Unknown"),
-    formatSetupLine("Context", formatContextSummary(options.config, byLabel.get("Calendar")?.value ?? "Unknown")),
+    formatSetupSummaryLine(readiness, renderOptions),
     "",
-    "Actions:",
-    ...setupConnectionsEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
+    renderTuiSectionLabel("STATUS", { ...renderOptions, accent: "playback" }),
+    formatSetupLine("Music", byLabel.get("Music")?.value ?? "Unknown", renderOptions),
+    formatSetupLine("LLM", byLabel.get("LLM")?.value ?? "Unknown", renderOptions),
+    formatSetupLine("Voice", byLabel.get("Voice")?.value ?? "Unknown", renderOptions),
+    formatSetupLine("Context", formatContextSummary(options.config, byLabel.get("Calendar")?.value ?? "Unknown"), renderOptions),
+    formatSetupLine("Scheduled", formatScheduledDjSummary(options.config), renderOptions),
     "",
-    `↑↓ Select  |  Enter Open  |  1-${setupConnectionsEntries.length} Open  |  B Back  |  Q Quit`
+    renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
+    ...setupConnectionsEntries.map((entry, index) => formatSetupConnectionAction(
+      entry.action === selectedAction,
+      index + 1,
+      entry.label,
+      entry.description,
+      renderOptions
+    )),
+    "",
+    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${setupConnectionsEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
   ].join("\n");
 }
 
 export function renderContextSetupSurface(
   options: Pick<WelcomeReadinessOptions, "config">,
-  renderOptions: { selectedAction?: ContextSetupAction } = {}
+  renderOptions: HubRenderOptions<ContextSetupAction> = {}
 ): string {
   const selectedAction = renderOptions.selectedAction ?? "calendar";
   return [
-    "Context",
+    renderTuiPageTitle("CONTEXT SETUP", renderOptions),
     "",
-    formatSetupLine("Calendar", options.config.calendar.enabled ? "Enabled" : "Not enabled"),
-    formatSetupLine("Weather", options.config.weather.enabled ? options.config.weather.location : "Not enabled"),
-    formatSetupLine("Diary", options.config.diary.enabled ? "Enabled" : "Not enabled"),
+    renderTuiBulletLine("Context helps stations match your day without becoming the main event.", renderOptions),
     "",
-    "Actions:",
-    ...contextSetupEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
+    renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
+    formatSetupLine("Calendar", options.config.calendar.enabled ? "Enabled" : "Not enabled", renderOptions),
+    formatSetupLine("Weather", options.config.weather.enabled ? options.config.weather.location : "Not enabled", renderOptions),
+    formatSetupLine("Diary", options.config.diary.enabled ? "Enabled" : "Not enabled", renderOptions),
     "",
-    `↑↓ Select  |  Enter Open  |  1-${contextSetupEntries.length} Open  |  B Back  |  Q Quit`
+    renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
+    ...contextSetupEntries.map((entry, index) => formatSetupConnectionAction(
+      entry.action === selectedAction,
+      index + 1,
+      entry.label,
+      entry.description,
+      renderOptions
+    )),
+    "",
+    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${contextSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
   ].join("\n");
 }
 
 export function renderLlmSetupSurface(
   options: Pick<WelcomeReadinessOptions, "config" | "env">,
-  renderOptions: { selectedAction?: LlmSetupAction } = {}
+  renderOptions: HubRenderOptions<LlmSetupAction> = {}
 ): string {
   const env = options.env ?? process.env;
   const keySource = getLlmKeySource(options.config, env);
   const selectedAction = renderOptions.selectedAction ?? inferLlmSetupAction(options.config);
   return [
-    "LLM",
+    renderTuiPageTitle("LLM SETUP", renderOptions),
     "",
-    "Current config",
-    formatSetupLine("Provider", "OpenAI-compatible"),
-    formatSetupLine("Model", options.config.llm.model),
-    formatSetupLine("API key", formatLlmKeySource(options.config.llm.apiKeyEnv, keySource)),
-    formatSetupLine("Base URL", options.config.llm.baseUrl ?? "OpenAI default"),
+    formatLlmSetupSummaryLine(keySource, options.config.llm.apiKeyEnv, renderOptions),
     "",
-    "Supported now",
-    "  Any OpenAI-compatible Chat Completions API.",
-    "  Presets only fill model, base URL, and API key env; the client remains configurable.",
+    renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
+    formatSetupLine("Provider", "OpenAI-compatible", renderOptions),
+    formatSetupLine("Model", options.config.llm.model, renderOptions),
+    formatSetupLine("API key", formatLlmKeySource(options.config.llm.apiKeyEnv, keySource), renderOptions),
+    formatSetupLine("Base URL", options.config.llm.baseUrl ?? "OpenAI default", renderOptions),
     "",
-    "Actions:",
-    ...llmSetupEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, `${entry.label}  ${entry.description}`)),
+    renderTuiSectionLabel("SUPPORT", { ...renderOptions, accent: "playback" }),
+    "Any OpenAI-compatible Chat Completions API.",
+    "Presets update model, base URL, and API key env. The client remains configurable.",
     "",
-    `↑↓ Select  |  Enter Open  |  1-${llmSetupEntries.length} Open  |  B Back  |  Q Quit`
+    renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
+    ...llmSetupEntries.map((entry, index) => formatSetupConnectionAction(
+      entry.action === selectedAction,
+      index + 1,
+      entry.label,
+      entry.description,
+      renderOptions
+    )),
+    "",
+    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${llmSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
   ].join("\n");
 }
 
 export function renderLlmProviderSurface(
   options: Pick<WelcomeReadinessOptions, "config" | "env">,
   providerId: LlmProviderId,
-  renderOptions: { selectedAction?: LlmProviderAction } = {}
+  renderOptions: HubRenderOptions<LlmProviderAction> = {}
 ): string {
   const env = options.env ?? process.env;
   const preset = getLlmProviderPreset(providerId, options.config);
@@ -250,22 +323,31 @@ export function renderLlmProviderSurface(
     ? `Optional: ${preset.apiKeyEnv}`
     : formatLlmKeySource(preset.apiKeyEnv, keySource);
   return [
-    preset.label,
+    renderTuiPageTitle(formatProviderTitle(preset.label), renderOptions),
     "",
-    formatProviderLine("Model", preset.model),
-    formatProviderLine("API key", apiKey),
-    formatProviderLine("Base URL", preset.baseUrl ?? "OpenAI default"),
+    formatLlmProviderSummaryLine(providerId, keySource, preset.apiKeyEnv, renderOptions),
     "",
-    "Actions:",
-    ...entries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
+    renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
+    formatSetupLine("Model", preset.model, renderOptions),
+    formatSetupLine("API key", apiKey, renderOptions),
+    formatSetupLine("Base URL", preset.baseUrl ?? "OpenAI default", renderOptions),
     "",
-    `↑↓ Select  |  Enter Open  |  1-${entries.length} Open  |  B Back  |  Q Quit`
+    renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
+    ...entries.map((entry, index) => formatSetupConnectionAction(
+      entry.action === selectedAction,
+      index + 1,
+      entry.label,
+      entry.description,
+      renderOptions
+    )),
+    "",
+    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${entries.length} Open  |  B Back  |  Q Quit`, renderOptions)
   ].join("\n");
 }
 
 export function renderVoiceSetupSurface(
   options: Pick<WelcomeReadinessOptions, "config" | "platform">,
-  renderOptions: { selectedAction?: VoiceSetupAction } = {}
+  renderOptions: HubRenderOptions<VoiceSetupAction> = {}
 ): string {
   const platform = options.platform ?? process.platform;
   const fishConfigured = isFishTtsReady(options.config);
@@ -273,123 +355,152 @@ export function renderVoiceSetupSurface(
   const voice = formatConfiguredVoice(options.config, platform);
   const selectedAction = renderOptions.selectedAction ?? "choose_voice";
   return [
-    "Voice",
+    renderTuiPageTitle("VOICE SETUP", renderOptions),
     "",
-    formatSetupLine("Provider", fishConfigured ? "Fish TTS" : provider),
-    formatSetupLine("Voice", fishConfigured ? "Mina or Nova" : voice),
-    formatSetupLine("Advanced", fishConfigured ? "Fish TTS configured" : "Fish TTS not configured"),
+    formatVoiceSetupSummaryLine(options.config, platform, fishConfigured, renderOptions),
     "",
-    "Actions:",
-    ...voiceSetupEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
+    renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
+    formatSetupLine("Provider", fishConfigured ? "Fish TTS" : provider, renderOptions),
+    formatSetupLine("Voice", fishConfigured ? "Mina or Nova" : voice, renderOptions),
+    formatSetupLine("Advanced", fishConfigured ? "Fish TTS configured" : "Fish TTS not configured", renderOptions),
     "",
-    `↑↓ Select  |  Enter Open  |  1-${voiceSetupEntries.length} Open  |  B Back  |  Q Quit`
+    renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
+    ...voiceSetupEntries.map((entry, index) => formatSetupConnectionAction(
+      entry.action === selectedAction,
+      index + 1,
+      entry.label,
+      entry.description,
+      renderOptions
+    )),
+    "",
+    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${voiceSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
   ].join("\n");
 }
 
 export function renderDjVoiceChooserSurface(
   options: Pick<WelcomeReadinessOptions, "config" | "platform">,
-  renderOptions: { selectedVoice?: DjVoiceChoiceId } = {}
+  renderOptions: TuiRenderOptions & { selectedVoice?: DjVoiceChoiceId } = {}
 ): string {
   const platform = options.platform ?? process.platform;
   const fishReady = isFishTtsReady(options.config);
   const selectedVoice = renderOptions.selectedVoice ?? getCurrentVoiceChoice(options.config, platform, fishReady);
   return [
-    "Choose DJ voice",
+    renderTuiPageTitle("CHOOSE DJ VOICE", renderOptions),
     "",
-    "Sample",
+    renderTuiBulletLine("Pick the voice that should represent Pockedio during spoken DJ moments.", renderOptions),
+    "",
+    renderTuiSectionLabel("SAMPLE", { ...renderOptions, accent: "playback" }),
     `"${voicePreviewText}"`,
     "",
-    "Built-in voices",
+    renderTuiSectionLabel("BUILT-IN VOICES", { ...renderOptions, accent: "playback" }),
     ...macosVoiceOptions.map((voice, index) => {
       const id: DjVoiceChoiceId = `macos:${voice.id}`;
       const status = platform === "darwin" ? currentVoiceLabel(id, options.config, "ready") : "unavailable";
-      return formatVoiceChoiceLine(id === selectedVoice, index + 1, voice.label, status, voice.description);
+      return formatVoiceChoiceLine(id === selectedVoice, index + 1, voice.label, status, voice.description, renderOptions);
     }),
     "",
-    "Advanced Fish voices",
+    renderTuiSectionLabel("FISH VOICES", { ...renderOptions, accent: "playback" }),
     ...fishVoiceOptions.map((voice, index) => {
       const id: DjVoiceChoiceId = `fish:${voice.id}`;
       const status = fishReady ? currentVoiceLabel(id, options.config, "ready") : "needs Fish TTS setup";
-      return formatVoiceChoiceLine(id === selectedVoice, index + 1 + macosVoiceOptions.length, voice.label, status, voice.description);
+      return formatVoiceChoiceLine(id === selectedVoice, index + 1 + macosVoiceOptions.length, voice.label, status, voice.description, renderOptions);
     }),
     "",
-    "↑↓ Select  |  Space Preview  |  Enter Save  |  F Fish setup  |  B Back"
+    renderTuiFooter("↑↓ Select  |  Space Preview  |  Enter Save  |  F Fish setup  |  B Back", renderOptions)
   ].join("\n");
 }
 
 export function renderTasteMemorySurface(
   options: Pick<WelcomeReadinessOptions, "config">,
-  renderOptions: { selectedAction?: TasteMemoryAction } = {}
+  renderOptions: HubRenderOptions<TasteMemoryAction> = {}
 ): string {
   const summary = readTasteMemorySummary(options.config);
   const selectedAction = renderOptions.selectedAction ?? "import";
   return [
-    "Taste & Memory",
+    renderTuiPageTitle("TASTE & MEMORY", renderOptions),
     "",
-    formatTasteLine("Imported lists", summary.importedLists, 16),
-    formatTasteLine("Last import", summary.lastImport, 16),
-    formatTasteLine("Taste profile", summary.profileStatus, 16),
-    formatTasteLine("Recent signals", summary.recentSignals, 16),
-    formatTasteLine("Session memory", summary.sessionMemory, 16),
-    formatTasteLine("Diary", options.config.diary.enabled ? "Summary available if diary has entries" : "Not enabled", 16),
+    renderTuiBulletLine("Taste signals shape future recommendations, favorites, and station direction.", renderOptions),
     "",
-    "Actions:",
-    ...tasteMemoryEntries.map((entry, index) => formatNumberedAction(entry.action === selectedAction, index + 1, entry.label)),
+    renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
+    formatTasteLine("Imported lists", summary.importedLists, 16, renderOptions),
+    formatTasteLine("Last import", summary.lastImport, 16, renderOptions),
+    formatTasteLine("Taste profile", summary.profileStatus, 16, renderOptions),
+    formatTasteLine("Recent signals", summary.recentSignals, 16, renderOptions),
+    formatTasteLine("Session memory", summary.sessionMemory, 16, renderOptions),
+    formatTasteLine("Diary", options.config.diary.enabled ? "Summary available if diary has entries" : "Not enabled", 16, renderOptions),
     "",
-    `↑↓ Select  |  Enter Open  |  1-${tasteMemoryEntries.length} Open  |  B Back  |  Q Quit`
+    renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
+    ...tasteMemoryEntries.map((entry, index) => formatSetupConnectionAction(
+      entry.action === selectedAction,
+      index + 1,
+      entry.label,
+      entry.description,
+      renderOptions
+    )),
+    "",
+    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${tasteMemoryEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
   ].join("\n");
 }
 
-export function renderTasteImportResultSurface(result: TasteImportResult): string {
+export function renderTasteImportResultSurface(result: TasteImportResult, options: TuiRenderOptions = {}): string {
   return [
-    "Imported playlist",
+    renderTuiPageTitle("IMPORTED PLAYLIST", options),
     "",
-    formatTasteLine("Tracks", String(result.trackCount), 14),
-    formatTasteLine("Artists", String(result.artists.length), 14),
-    formatTasteLine("Playlist", result.playlists.join(", ") || "Unknown", 14),
-    formatTasteLine("Taste file", result.tastePath, 14),
+    renderTuiBulletLine("Playlist data was saved into taste memory for future recommendations.", options),
     "",
-    "Updated:",
+    renderTuiSectionLabel("RESULT", { ...options, accent: "playback" }),
+    formatTasteLine("Tracks", String(result.trackCount), 14, options),
+    formatTasteLine("Artists", String(result.artists.length), 14, options),
+    formatTasteLine("Playlist", result.playlists.join(", ") || "Unknown", 14, options),
+    formatTasteLine("Taste file", result.tastePath, 14, options),
+    "",
+    renderTuiSectionLabel("UPDATED", { ...options, accent: "playback" }),
     "  Imported taste signals",
     "  Taste memory",
     "",
-    "Press Enter to return to Taste & Memory."
+    renderTuiFooter("Press Enter to return to Taste & Memory.", options)
   ].join("\n");
 }
 
-export function renderTasteSummarySurface(options: Pick<WelcomeReadinessOptions, "config">): string {
+export function renderTasteSummarySurface(
+  options: Pick<WelcomeReadinessOptions, "config">,
+  renderOptions: TuiRenderOptions = {}
+): string {
   const summary = readTasteMemorySummary(options.config);
   const details = readTasteMemoryDetails(options.config);
   if (!details.exists) {
     return [
-      "Taste Summary",
+      renderTuiPageTitle("TASTE SUMMARY", renderOptions),
       "",
-      "No taste file has been created yet.",
+      renderTuiBulletLine("No taste file has been created yet.", renderOptions),
       "",
       "Import a NetEase playlist first, then Pockedio can summarize your listening signals.",
       "",
-      "Press Enter to return to Taste & Memory."
+      renderTuiFooter("Press Enter to return to Taste & Memory.", renderOptions)
     ].join("\n");
   }
 
   return [
-    "Taste Summary",
+    renderTuiPageTitle("TASTE SUMMARY", renderOptions),
     "",
-    formatTasteLine("Imported", summary.importedLists, 14),
-    formatTasteLine("Last import", summary.lastImport, 14),
-    formatTasteLine("Profile", summary.profileStatus, 14),
-    formatTasteLine("Taste file", options.config.paths.taste, 14),
+    renderTuiBulletLine("Imported music signals currently available to Pockedio.", renderOptions),
     "",
-    "Top artists",
+    renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
+    formatTasteLine("Imported", summary.importedLists, 14, renderOptions),
+    formatTasteLine("Last import", summary.lastImport, 14, renderOptions),
+    formatTasteLine("Profile", summary.profileStatus, 14, renderOptions),
+    formatTasteLine("Taste file", options.config.paths.taste, 14, renderOptions),
+    "",
+    renderTuiSectionLabel("TOP ARTISTS", { ...renderOptions, accent: "playback" }),
     ...formatRankedList(details.topArtists, "No imported artists yet."),
     "",
-    "Playlists",
+    renderTuiSectionLabel("PLAYLISTS", { ...renderOptions, accent: "playback" }),
     ...formatPlainList(details.playlists, "No imported playlists yet.", 5),
     "",
-    "Sample tracks",
+    renderTuiSectionLabel("SAMPLE TRACKS", { ...renderOptions, accent: "playback" }),
     ...formatPlainList(details.sampleTracks, "No imported tracks yet.", 6),
     "",
-    "Press Enter to return to Taste & Memory."
+    renderTuiFooter("Press Enter to return to Taste & Memory.", renderOptions)
   ].join("\n");
 }
 
@@ -403,7 +514,11 @@ export async function promptWelcomeHub(readiness: WelcomeReadiness): Promise<Wel
     const render = () => {
       output.write("\x1B[?25l");
       output.write("\x1B[H\x1B[2J");
-      output.write(renderWelcomeHub(readiness, { selectedAction: welcomeHubEntries[selectedIndex]!.action }));
+      output.write(renderWelcomeHub(readiness, {
+        selectedAction: welcomeHubEntries[selectedIndex]!.action,
+        color: Boolean(output.isTTY),
+        width: output.columns
+      }));
     };
     const cleanup = (action: WelcomeHubAction) => {
       input.off("keypress", onKeypress);
@@ -466,7 +581,7 @@ export async function promptSetupConnections(options: WelcomeReadinessOptions): 
   return promptNumberedSurface({
     entries: setupConnectionsEntries,
     initialAction: "full_setup",
-    render: (action) => renderSetupConnectionsSurface(options, { selectedAction: action })
+    render: (action, renderOptions) => renderSetupConnectionsSurface(options, { ...renderOptions, selectedAction: action })
   });
 }
 
@@ -474,7 +589,7 @@ export async function promptLlmSetup(options: Pick<WelcomeReadinessOptions, "con
   return promptNumberedSurface({
     entries: llmSetupEntries,
     initialAction: inferLlmSetupAction(options.config),
-    render: (action) => renderLlmSetupSurface(options, { selectedAction: action })
+    render: (action, renderOptions) => renderLlmSetupSurface(options, { ...renderOptions, selectedAction: action })
   });
 }
 
@@ -485,7 +600,7 @@ export async function promptLlmProvider(
   return promptNumberedSurface({
     entries: getLlmProviderEntries(providerId),
     initialAction: getLlmProviderEntries(providerId)[0]!.action,
-    render: (action) => renderLlmProviderSurface(options, providerId, { selectedAction: action })
+    render: (action, renderOptions) => renderLlmProviderSurface(options, providerId, { ...renderOptions, selectedAction: action })
   });
 }
 
@@ -511,7 +626,7 @@ export async function promptVoiceSetup(options: Pick<WelcomeReadinessOptions, "c
   return promptNumberedSurface({
     entries: voiceSetupEntries,
     initialAction: "choose_voice",
-    render: (action) => renderVoiceSetupSurface(options, { selectedAction: action })
+    render: (action, renderOptions) => renderVoiceSetupSurface(options, { ...renderOptions, selectedAction: action })
   });
 }
 
@@ -519,7 +634,7 @@ export async function promptContextSetup(options: Pick<WelcomeReadinessOptions, 
   return promptNumberedSurface({
     entries: contextSetupEntries,
     initialAction: "calendar",
-    render: (action) => renderContextSetupSurface(options, { selectedAction: action })
+    render: (action, renderOptions) => renderContextSetupSurface(options, { ...renderOptions, selectedAction: action })
   });
 }
 
@@ -541,7 +656,11 @@ export async function promptDjVoiceChooser(
     const render = () => {
       output.write("\x1B[?25l");
       output.write("\x1B[H\x1B[2J");
-      output.write(renderDjVoiceChooserSurface(options, { selectedVoice }));
+      output.write(renderDjVoiceChooserSurface(options, {
+        selectedVoice,
+        color: Boolean(output.isTTY),
+        width: output.columns
+      }));
     };
     const cleanup = (submit: DjVoiceChooserSubmit) => {
       input.off("keypress", onKeypress);
@@ -576,7 +695,7 @@ export async function promptTasteMemory(options: Pick<WelcomeReadinessOptions, "
   return promptNumberedSurface({
     entries: tasteMemoryEntries,
     initialAction: "import",
-    render: (action) => renderTasteMemorySurface(options, { selectedAction: action })
+    render: (action, renderOptions) => renderTasteMemorySurface(options, { ...renderOptions, selectedAction: action })
   });
 }
 
@@ -689,7 +808,7 @@ export function applyTasteMemoryKey(
 function promptNumberedSurface<TAction extends string>(options: {
   entries: Array<{ action: TAction; label: string }>;
   initialAction: TAction;
-  render: (selectedAction: TAction) => string;
+  render: (selectedAction: TAction, renderOptions: TuiRenderOptions) => string;
 }): Promise<TAction> {
   return new Promise((resolve) => {
     let selectedAction = options.initialAction;
@@ -700,7 +819,10 @@ function promptNumberedSurface<TAction extends string>(options: {
     const render = () => {
       output.write("\x1B[?25l");
       output.write("\x1B[H\x1B[2J");
-      output.write(options.render(selectedAction));
+      output.write(options.render(selectedAction, {
+        color: Boolean(output.isTTY),
+        width: output.columns
+      }));
     };
     const cleanup = (action: TAction) => {
       input.off("keypress", onKeypress);
@@ -1093,7 +1215,16 @@ function buildCalendarReadiness(config: PockedioConfig): WelcomeReadinessItem {
   };
 }
 
-function formatHubEntry(selected: boolean, index: number, label: string, description: string): string {
+function formatHubEntry(selected: boolean, index: number, label: string, description: string, options: TuiRenderOptions = {}): string {
+  if (options.color) {
+    return renderTuiRow({
+      marker: selected ? ">" : " ",
+      label: `${index}.`,
+      text: `${label.padEnd(24)} ${description}`,
+      selected,
+      accent: selected ? "playback" : "dim"
+    }, options);
+  }
   return formatSelectableLine(selected, `${selected ? ">" : " "} ${`${index}. ${label}`.padEnd(27)} ${description}`);
 }
 
@@ -1101,26 +1232,129 @@ function formatNumberedAction(selected: boolean, index: number, label: string): 
   return formatSelectableLine(selected, `${selected ? ">" : " "} ${index}. ${label}`);
 }
 
+function formatSetupSummaryLine(readiness: WelcomeReadiness, options: TuiRenderOptions = {}): string {
+  const missing = readiness.items.filter((item) => !item.ok).map((item) => item.label);
+  if (missing.length === 0) {
+    return renderTuiBulletLine("Ready for a listening session.", options);
+  }
+  return renderTuiBulletLine(`Pockedio is almost ready. ${missing.join(", ")} ${missing.length === 1 ? "needs" : "need"} attention.`, options);
+}
+
+function formatLlmSetupSummaryLine(
+  keySource: ReturnType<typeof getLlmKeySource>,
+  apiKeyEnv: string,
+  options: TuiRenderOptions = {}
+): string {
+  if (keySource === "missing") {
+    return renderTuiBulletLine(`LLM needs an API key before recommendations and DJ chat can run. Expected ${apiKeyEnv}.`, options);
+  }
+  return renderTuiBulletLine("LLM is ready for recommendations, chat, and DJ copy.", options);
+}
+
+function formatLlmProviderSummaryLine(
+  providerId: LlmProviderId,
+  keySource: ReturnType<typeof getLlmKeySource>,
+  apiKeyEnv: string,
+  options: TuiRenderOptions = {}
+): string {
+  if (providerId === "local_vllm") {
+    return renderTuiBulletLine("Local vLLM keeps model traffic on your machine when the server is running.", options);
+  }
+  if (keySource === "missing") {
+    return renderTuiBulletLine(`This provider needs an API key before use. Expected ${apiKeyEnv}.`, options);
+  }
+  return renderTuiBulletLine("This provider is ready to test with the current credentials.", options);
+}
+
+function formatProviderTitle(label: string): string {
+  return `${label.toUpperCase()} SETUP`;
+}
+
+function formatVoiceSetupSummaryLine(
+  config: PockedioConfig,
+  platform: NodeJS.Platform,
+  fishConfigured: boolean,
+  options: TuiRenderOptions = {}
+): string {
+  if (config.tts.provider === "text") {
+    return renderTuiBulletLine("Spoken DJ audio is off. Pockedio can still write DJ notes.", options);
+  }
+  if (fishConfigured || config.tts.provider === "fish") {
+    return renderTuiBulletLine("Fish TTS is ready for generated Mina or Nova voice.", options);
+  }
+  if (platform === "darwin") {
+    return renderTuiBulletLine("Built-in macOS voice is ready. Fish TTS can add Mina or Nova later.", options);
+  }
+  return renderTuiBulletLine("Spoken DJ audio needs Fish TTS on this platform.", options);
+}
+
+function formatScheduledDjSummary(config: PockedioConfig): string {
+  const morning = config.dj.schedule.morning;
+  const evening = config.dj.schedule.evening;
+  if (!morning.enabled && !evening.enabled) {
+    return "Off";
+  }
+
+  const parts = [];
+  parts.push(morning.enabled ? `Morning DJ ${morning.playTime}` : "Morning off");
+  parts.push(evening.enabled ? `Evening DJ ${evening.playTime}` : "Evening off");
+  return parts.join(", ");
+}
+
+function formatSetupConnectionAction(
+  selected: boolean,
+  index: number,
+  label: string,
+  description: string,
+  options: TuiRenderOptions = {}
+): string {
+  if (options.color) {
+    return renderTuiRow({
+      marker: selected ? ">" : " ",
+      label: `${index}.`,
+      text: `${label.padEnd(29)} ${description}`,
+      selected,
+      accent: selected ? "playback" : "dim"
+    }, options);
+  }
+  const marker = selected ? "▌ >" : "   ";
+  const actionLabel = `${index}. ${label}`.padEnd(32);
+  return formatSelectableLine(selected, `${marker} ${actionLabel} ${description}`);
+}
+
 function formatVoiceChoiceLine(
   selected: boolean,
   index: number,
   label: string,
   status: string,
-  description: string
+  description: string,
+  options: TuiRenderOptions = {}
 ): string {
-  return formatSelectableLine(selected, `${selected ? ">" : " "} ${`${index}. ${label}`.padEnd(12)} ${status.padEnd(23)} ${description}`);
+  if (options.color) {
+    return renderTuiRow({
+      marker: selected ? ">" : " ",
+      label: `${index}.`,
+      text: `${label.padEnd(12)} ${status.padEnd(23)} ${description}`,
+      selected,
+      accent: selected ? "playback" : "dim"
+    }, options);
+  }
+  return formatSelectableLine(selected, `${selected ? "▌ >" : "   "} ${`${index}. ${label}`.padEnd(12)} ${status.padEnd(23)} ${description}`);
 }
 
 function formatSelectableLine(selected: boolean, line: string): string {
   return selected ? `\x1B[7m${line}\x1B[0m` : line;
 }
 
-function formatReadinessItem(item: WelcomeReadinessItem): string {
-  return `  ${item.label.padEnd(12)} ${item.value}`;
+function formatReadinessItem(item: WelcomeReadinessItem, options: TuiRenderOptions = {}): string {
+  if (!options.color) {
+    return `  ${item.label.padEnd(12)} ${item.value}`;
+  }
+  return formatSetupLine(item.label, item.value, { ...options, accent: item.ok ? "dj" : "danger" });
 }
 
-function formatSetupLine(label: string, value: string): string {
-  return `${label.padEnd(16)}${value}`;
+function formatSetupLine(label: string, value: string, options: TuiRenderOptions = {}): string {
+  return renderTuiKeyValue(label, value, 15, options);
 }
 
 function formatProviderLine(label: string, value: string): string {
@@ -1214,11 +1448,11 @@ function currentVoiceLabel(
   return isCurrent ? `${status}, current` : status;
 }
 
-function formatTasteLine(label: string, value: string, width: number): string {
-  return `${label.padEnd(width)}${value}`;
+function formatTasteLine(label: string, value: string, width: number, options: TuiRenderOptions = {}): string {
+  return renderTuiKeyValue(label, value, width - 1, options);
 }
 
-function getLlmProviderEntries(providerId: LlmProviderId): Array<{ action: LlmProviderAction; label: string }> {
+function getLlmProviderEntries(providerId: LlmProviderId): Array<{ action: LlmProviderAction; label: string; description: string }> {
   if (providerId === "local_vllm") {
     return localVllmProviderEntries;
   }
