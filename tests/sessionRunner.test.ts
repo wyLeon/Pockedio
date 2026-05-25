@@ -206,7 +206,7 @@ describe("runSessionTurn", () => {
     expect(guide).toContain("stop");
     expect(guide).toContain("menu        return to main menu");
     expect(guide).toContain("what's playing?");
-    expect(guide).toContain("q           quit while processing");
+    expect(guide).toContain("q           cancel processing");
     expect(guide).not.toContain("████");
   });
 
@@ -359,8 +359,8 @@ describe("runSessionTurn", () => {
     })).toBe("Starting DJ program...");
   });
 
-  it("formats processing status with q as the quit key", () => {
-    expect(formatInteractiveStatusDisplayText("Thinking...")).toBe("Thinking...  press q to quit");
+  it("formats processing status with q as the cancel key", () => {
+    expect(formatInteractiveStatusDisplayText("Thinking...")).toBe("Thinking...  press q to cancel");
   });
 
   it("clears the interactive status before printing turn output", () => {
@@ -1955,7 +1955,7 @@ describe("runSessionTurn", () => {
     expect(state.suppressIdleInterruptUntil).toBe(0);
   });
 
-  it("lets q quit while a turn is processing", async () => {
+  it("lets q cancel a turn while keeping the session open", async () => {
     const input = new EventEmitter() as EventEmitter & {
       isTTY: boolean;
       isRaw: boolean;
@@ -1965,7 +1965,6 @@ describe("runSessionTurn", () => {
     };
     const playbackState: InteractivePlaybackState = {};
     const activeTurnController = new AbortController();
-    let stopped = false;
     let closed = false;
     let paused = false;
     input.isTTY = true;
@@ -1977,13 +1976,6 @@ describe("runSessionTurn", () => {
     input.pause = () => {
       paused = true;
       return input;
-    };
-    playbackState.activePlayback = {
-      target: "track-1",
-      done: new Promise(() => undefined),
-      stop: () => {
-        stopped = true;
-      }
     };
     const state: InteractiveInterruptState = {
       activeTurnController,
@@ -2001,10 +1993,9 @@ describe("runSessionTurn", () => {
     cleanup();
 
     expect(activeTurnController.signal.aborted).toBe(true);
-    expect(stopped).toBe(true);
-    expect(closed).toBe(true);
+    expect(closed).toBe(false);
     expect(playbackState.activePlayback).toBeUndefined();
-    expect(state.exiting).toBe(true);
+    expect(state.exiting).toBe(false);
     expect(input.isRaw).toBe(false);
     expect(paused).toBe(true);
   });

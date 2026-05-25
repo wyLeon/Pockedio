@@ -214,7 +214,7 @@ export function formatInteractiveStartupGuide(displayName = "Pockedio", setupNot
     renderTuiCommandRow("queue", "show queue", 11, options),
     renderTuiCommandRow("stop", "stop playback", 11, options),
     renderTuiCommandRow("menu", "return to main menu", 11, options),
-    renderTuiCommandRow("q", "quit while processing", 11, options),
+    renderTuiCommandRow("q", "cancel processing", 11, options),
     "",
     renderTuiSectionLabel("SETUP", { ...options, accent: "playback" }),
     renderTuiCommandRow("setup", "open setup and connections", 11, options),
@@ -1096,7 +1096,7 @@ function createInteractiveStatusWriter(output: typeof defaultOutput): StatusWrit
 }
 
 export function formatInteractiveStatusDisplayText(text: string): string {
-  return `${text}  press q to quit`;
+  return `${text}  press q to cancel`;
 }
 
 function createTurnScopedStatusWriter(baseWriter: StatusWriter, initialText?: string): { writeStatus: StatusWriter; finish: () => void } {
@@ -3023,7 +3023,7 @@ export function watchProcessingQuitKeypress(input: typeof defaultInput, state: I
   let stopped = false;
   const onKeypress = (_value: string, key: Key) => {
     if (key.name === "q" && !key.ctrl && !key.meta) {
-      handleInteractiveProcessingQuit(state);
+      cancelInteractiveProcessing(state);
     }
   };
 
@@ -3043,11 +3043,15 @@ export function watchProcessingQuitKeypress(input: typeof defaultInput, state: I
   };
 }
 
-export function handleInteractiveProcessingQuit(state: InteractiveInterruptState): void {
+export function cancelInteractiveProcessing(state: Pick<InteractiveInterruptState, "activeTurnController">): void {
   const activeTurnController = state.activeTurnController;
   if (activeTurnController && !activeTurnController.signal.aborted) {
     activeTurnController.abort();
   }
+}
+
+export function handleInteractiveProcessingQuit(state: InteractiveInterruptState): void {
+  cancelInteractiveProcessing(state);
   state.exiting = true;
   stopPlaybackForSessionExit(state.playbackState);
   state.closeReadline();
