@@ -238,6 +238,7 @@ describe("runSessionTurn", () => {
 
     expect(formatInteractiveStartupDisplayName(config, "darwin")).toBe("Sable");
     expect(formatRuntimeDjDisplayName(config, "darwin")).toBe("Sable");
+    expect(formatRuntimeDjDisplayName(config, "linux")).toBe("Sable");
 
     config.tts.provider = "fish";
     config.tts.fishVoice = "nova";
@@ -5249,6 +5250,10 @@ describe("runSessionTurn", () => {
       provider: new FakeProvider(),
       llm: fakeLlm()
     });
+
+    for (let attempt = 0; attempt < 10 && !transitionSignal; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
 
     await runSessionTurn({
       input: "exit",

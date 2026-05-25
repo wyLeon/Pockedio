@@ -267,7 +267,7 @@ describe("scheduled DJ jobs", () => {
       synthesizeFishAudio: async (_config, text) => ({ ok: true, audioPath: `/tmp/${text.length}.wav`, latencyMs: 5 }),
       playFile: async (filePath) => ({ ok: true, target: filePath, exitCode: 0, signal: null }),
       playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null }),
-      promptPlayback: async () => "play"
+      promptPlayback: async () => "later"
     });
 
     expect(prompts[0]).toContain("Keep it under 70 words.");
@@ -308,6 +308,12 @@ describe("scheduled DJ jobs", () => {
       synthesizeFishAudio: async (_config, text) => ({ ok: true, audioPath: `/tmp/${text.length}.wav`, latencyMs: 5 }),
       playFile: async (filePath) => ({ ok: true, target: filePath, exitCode: 0, signal: null }),
       playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null }),
+      startDuckedIntroPlayback: async (url, introFilePath) => ({
+        target: url,
+        introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+        done: Promise.resolve({ ok: true, target: url, exitCode: 0, signal: null }),
+        stop: () => undefined
+      }),
       promptPlayback: async () => "play"
     });
 

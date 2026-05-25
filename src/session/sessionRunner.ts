@@ -244,7 +244,7 @@ export function formatRuntimeDjDisplayName(config: PockedioConfig, platform: Nod
     return formatFishVoiceName(config.tts.fishVoice);
   }
   if (config.tts.provider === "macos") {
-    return platform === "darwin" ? formatMacosVoiceName(config.tts.macosVoice) : config.dj.displayName;
+    return formatMacosVoiceName(config.tts.macosVoice);
   }
   if (config.tts.provider === "text") {
     return "Pockedio";
