@@ -6,7 +6,7 @@ import { loadConfig, saveConfig } from "../src/config/load.js";
 import type { PockedioConfig } from "../src/config/schema.js";
 import { normalizeCalendarWarning, readCalendarContext, requestCalendarPermission } from "../src/context/calendar.js";
 import { buildContext } from "../src/context/contextBuilder.js";
-import { readDiaryContext, readDiaryContextWithLlmSummary, refreshDiaryHistoryMemory } from "../src/context/diary.js";
+import { rankDiaryMemoryItems, readDiaryContext, readDiaryContextWithLlmSummary, refreshDiaryHistoryMemory } from "../src/context/diary.js";
 import { formatRefreshContextResult, refreshContext } from "../src/context/refreshContext.js";
 import { readWeatherContext } from "../src/context/weather.js";
 import { withDatabase } from "../src/db/database.js";
@@ -392,9 +392,38 @@ describe("diary adapter", () => {
       memoryQuery: "rainy focus station",
       calendarRunner: async () => ({ stdout: "", stderr: "", timedOut: false, code: 0 })
     });
+    const moodContext = await buildContext(config, {
+      llm,
+      memoryQuery: "I feel exhausted and need a station",
+      calendarRunner: async () => ({ stdout: "", stderr: "", timedOut: false, code: 0 })
+    });
 
     expect(reused.summariesReused).toBe(2);
     expect(context.memorySummaries[0]?.content).toContain("Rainy writing day");
+    expect(moodContext.memorySummaries[0]?.content).toContain("Tired workday");
+  });
+
+  it("ranks diary memories by mood-tag intent even when query words do not match literally", () => {
+    const ranked = rankDiaryMemoryItems([
+      {
+        id: "rainy",
+        kind: "diary",
+        sourceSessionId: null,
+        content: "Diary memory: Rainy writing day. Listening fit: soft focus music.",
+        metadata: { moodTags: ["calm"], lifeContextTags: ["work"] },
+        createdAt: "2026-05-02T10:00:00.000Z"
+      },
+      {
+        id: "tired",
+        kind: "diary",
+        sourceSessionId: null,
+        content: "Diary memory: Tired workday. Listening fit: warm recovery music.",
+        metadata: { moodTags: ["tired"], lifeContextTags: ["recovery"] },
+        createdAt: "2026-05-01T10:00:00.000Z"
+      }
+    ], "I feel exhausted and need something gentle", 1);
+
+    expect(ranked[0]?.id).toBe("tired");
   });
 });
 

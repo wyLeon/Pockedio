@@ -3252,6 +3252,41 @@ describe("runSessionTurn", () => {
     expect(prompts[0]).toContain("Calendar listening hint:");
   });
 
+  it("uses diary context for personal mood conversation without starting playback", async () => {
+    const config = makeConfig();
+    const prompts: string[] = [];
+    const result = await runSessionTurn({
+      input: "The diary mood still feels heavy.",
+      config,
+      playbackState: {},
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I hear the heaviness. Keep this gentle and close, without turning it into advice.", prompts),
+      buildContext: async () => ({
+        diary: {
+          filePath: "/tmp/diary/2026-05-20.md",
+          sourceMtime: "2026-05-20T10:00:00.000Z",
+          summary: "Recent diary summary: loss has made the week feel heavy and quiet.",
+          listeningHint: "Favor warm, spacious songs that can hold grief without becoming too bleak."
+        },
+        memorySummaries: [{
+          id: "memory_1",
+          kind: "diary",
+          sourceSessionId: null,
+          content: "Diary memory: A reflective night about missing family. Listening fit: warm spacious music.",
+          metadata: { source: "diary", moodTags: ["reflective"] },
+          createdAt: "2026-05-20T10:00:00.000Z"
+        }],
+        personality: config.personality
+      })
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.station).toBeUndefined();
+    expect(prompts[0]).toContain("Diary summary: Recent diary summary: loss has made the week feel heavy and quiet.");
+    expect(prompts[0]).toContain("Diary listening hint: Favor warm, spacious songs");
+    expect(prompts[0]).toContain("Diary memory summaries: Diary memory: A reflective night about missing family.");
+  });
+
   it("does not address the user by the selected DJ name during personal conversation", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";

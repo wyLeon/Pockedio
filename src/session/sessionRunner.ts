@@ -924,7 +924,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent: { type: "conversation", confidence: "high" }, response, shouldExit: false };
     }
 
-    const conversationContext = isContextualCalendarConversation(userText)
+    const conversationContext = shouldReadConversationContext(userText)
       ? await withStatus(writeStatus, "Reading your context...", () => (input.buildContext ?? buildContext)(config, { memoryQuery: userText }), signal)
       : undefined;
     if (conversationContext) {
@@ -2471,6 +2471,7 @@ function formatConversationPrompt(
     formatLocalTimeContextInstruction(context),
     formatConversationTasteContext(config, userText),
     formatConversationCalendarContext(context),
+    formatConversationDiaryContext(context),
     formatConversationPlaybackContext(playbackState),
     `User: ${userText}`
   ].filter(Boolean).join("\n");
@@ -2588,10 +2589,36 @@ function formatConversationCalendarContext(context: Partial<PockedioContext> | u
   ].join("\n");
 }
 
+function formatConversationDiaryContext(context: Partial<PockedioContext> | undefined): string {
+  if (!context?.diary) {
+    return "";
+  }
+  const diaryMemories = (context.memorySummaries ?? [])
+    .filter((memory) => memory.kind === "diary" || memory.content.startsWith("Diary memory:"))
+    .slice(0, 3)
+    .map((memory) => memory.content.replace(/\s+/g, " ").trim());
+  return [
+    `Diary summary: ${context.diary.summary}`,
+    `Diary listening hint: ${context.diary.listeningHint}`,
+    diaryMemories.length > 0 ? `Diary memory summaries: ${diaryMemories.join(" | ")}` : "",
+    "Diary context is recent context, not proof of the user's current schedule or identity. Use it lightly and do not sound clinical."
+  ].filter(Boolean).join("\n");
+}
+
+function shouldReadConversationContext(text: string): boolean {
+  return isContextualCalendarConversation(text) || isContextualPersonalConversation(text);
+}
+
 function isContextualCalendarConversation(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return /\b(today|this morning|this afternoon|tonight|my day|my schedule|calendar|meeting|meetings|focus block|work block|get through|afternoon|evening|morning)\b/.test(normalized)
     && /\b(how|what|help|suggest|fit|fits|should|listen|music|feel|look|plan|through)\b/.test(normalized);
+}
+
+function isContextualPersonalConversation(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return /\b(diary|journal|memory|mood|grief|loss|sad|heavy|tired|exhausted|stressed|reflective)\b/.test(normalized)
+    && /\b(diary|journal|mood|feel|feels|felt|music|song|songs|listen|hear|station|set|fit|fits|should)\b/.test(normalized);
 }
 
 function isTasteInsightQuestion(text: string): boolean {

@@ -205,10 +205,12 @@ export function rankDiaryMemoryItems<T extends { content: string; metadata: unkn
   limit = 5
 ): T[] {
   const queryTokens = tokenizeForDiaryRank(query);
+  const queryMoodTags = extractMoodTags(query);
+  const queryLifeContextTags = extractLifeContextTags(query);
   return items
     .map((item, index) => ({
       item,
-      score: scoreDiaryMemory(item, queryTokens, index)
+      score: scoreDiaryMemory(item, queryTokens, queryMoodTags, queryLifeContextTags, index)
     }))
     .sort((a, b) => b.score - a.score || b.item.createdAt.localeCompare(a.item.createdAt))
     .slice(0, limit)
@@ -367,19 +369,31 @@ function extractTags(text: string, patterns: Record<string, RegExp>): string[] {
 function scoreDiaryMemory(
   item: { content: string; metadata: unknown },
   queryTokens: string[],
+  queryMoodTags: string[],
+  queryLifeContextTags: string[],
   index: number
 ): number {
   const metadata = isRecord(item.metadata) ? item.metadata : {};
+  const moodTags = Array.isArray(metadata.moodTags) ? metadata.moodTags.filter((tag): tag is string => typeof tag === "string") : [];
+  const lifeContextTags = Array.isArray(metadata.lifeContextTags) ? metadata.lifeContextTags.filter((tag): tag is string => typeof tag === "string") : [];
   const searchable = [
     item.content,
     metadata.date,
     metadata.month,
     metadata.musicHint,
-    ...(Array.isArray(metadata.moodTags) ? metadata.moodTags : []),
-    ...(Array.isArray(metadata.lifeContextTags) ? metadata.lifeContextTags : [])
+    ...moodTags,
+    ...lifeContextTags
   ].join(" ").toLowerCase();
   const queryScore = queryTokens.reduce((score, token) => score + (searchable.includes(token) ? 4 : 0), 0);
-  return queryScore + Math.max(0, 3 - index * 0.1);
+  const moodScore = queryMoodTags.reduce(
+    (score, tag, tagIndex) => score + (moodTags.includes(tag) ? Math.max(3, 8 - tagIndex) : 0),
+    0
+  );
+  const lifeContextScore = queryLifeContextTags.reduce(
+    (score, tag) => score + (lifeContextTags.includes(tag) ? 4 : 0),
+    0
+  );
+  return queryScore + moodScore + lifeContextScore + Math.max(0, 3 - index * 0.1);
 }
 
 function tokenizeForDiaryRank(query: string): string[] {
