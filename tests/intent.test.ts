@@ -121,6 +121,14 @@ describe("parseIntent", () => {
       type: "feedback_less_like_this",
       confidence: "high"
     });
+    await expect(parseIntent("dont like this one")).resolves.toEqual({
+      type: "feedback_less_like_this",
+      confidence: "high"
+    });
+    await expect(parseIntent("don't like this one")).resolves.toEqual({
+      type: "feedback_less_like_this",
+      confidence: "high"
+    });
     await expect(parseIntent("favorite this")).resolves.toEqual({
       type: "feedback_favorite",
       confidence: "high"

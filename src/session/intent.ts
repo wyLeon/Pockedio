@@ -179,6 +179,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(less like this|less of this|not so much like this)\b/.test(text)) {
     return { type: "feedback_less_like_this", confidence: "high" };
   }
+  if (isNegatedCurrentLikeText(text)) {
+    return { type: "feedback_less_like_this", confidence: "high" };
+  }
   if (/\b(save this vibe|remember this vibe|keep this as a vibe)\b/.test(text)) {
     return { type: "feedback_save_vibe", confidence: "high" };
   }
@@ -227,6 +230,11 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   }
 
   return { type: "conversation", confidence: "medium" };
+}
+
+function isNegatedCurrentLikeText(text: string): boolean {
+  return /\b(don't|dont|do not|not|isn'?t|is not)\b.{0,24}\b(like|love|enjoy|feeling)\b.{0,16}\b(this|it|this one|this song|this track|this pick)\b/.test(text)
+    || /\b(this|it|this one|this song|this track|this pick)\b.{0,16}\b(isn'?t|is not)\b.{0,16}\b(working|landing|good|right)\b/.test(text);
 }
 
 function isPauseText(text: string): boolean {

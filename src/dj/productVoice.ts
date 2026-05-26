@@ -73,8 +73,8 @@ function formatTrackTitle(track: StationTrack): string {
 
 function formatListeningDirection(context: FeedbackConfirmationContext): string {
   const rationale = context.track?.rationale;
-  if (rationale && isHumanFacingRationale(rationale)) {
-    return ` in this ${rationale.toLowerCase()} lane`;
+  if (rationale && isHumanFacingRationale(rationale) && isConciseRationaleFragment(rationale)) {
+    return ` in this ${rewriteListenerReferences(rationale).toLowerCase()} lane`;
   }
   const stationRequest = context.stationRequest ? formatStationRequest(context.stationRequest) : "";
   if (stationRequest) {
@@ -85,6 +85,25 @@ function formatListeningDirection(context: FeedbackConfirmationContext): string 
 
 function isHumanFacingRationale(rationale: string): boolean {
   return !/\b(deterministic|fallback|llm|unavailable|local|signal|weight|confidence)\b/i.test(rationale);
+}
+
+function isConciseRationaleFragment(rationale: string): boolean {
+  const cleaned = rationale.replace(/\s+/g, " ").trim();
+  return cleaned.split(/\s+/).length <= 6
+    && !/[.!?;:]/.test(cleaned)
+    && !/\b(the listener|listener['’]s|the user|user['’]s)\b/i.test(cleaned);
+}
+
+function rewriteListenerReferences(text: string): string {
+  return text
+    .replace(/\buser taste\b/gi, "your taste")
+    .replace(/\buser preferences\b/gi, "your preferences")
+    .replace(/\buser request\b/gi, "your request")
+    .replace(/\bthe user['’]s\b/gi, "your")
+    .replace(/\buser['’]s\b/gi, "your")
+    .replace(/\bthe user\b/gi, "you")
+    .replace(/\blistener['’]s\b/gi, "your")
+    .replace(/\bthe listener\b/gi, "you");
 }
 
 function formatStationRequest(request: string): string {

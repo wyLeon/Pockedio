@@ -2488,6 +2488,74 @@ describe("runSessionTurn", () => {
     ]);
   });
 
+  it("treats negated like-this feedback as less-like-this during playback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    let stationPlanCalls = 0;
+    const llm: LlmClient = {
+      generateJson: async () => {
+        stationPlanCalls += 1;
+        if (stationPlanCalls === 1) {
+          return {
+            ok: true as const,
+            value: {
+              tracks: [
+                { title: "Superheroes", artist: "Chief Keef", rationale: "driving piano and a husky vocal deliver a steady, forward-moving energy that aligns with the listener's post-exercise mindset" },
+                { title: "Sparks", artist: "Coldplay", rationale: "steady piano" },
+                { title: "Bloom", artist: "The Paper Kites", rationale: "soft acoustic drift" },
+                { title: "Weightless Part 1", artist: "Marconi Union", rationale: "quiet ambient landing" },
+                { title: "Run", artist: "Snow Patrol", rationale: "anthemic lift" }
+              ]
+            }
+          };
+        }
+        return {
+          ok: true as const,
+          value: {
+            tracks: [
+              { title: "Soft Reset", artist: "Reshape Artist", rationale: "less like current track" },
+              { title: "Low Light", artist: "Reshape Artist", rationale: "less like current track" },
+              { title: "Easy Turn", artist: "Reshape Artist", rationale: "less like current track" },
+              { title: "Calm Road", artist: "Reshape Artist", rationale: "less like current track" },
+              { title: "Quiet Finish", artist: "Reshape Artist", rationale: "less like current track" }
+            ]
+          }
+        };
+      },
+      generateText: async () => ({ ok: true as const, value: "Tonight's set stays crisp and nocturnal." })
+    };
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "dont like this one",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    expect(result.intent.type).toBe("feedback_less_like_this");
+    expect(result.response).toContain("I’ll ease away from");
+    expect(result.response).toContain("I reshaped the rest of the queue");
+    expect(result.response).not.toContain("I’ll lean more toward");
+    expect(result.response).not.toContain("listener's");
+    expect(result.response).not.toContain("the user's");
+  });
+
   it("reshapes the remaining queue for grief-informed tone changes during playback", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
