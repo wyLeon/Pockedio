@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
+import { runMigrations } from "../src/db/migrations.js";
+import { withDatabase } from "../src/db/database.js";
 import { createLlmClient } from "../src/llm/openaiClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
 import { generateStation, type StationLlmClient } from "../src/station/stationGenerator.js";
@@ -310,6 +312,102 @@ describe("generateStation", () => {
 
     expect(observedPrompt).toContain("Artists: Keren Ann, Norah Jones");
     expect(observedPrompt).not.toContain("Top Raw Track");
+  });
+
+  it("passes relevant imported taste candidates into station planning", async () => {
+    const config = makeConfig();
+    runMigrations(config);
+    withDatabase(config, (db) => {
+      db.prepare(`
+        INSERT INTO taste_items (
+          dedupe_key, title, artist, album, source, playlist, import_source, provider,
+          provider_track_id, search_text, first_imported_at, last_imported_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "nora-focus",
+        "Sunrise Focus",
+        "Nora Keys",
+        "Morning Study",
+        "netease",
+        "deep focus piano",
+        "netease:playlist:1",
+        "netease",
+        null,
+        "sunrise focus nora keys morning study deep focus piano netease",
+        "2026-05-25T00:00:00.000Z",
+        "2026-05-25T00:00:00.000Z"
+      );
+    });
+    const provider = new FakeProvider();
+    let observedPrompt = "";
+    const llm: StationLlmClient = {
+      generateJson: async (prompt) => {
+        observedPrompt = prompt;
+        return {
+          ok: true,
+          value: {
+            tracks: [
+              { title: "A", artist: "Artist A", rationale: "first" },
+              { title: "B", artist: "Artist B", rationale: "second" },
+              { title: "C", artist: "Artist C", rationale: "third" },
+              { title: "D", artist: "Artist D", rationale: "fourth" },
+              { title: "E", artist: "Artist E", rationale: "fifth" }
+            ]
+          }
+        };
+      },
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    await generateStation({
+      request: "play focus piano",
+      config,
+      provider,
+      llm
+    });
+
+    expect(observedPrompt).toContain("Relevant imported taste candidates:");
+    expect(observedPrompt).toContain("Sunrise Focus - Nora Keys");
+    expect(observedPrompt).toContain("playlist deep focus piano");
+  });
+
+  it("uses relevant imported taste candidates in fallback search seeds", async () => {
+    const config = makeConfig();
+    runMigrations(config);
+    withDatabase(config, (db) => {
+      db.prepare(`
+        INSERT INTO taste_items (
+          dedupe_key, title, artist, album, source, playlist, import_source, provider,
+          provider_track_id, search_text, first_imported_at, last_imported_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "nora-focus",
+        "Sunrise Focus",
+        "Nora Keys",
+        "Morning Study",
+        "netease",
+        "deep focus piano",
+        "netease:playlist:1",
+        "netease",
+        null,
+        "sunrise focus nora keys morning study deep focus piano netease",
+        "2026-05-25T00:00:00.000Z",
+        "2026-05-25T00:00:00.000Z"
+      );
+    });
+    const provider = new FakeProvider();
+    const llm = createLlmClient(config, {});
+
+    await generateStation({
+      request: "play focus piano",
+      config,
+      provider,
+      llm
+    });
+
+    expect(provider.searches.map((query) => query.keyword).join("\n")).toContain("Sunrise Focus Nora Keys");
   });
 
   it("uses feedback signals in fallback searches and filters banned artists", async () => {

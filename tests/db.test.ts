@@ -47,6 +47,7 @@ describe("database migrations", () => {
       "settings",
       "station_tracks",
       "taste_imports",
+      "taste_items",
       "taste_profile_snapshots",
       "taste_signals"
     ]);

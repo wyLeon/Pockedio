@@ -6,6 +6,7 @@ import { formatCalendarStateForPrompt } from "../context/calendar.js";
 import type { PockedioContext } from "../context/contextBuilder.js";
 import type { MusicProvider, MusicTrackCandidate, PlayableTrack } from "../providers/musicProvider.js";
 import { NetEaseProvider } from "../providers/netease.js";
+import { getTasteCandidates, type TasteCandidate } from "../taste/tasteItems.js";
 import { generatedTasteProfileEnd, generatedTasteProfileStart } from "../taste/tasteMarkdown.js";
 import type { GeneratedStation, PlannedStationTrack, StationTrack } from "./stationTypes.js";
 
@@ -58,9 +59,10 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
     };
   }
   const tasteSummary = readTasteSummary(input.config.paths.taste, input.context?.tasteProfile?.summary);
-  const plan = await planTracks(input, llm, tasteSummary);
+  const tasteCandidates = getTasteCandidates(input.config, input.request, input.context?.tasteSignals ?? []);
+  const plan = await planTracks(input, llm, tasteSummary, tasteCandidates);
   throwIfAborted(input.signal);
-  const plannedTracks = applyTasteSignalConstraints(plan.tracks, input, tasteSummary);
+  const plannedTracks = applyTasteSignalConstraints(plan.tracks, input, tasteSummary, tasteCandidates);
   const avoidKeys = buildAvoidTrackKeys(input.avoidTracks ?? [], input.request);
   const usedKeys = new Set<string>();
   const tracks: StationTrack[] = [];
@@ -157,9 +159,10 @@ function normalizeComparableText(text: string): string {
 async function planTracks(
   input: GenerateStationInput,
   llm: StationLlmClient,
-  tasteSummary: string
+  tasteSummary: string,
+  tasteCandidates: TasteCandidate[]
 ): Promise<TrackPlan> {
-  const prompt = buildStationPrompt(input, tasteSummary);
+  const prompt = buildStationPrompt(input, tasteSummary, tasteCandidates);
   const llmResult = await llm.generateJson<StationJsonResponse>(prompt, stationSchema, { signal: input.signal });
   if (llmResult.ok) {
     const parsed = parseStationTracks(llmResult.value);
@@ -168,10 +171,10 @@ async function planTracks(
     }
   }
 
-  return { source: "fallback", tracks: fallbackTracksWithTasteSignals(input.request, tasteSummary, input.context?.tasteSignals ?? []) };
+  return { source: "fallback", tracks: fallbackTracksWithTasteSignals(input.request, tasteSummary, input.context?.tasteSignals ?? [], tasteCandidates) };
 }
 
-function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): string {
+function buildStationPrompt(input: GenerateStationInput, tasteSummary: string, tasteCandidates: TasteCandidate[]): string {
   const context = input.context;
   return [
     "Create exactly five track plans for Pockedio.",
@@ -183,6 +186,7 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     `User request: ${input.request}`,
     `Taste summary: ${tasteSummary}`,
     `Generated taste profile: ${input.context?.tasteProfile?.summary ?? "No generated taste profile yet."}`,
+    `Relevant imported taste candidates: ${formatTasteCandidatesForPrompt(tasteCandidates)}`,
     `Relevant DJ memories: ${formatMemorySummariesForPrompt(context?.memorySummaries ?? [])}`,
     `Avoid guidance from memory: ${formatMemoryAvoidGuidanceForPrompt(context?.memorySummaries ?? [])}`,
     formatStationLocalTimeContext(context),
@@ -199,6 +203,22 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     `Recently played tracks to avoid unless explicitly requested: ${formatAvoidTracksForPrompt(input.avoidTracks ?? [])}`,
     "Return only JSON."
   ].join("\n");
+}
+
+function formatTasteCandidatesForPrompt(candidates: TasteCandidate[]): string {
+  if (candidates.length === 0) {
+    return "No request-matched imported playlist candidates.";
+  }
+  return candidates.slice(0, 12).map((candidate) => {
+    const details = [
+      candidate.album ? `album ${candidate.album}` : "",
+      candidate.playlist ? `playlist ${candidate.playlist}` : "",
+      candidate.source ? `source ${candidate.source}` : ""
+    ].filter(Boolean).join("; ");
+    return details
+      ? `${candidate.title} - ${candidate.artist} (${details})`
+      : `${candidate.title} - ${candidate.artist}`;
+  }).join(" | ");
 }
 
 function formatStationLocalTimeContext(context: GenerateStationInput["context"]): string {
@@ -337,7 +357,8 @@ function fallbackTracks(request: string, tasteSummary: string): PlannedStationTr
 function applyTasteSignalConstraints(
   tracks: PlannedStationTrack[],
   input: GenerateStationInput,
-  tasteSummary: string
+  tasteSummary: string,
+  tasteCandidates: TasteCandidate[] = []
 ): PlannedStationTrack[] {
   const signals = input.context?.tasteSignals ?? [];
   const bannedArtists = new Set(signals
@@ -356,7 +377,7 @@ function applyTasteSignalConstraints(
     return filtered.slice(0, 5);
   }
 
-  const fallback = fallbackTracksWithTasteSignals(input.request, tasteSummary, signals)
+  const fallback = fallbackTracksWithTasteSignals(input.request, tasteSummary, signals, tasteCandidates)
     .filter((track) => !bannedArtists.has(normalizeComparableText(track.artist)))
     .filter((track) => !bannedTracks.has(normalizeComparableText(`${track.title} - ${track.artist}`)));
   const seen = new Set(filtered.map((track) => normalizeSongKey(track.title, track.artist)));
@@ -378,7 +399,8 @@ function applyTasteSignalConstraints(
 function fallbackTracksWithTasteSignals(
   request: string,
   tasteSummary: string,
-  signals: NonNullable<PockedioContext["tasteSignals"]>
+  signals: NonNullable<PockedioContext["tasteSignals"]>,
+  tasteCandidates: TasteCandidate[] = []
 ): PlannedStationTrack[] {
   const positiveSeeds = signals
     .filter((signal) => signal.weight > 0 && (signal.signalType === "positive_seed" || signal.signalType === "favorite" || signal.signalType === "vibe_preset"))
@@ -386,11 +408,19 @@ function fallbackTracksWithTasteSignals(
     .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight))
     .map((signal) => signal.targetValue)
     .slice(0, 3);
-  if (positiveSeeds.length === 0) {
+  const candidateSeeds = tasteCandidates
+    .map((candidate) => `${candidate.title} ${candidate.artist}`.trim())
+    .slice(0, 3);
+  if (positiveSeeds.length === 0 && candidateSeeds.length === 0) {
     return fallbackTracks(request, tasteSummary);
   }
   const base = fallbackSearchQueries(request, tasteSummary);
-  const queries = [...positiveSeeds.map((seed) => `${normalizeRequestForSearch(request)} ${seed}`.trim()), ...base];
+  const requestSeed = normalizeRequestForSearch(request);
+  const queries = [
+    ...positiveSeeds.map((seed) => `${requestSeed} ${seed}`.trim()),
+    ...candidateSeeds.map((seed) => `${requestSeed} ${seed}`.trim()),
+    ...base
+  ];
   return queries.slice(0, 5).map((query) => ({
     title: query,
     artist: providerSearchArtist,

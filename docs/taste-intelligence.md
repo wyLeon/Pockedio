@@ -16,7 +16,7 @@ This is the most direct signal for musical preference. It can reveal:
 - differences between platforms, such as discovery playlists versus manually saved songs
 - disliked gaps, such as styles that appear in app history but were never collected
 
-The first version should treat exported music data as the primary taste seed. The product should keep raw imports separate from derived taste summaries so the system can regenerate better profiles later.
+The first version should treat exported music data as the primary taste seed. The product should keep raw imports separate from derived taste summaries so the system can regenerate better profiles later. Imported tracks should also be stored as structured local taste candidates, so station generation can retrieve request-relevant playlist evidence instead of relying only on a compact `taste.md` summary.
 
 ## Source 2: `taste.md`
 

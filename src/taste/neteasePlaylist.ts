@@ -12,6 +12,7 @@ type NetEasePlaylistTrackResponse = {
 };
 
 type NetEaseSong = {
+  id?: unknown;
   name?: unknown;
   ar?: unknown;
   artists?: unknown;
@@ -83,7 +84,8 @@ export function normalizeNetEasePlaylistRows(response: NetEasePlaylistTrackRespo
       album: normalizeAlbum(song) ?? "",
       source: "netease",
       playlist,
-      liked_at: ""
+      liked_at: "",
+      providerTrackId: valueToString(song.id) ?? undefined
     }];
   });
   return dedupeNetEasePlaylistRows(rows);

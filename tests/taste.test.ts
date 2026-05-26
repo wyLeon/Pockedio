@@ -71,6 +71,37 @@ describe("taste import", () => {
     expect(row.trackCount).toBe(3);
   });
 
+  it("upserts imported tracks into structured taste candidates", () => {
+    const config = makeConfig();
+    importTaste("tests/fixtures/taste-normalized.csv", config);
+    importTaste("tests/fixtures/taste-normalized.csv", config);
+
+    const rows = withDatabase(config, (db) => db.prepare(`
+      SELECT title, artist, album, source, playlist, import_source as importSource, search_text as searchText
+      FROM taste_items
+      ORDER BY title
+    `).all()) as Array<{
+      title: string;
+      artist: string;
+      album: string;
+      source: string;
+      playlist: string;
+      importSource: string;
+      searchText: string;
+    }>;
+
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({
+      title: "An Ending (Ascent)",
+      artist: "Brian Eno",
+      album: "Apollo",
+      source: "apple_music",
+      playlist: "ambient reset",
+      importSource: "tests/fixtures/taste-normalized.csv"
+    });
+    expect(rows[0].searchText).toContain("an ending ascent brian eno apollo ambient reset apple music");
+  });
+
   it("merges additional imports without losing previous playlist signals or user notes", async () => {
     const config = makeConfig();
     importTaste("tests/fixtures/taste-normalized.csv", config);

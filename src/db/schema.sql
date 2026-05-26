@@ -56,6 +56,21 @@ CREATE TABLE IF NOT EXISTS taste_profile_snapshots (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS taste_items (
+  dedupe_key TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  album TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT '',
+  playlist TEXT NOT NULL DEFAULT '',
+  import_source TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT '',
+  provider_track_id TEXT,
+  search_text TEXT NOT NULL,
+  first_imported_at TEXT NOT NULL,
+  last_imported_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memory_items (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('agenda', 'diary', 'taste', 'feedback', 'summary', 'personality')),
@@ -168,6 +183,9 @@ CREATE INDEX IF NOT EXISTS idx_station_tracks_session_position ON station_tracks
 CREATE INDEX IF NOT EXISTS idx_taste_signals_type_created ON taste_signals(signal_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_taste_signals_target ON taste_signals(target_type, target_value);
 CREATE INDEX IF NOT EXISTS idx_taste_profile_snapshots_created ON taste_profile_snapshots(created_at);
+CREATE INDEX IF NOT EXISTS idx_taste_items_search ON taste_items(search_text);
+CREATE INDEX IF NOT EXISTS idx_taste_items_artist ON taste_items(artist);
+CREATE INDEX IF NOT EXISTS idx_taste_items_playlist ON taste_items(playlist);
 CREATE INDEX IF NOT EXISTS idx_memory_items_kind_created ON memory_items(kind, created_at);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_time);
 CREATE INDEX IF NOT EXISTS idx_diary_summaries_source ON diary_summaries(source_file, source_mtime);

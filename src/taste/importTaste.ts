@@ -10,6 +10,7 @@ import { MemoryStore } from "../memory/store.js";
 import { parseTasteCsv, type TasteImportRow } from "./csv.js";
 import { generateTasteMarkdown, summarizeTasteRows } from "./tasteMarkdown.js";
 import { updateTasteProfile } from "./profile.js";
+import { upsertTasteItems } from "./tasteItems.js";
 
 export type TasteImportResult = {
   trackCount: number;
@@ -55,6 +56,7 @@ export function importTasteRows(rows: TasteImportRow[], sourceFile: string, conf
 
   withDatabase(config, (db) => {
     const store = new MemoryStore(db);
+    upsertTasteItems(db, rows, sourceFile);
     for (const row of rows) {
       store.addMemoryItem("taste", `${row.title} by ${row.artist}`, {
         album: row.album,

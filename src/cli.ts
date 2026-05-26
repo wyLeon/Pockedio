@@ -147,7 +147,7 @@ program
     console.log(`Imported ${result.trackCount} tracks into ${result.tastePath}.`);
     console.log(`Artists: ${result.artists.join(", ") || "none"}`);
     console.log(`Playlists: ${result.playlists.join(", ") || "none"}`);
-    console.log("Taste profile: needs refresh");
+    console.log("Taste profile: updated");
   });
 
 program

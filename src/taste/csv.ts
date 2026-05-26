@@ -9,6 +9,7 @@ export type TasteImportRow = {
   source: string;
   playlist: string;
   liked_at: string;
+  providerTrackId?: string;
 };
 
 export function parseTasteCsv(text: string): TasteImportRow[] {
