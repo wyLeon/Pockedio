@@ -1688,8 +1688,8 @@ function getRequestedQueuePositionIndex(
   if (!playbackState?.station || queue.length === 0) {
     return undefined;
   }
-  const match = text.trim().toLowerCase().match(/^(?:play\s+)?(?:song\s+|track\s+|#)?([1-9]\d*)$/)
-    ?? text.trim().toLowerCase().match(/^(?:play|start|queue|jump to|go to)\s+(?:song\s+|track\s+|#)?([1-9]\d*)$/);
+  const match = text.trim().toLowerCase().match(/^(?:play\s*)?(?:song\s*|track\s*|#)?([1-9]\d*)$/)
+    ?? text.trim().toLowerCase().match(/^(?:play|start|queue|jump to|go to)\s*(?:song\s*|track\s*|#)?([1-9]\d*)$/);
   if (!match) {
     return undefined;
   }

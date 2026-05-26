@@ -1244,6 +1244,47 @@ describe("runSessionTurn", () => {
     expect(playbackState.currentIndex).toBe(4);
   });
 
+  it("plays a compact queue position command while a station is active", async () => {
+    const config = makeConfig();
+    let stopCalls = 0;
+    const started: string[] = [];
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "play2",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("queue_position_playback");
+    expect(result.response).toContain("Now playing: 2/5");
+    expect(result.response).toContain("> 2.");
+    expect(stopCalls).toBe(1);
+    expect(started).toHaveLength(2);
+    expect(playbackState.currentIndex).toBe(1);
+  });
+
   it("explains when previous has no earlier playable track", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
