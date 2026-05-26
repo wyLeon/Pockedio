@@ -1981,6 +1981,7 @@ async function generateStationIntroResponse(input: {
     `You are ${displayName}, Pockedio's personal DJ.`,
     `${displayName} is the DJ/assistant name, not the user's name. Do not address the user as ${displayName}. If the user's preferred name is unknown, do not use a personal name.`,
     "Write a warm, concise station introduction for a CLI music session.",
+    "Speak directly to the listener as 'you'. Do not refer to them as 'the user' or describe their taste in third person.",
     "Acknowledge the user's mood or request in human language before mentioning the station.",
     "Keep it to 2-3 sentences.",
     formatLanguageInstruction(input.config),
@@ -2004,7 +2005,7 @@ async function generateStationIntroResponse(input: {
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
     return alignGeneratedTextToLocalDaypart(
-      sanitizeDjNameAsUserAddress(result.value.trim(), input.config),
+      sanitizeGeneratedDjCopy(result.value.trim(), input.config),
       input.userText,
       input.context
     );
@@ -2057,6 +2058,7 @@ async function generateMusicRecommendationResponse(input: {
   const prompt = [
     `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's concise personal DJ.`,
     "The user is asking what they should listen to, but has not asked you to start playback.",
+    "Speak directly to the listener as 'you'. Do not refer to them as 'the user'.",
     "Recommend one clear listening direction in 2-4 sentences, tuned to their mood or context.",
     "End by asking whether they want you to build or play that station.",
     formatLanguageInstruction(input.config),
@@ -2075,7 +2077,7 @@ async function generateMusicRecommendationResponse(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return appendPendingStationChoicePrompt(formatDjNoteSurface(result.value.trim(), input.config));
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(sanitizeGeneratedDjCopy(result.value.trim(), input.config), input.config));
   }
 
   return appendPendingStationChoicePrompt(formatDjNoteSurface([
@@ -2308,7 +2310,7 @@ async function handlePendingStationFollowup(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return appendPendingStationChoicePrompt(formatDjNoteSurface(result.value.trim(), input.config));
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(sanitizeGeneratedDjCopy(result.value.trim(), input.config), input.config));
   }
 
   return appendPendingStationChoicePrompt(formatDjNoteSurface(`Got it. I’ll shape it around: ${input.userText.trim()}.\n\nPlay this version?`, input.config));
@@ -2339,7 +2341,7 @@ async function answerPendingStationQuestion(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return appendPendingStationChoicePrompt(formatDjNoteSurface(result.value.trim(), input.config));
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(sanitizeGeneratedDjCopy(result.value.trim(), input.config), input.config));
   }
 
   return appendPendingStationChoicePrompt(formatDjNoteSurface("I’d keep it close to the direction we just discussed, then adjust once the first track lands.\n\nPlay this version?", input.config));
@@ -2414,7 +2416,7 @@ async function generateIdentityCapabilityResponse(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result) && isValidIdentityCapabilityResponse(result.value, displayName)) {
-    return result.value.trim();
+    return sanitizeGeneratedDjCopy(result.value.trim(), input.config);
   }
 
   return formatIdentityCapabilityFallback(displayName);
@@ -2452,7 +2454,7 @@ async function generateConversationResponse(input: {
   const prompt = formatConversationPrompt(input.userText, input.playbackState, input.config, input.context);
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return sanitizeDjNameAsUserAddress(result.value.trim(), input.config);
+    return sanitizeGeneratedDjCopy(result.value.trim(), input.config);
   }
 
   return formatConversationFallback(input.userText, input.playbackState, input.config);
@@ -2566,6 +2568,20 @@ function sanitizeDjNameAsUserAddress(response: string, config?: PockedioConfig):
     .replace(new RegExp(`,\\s*${name}([.!?])`, "gi"), "$1")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function sanitizeGeneratedDjCopy(response: string, config?: PockedioConfig): string {
+  return rewriteListenerReferences(sanitizeDjNameAsUserAddress(response, config));
+}
+
+function rewriteListenerReferences(text: string): string {
+  return text
+    .replace(/\buser taste\b/gi, "your taste")
+    .replace(/\buser preferences\b/gi, "your preferences")
+    .replace(/\buser request\b/gi, "your request")
+    .replace(/\bthe user['’]s\b/gi, "your")
+    .replace(/\buser['’]s\b/gi, "your")
+    .replace(/\bthe user\b/gi, "you");
 }
 
 function escapeRegExp(value: string): string {
@@ -3274,6 +3290,7 @@ async function generateStationDjProgramIntro(input: {
     `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's spoken DJ.`,
     "Write a warm, concise opening for a five-track DJ program.",
     "Sound human and specific, but keep it under 70 words.",
+    "Speak directly to the listener as 'you'. Do not refer to them as 'the user'.",
     formatLanguageInstruction(input.config),
     "Mention the station direction and ease the listener into the first track.",
     "Do not list every track.",
@@ -3282,7 +3299,7 @@ async function generateStationDjProgramIntro(input: {
     ...input.station.tracks.map((track) => `${track.position}. ${track.title} - ${track.artist}: ${track.rationale}`)
   ].join("\n"), { signal: input.signal });
   const text = isUsableGeneratedText(input.config, textResult)
-    ? textResult.value.trim()
+    ? sanitizeGeneratedDjCopy(textResult.value.trim(), input.config)
     : `${formatRuntimeDjDisplayName(input.config)} here. I’ll open this as a short DJ program and ease you into the first track with the station already shaped around your request.`;
   const djAudio = shouldUseSpokenDjAudio({
     triggerType: "conversation",
@@ -3994,6 +4011,7 @@ async function generateTrackDjProgramIntro(input: {
     `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's spoken DJ.`,
     `Write a warm transition intro for Track ${input.track.position}: ${input.track.title} - ${input.track.artist}.`,
     "Keep it under 45 words.",
+    "Speak directly to the listener as 'you'. Do not refer to them as 'the user'.",
     formatLanguageInstruction(input.config),
     "Mention why this next track belongs here.",
     "Do not recap the full queue.",
@@ -4003,7 +4021,7 @@ async function generateTrackDjProgramIntro(input: {
     `Next track rationale: ${input.track.rationale}`
   ].filter(Boolean).join("\n"));
   const text = isUsableGeneratedText(input.config, textResult)
-    ? textResult.value.trim()
+    ? sanitizeGeneratedDjCopy(textResult.value.trim(), input.config)
     : `${formatRuntimeDjDisplayName(input.config)} here. Track ${input.track.position} keeps the set moving with ${input.track.title} by ${input.track.artist}.`;
   const djAudio = await input.synthesize(input.config, text, { signal: input.signal });
   if (!djAudio.ok) {

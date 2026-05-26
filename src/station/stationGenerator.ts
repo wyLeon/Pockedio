@@ -178,7 +178,8 @@ function buildStationPrompt(input: GenerateStationInput, tasteSummary: string): 
     "Default output language is English.",
     "Choose real, findable songs with real artists.",
     "Do not mention the music provider, searchability, catalog size, availability, resources, or platform convenience in rationales.",
-    "Rationales should explain musical fit, mood, user taste, context, or station arc only.",
+    "Rationales should explain musical fit, mood, your taste, context, or station arc only.",
+    "Write rationales as short listener-facing fragments. Do not refer to the listener as 'the user'.",
     `User request: ${input.request}`,
     `Taste summary: ${tasteSummary}`,
     `Generated taste profile: ${input.context?.tasteProfile?.summary ?? "No generated taste profile yet."}`,
@@ -303,7 +304,17 @@ function cleanTrackRationale(rationale: string | null | undefined): string {
   if (!cleaned || containsProviderPromotion(cleaned) || containsCjkText(cleaned)) {
     return "Fits the requested station.";
   }
-  return cleaned;
+  return rewriteListenerReferences(cleaned);
+}
+
+function rewriteListenerReferences(text: string): string {
+  return text
+    .replace(/\buser taste\b/gi, "your taste")
+    .replace(/\buser preferences\b/gi, "your preferences")
+    .replace(/\buser request\b/gi, "your request")
+    .replace(/\bthe user['’]s\b/gi, "your")
+    .replace(/\buser['’]s\b/gi, "your")
+    .replace(/\bthe user\b/gi, "you");
 }
 
 function containsProviderPromotion(text: string): boolean {

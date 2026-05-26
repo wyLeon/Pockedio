@@ -5268,14 +5268,16 @@ describe("runSessionTurn", () => {
         generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
         generateText: async (prompt) => ({
           ok: true,
-          value: prompt.includes("Track 3") ? "Track 3 intro is ready." : "Mina keeps this short and warm."
+          value: prompt.includes("Track 3")
+            ? "I’m bringing this in because it aligns with the user's love for warm jazz."
+            : "Mina keeps this short and warm."
         })
       },
       buildContext: async () => ({ personality: config.personality }),
       writeOutput: (text) => output.push(text),
       synthesizeFishAudio: async (_config, text) => ({
         ok: true,
-        audioPath: text.includes("Track 3") ? "/tmp/track-3-intro.wav" : "/tmp/opening-intro.wav",
+        audioPath: text.includes("your love for warm jazz") ? "/tmp/track-3-intro.wav" : "/tmp/opening-intro.wav",
         latencyMs: 15
       }),
       startUrlPlayback: async (url) => {
@@ -5346,8 +5348,9 @@ describe("runSessionTurn", () => {
     });
     expect(directStarts).toHaveLength(1);
     expect(output.join("\n")).toContain("Mina's note:");
-    expect(output.join("\n")).toContain("Track 3 intro is ready.");
-    expect(output.join("\n")).toContain("Track 3 intro is ready.\n\nNOW PLAYING\nNow playing:");
+    expect(output.join("\n")).toContain("aligns with your love for warm jazz");
+    expect(output.join("\n")).not.toContain("the user's love");
+    expect(output.join("\n")).toContain("aligns with your love for warm jazz.\n\nNOW PLAYING\nNow playing:");
   });
 
   it("keeps manual next moving with feedback when DJ intro is not ready", async () => {

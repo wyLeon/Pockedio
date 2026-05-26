@@ -431,6 +431,40 @@ describe("generateStation", () => {
     expect(station.tracks[1].rationale).toBe("soft focus texture");
   });
 
+  it("keeps generated rationales addressed to the listener", async () => {
+    const provider = new FakeProvider();
+    let observedPrompt = "";
+    const llm: StationLlmClient = {
+      generateJson: async (prompt) => {
+        observedPrompt = prompt;
+        return {
+          ok: true,
+          value: {
+            tracks: [
+              { title: "A", artist: "Artist A", rationale: "aligns with the user's love for warm jazz" },
+              { title: "B", artist: "Artist B", rationale: "matches user taste for quiet vocals" },
+              { title: "C", artist: "Artist C", rationale: "keeps the arc intimate" },
+              { title: "D", artist: "Artist D", rationale: "soft landing" },
+              { title: "E", artist: "Artist E", rationale: "gentle close" }
+            ]
+          }
+        };
+      },
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" })
+    };
+
+    const station = await generateStation({
+      request: "play warm quiet jazz",
+      config: makeConfig(),
+      provider,
+      llm
+    });
+
+    expect(observedPrompt).toContain("Do not refer to the listener as 'the user'");
+    expect(station.tracks[0].rationale).toBe("aligns with your love for warm jazz");
+    expect(station.tracks[1].rationale).toBe("matches your taste for quiet vocals");
+  });
+
   it("keeps unavailable provider results in the station instead of throwing", async () => {
     const provider = new FakeProvider();
     provider.getPlayableUrl = async (trackId: string) => ({
