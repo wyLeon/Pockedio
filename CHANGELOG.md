@@ -2,6 +2,18 @@
 
 All notable public release changes are documented here.
 
+## 0.2.0 - 2026-05-27
+
+Voice setup and CLI polish release.
+
+- Add Kokoro as a local voice category with guided setup and curated voices.
+- Improve Fish Speech setup for fresh installs, including proxy-friendly model download commands.
+- Add taste candidate retrieval so station planning can draw from more relevant taste context.
+- Keep DJ notes directly addressed to the listener and handle negated feedback more naturally.
+- Accept compact queue commands such as `play2` in addition to spaced forms.
+- Improve playback resilience when a player process exits unexpectedly.
+- Fix `q` cancellation behavior while processing.
+
 ## 0.1.1 - 2026-05-25
 
 Taste personalization patch.
