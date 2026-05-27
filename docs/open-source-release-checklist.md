@@ -34,6 +34,8 @@ Not in scope for the first public release:
 - [ ] NetEase cookie path does not echo the cookie.
 - [ ] Playlist import works with a NetEase playlist URL or ID.
 - [ ] A basic station can be generated and playback starts or fails gracefully.
+- [ ] `pockedio update --check` reports the current and latest release without changing local files.
+- [ ] `pockedio update` refuses to run when the Git source tree has uncommitted changes.
 
 ## Secret Safety
 
@@ -83,3 +85,4 @@ Do not publish to npm until all of these are true:
 4. Push `main`.
 5. Create a GitHub release tag such as `v0.1.0`.
 6. Include known limitations in the release notes.
+7. Confirm `pockedio update --check` sees the new latest release after publication.

@@ -356,7 +356,8 @@ Planned sections:
 10. Explicit DJ audio flow.
 11. `pockedio status` flow.
 12. `pockedio serve` scheduled DJ flow.
-13. Error and fallback flow catalog.
+13. `pockedio update` source-install upgrade flow.
+14. Error and fallback flow catalog.
 
 Scheduled DJ playback consent:
 
@@ -385,6 +386,9 @@ pockedio setup calendar
 pockedio setup netease
 pockedio import-taste <file>
 pockedio refresh-context
+pockedio status
+pockedio update
+pockedio update --check
 ```
 
 Unsupported setup sections should fail plainly:

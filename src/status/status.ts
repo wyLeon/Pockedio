@@ -19,6 +19,8 @@ import {
 } from "../tui/terminalRenderer.js";
 import { resolveRuntimePath } from "../tts/fishAudio.js";
 import { formatFishVoiceName, formatKokoroVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
+import { pockedioVersion } from "../index.js";
+import { checkForPockedioUpdate, type UpdateCheckResult } from "../update/updateCheck.js";
 
 export type StatusReport = {
   config: {
@@ -88,12 +90,14 @@ export type StatusReport = {
   };
   latestSessionTimestamp: string | null;
   contextHeartbeat: ContextRefreshRunRecord | null;
+  update?: UpdateCheckResult | null;
 };
 
 export type StatusReportOptions = {
   config?: PockedioConfig;
   env?: PockedioEnv;
   fetchImpl?: typeof fetch;
+  update?: UpdateCheckResult | null;
 };
 
 export async function getStatusReport(options: PockedioConfig | StatusReportOptions = {}): Promise<StatusReport> {
@@ -148,7 +152,8 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
       present: fs.existsSync(config.paths.personas)
     },
     latestSessionTimestamp: getLatestSessionTimestamp(config),
-    contextHeartbeat: getLatestContextRefreshRun(config)
+    contextHeartbeat: getLatestContextRefreshRun(config),
+    update: resolved.update
   };
 
   try {
@@ -172,7 +177,7 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
   }
 }
 
-function resolveStatusOptions(options: PockedioConfig | StatusReportOptions): Required<Omit<StatusReportOptions, "fetchImpl">> & Pick<StatusReportOptions, "fetchImpl"> {
+function resolveStatusOptions(options: PockedioConfig | StatusReportOptions): Required<Omit<StatusReportOptions, "fetchImpl" | "update">> & Pick<StatusReportOptions, "fetchImpl" | "update"> {
   if (isPockedioConfig(options)) {
     return { config: options, env: process.env, fetchImpl: undefined };
   }
@@ -180,7 +185,8 @@ function resolveStatusOptions(options: PockedioConfig | StatusReportOptions): Re
   return {
     config: options.config ?? loadConfig(env),
     env,
-    fetchImpl: options.fetchImpl
+    fetchImpl: options.fetchImpl,
+    update: options.update
   };
 }
 
@@ -395,6 +401,7 @@ export function formatStatusReport(report: StatusReport, options: TuiRenderOptio
     renderTuiBulletLine("Current runtime, setup, memory, and local data state.", options),
     "",
     renderTuiSectionLabel("RUNTIME", { ...options, accent: "playback" }),
+    formatStatusLine("Version", formatUpdateStatus(report.update), options),
     formatStatusLine("Playback", report.runtime.currentPlayback ?? "none", options),
     formatStatusLine("Session", report.latestSessionTimestamp ?? "none", options),
     formatStatusLine("Schedule", report.runtime.scheduledJobs, options),
@@ -478,10 +485,24 @@ function formatLlmKeySource(source: StatusReport["llm"]["apiKeySource"]): string
 }
 
 export async function printStatus(): Promise<void> {
-  console.log(formatStatusReport(await getStatusReport(), {
+  const update = await checkForPockedioUpdate({ currentVersion: pockedioVersion }).catch(() => null);
+  console.log(formatStatusReport(await getStatusReport({ update }), {
     color: Boolean(process.stdout.isTTY),
     width: process.stdout.columns
   }));
+}
+
+function formatUpdateStatus(update: UpdateCheckResult | null | undefined): string {
+  if (!update) {
+    return pockedioVersion;
+  }
+  if (update.updateAvailable && update.latestVersion) {
+    return `${pockedioVersion} (update ${update.latestVersion} available; run pockedio update)`;
+  }
+  if (update.error) {
+    return `${pockedioVersion} (update check unavailable)`;
+  }
+  return `${pockedioVersion} (latest)`;
 }
 
 function isPockedioConfig(value: PockedioConfig | StatusReportOptions): value is PockedioConfig {
