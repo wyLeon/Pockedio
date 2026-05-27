@@ -22,6 +22,8 @@ import { runFullSetupWizard, type FullSetupStepId } from "./setup/fullSetupWizar
 import { formatStatusReport, getStatusReport, printStatus } from "./status/status.js";
 import { importTasteInput } from "./taste/importTaste.js";
 import { importTasteFromNetEasePlaylist } from "./taste/neteasePlaylist.js";
+import { detectSourceInstall, runSourceUpdate } from "./update/sourceUpdate.js";
+import { checkForPockedioUpdate, formatUpdateNotice } from "./update/updateCheck.js";
 import {
   buildFishVoicePreview,
   buildMacosVoicePreview,
@@ -103,7 +105,8 @@ program
       await runSessionThenMaybeHub();
       return;
     }
-    await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config })));
+    const updateNotice = await getStartupUpdateNotice();
+    await runWelcomeHubAction(await promptWelcomeHub({ ...buildWelcomeReadiness({ config }), updateNotice }));
   });
 
 program
@@ -184,6 +187,15 @@ program
     await printStatus();
   });
 
+program
+  .command("update")
+  .description("Check for and install the latest source release")
+  .option("--check", "only check whether an update is available")
+  .option("--yes", "run the source update without an interactive confirmation")
+  .action(async (options: { check?: boolean; yes?: boolean }) => {
+    await runUpdateCommand(options);
+  });
+
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
@@ -210,6 +222,10 @@ async function runWelcomeHubAction(action: WelcomeHubAction): Promise<void> {
     await showInteractiveStatus();
     return;
   }
+  if (action === "update") {
+    await runUpdateCommand({});
+    return;
+  }
   if (action === "taste") {
     await runTasteMemoryLoop();
   }
@@ -219,7 +235,10 @@ async function runSessionThenMaybeHub(): Promise<void> {
   clearTerminalForSession();
   const outcome = await runInteractiveSession();
   if (outcome === "menu") {
-    await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config: loadConfig() })));
+    await runWelcomeHubAction(await promptWelcomeHub({
+      ...buildWelcomeReadiness({ config: loadConfig() }),
+      updateNotice: await getStartupUpdateNotice()
+    }));
   }
 }
 
@@ -230,11 +249,89 @@ function clearTerminalForSession(): void {
 }
 
 async function showInteractiveStatus(): Promise<void> {
-  await pauseWithMessage(formatStatusReport(await getStatusReport(), {
+  const update = await checkForPockedioUpdate({ currentVersion: pockedioVersion }).catch(() => null);
+  await pauseWithMessage(formatStatusReport(await getStatusReport({ update }), {
     color: Boolean(defaultOutput.isTTY),
     width: defaultOutput.columns
   }));
-  await runWelcomeHubAction(await promptWelcomeHub(buildWelcomeReadiness({ config: loadConfig() })));
+  await runWelcomeHubAction(await promptWelcomeHub({
+    ...buildWelcomeReadiness({ config: loadConfig() }),
+    updateNotice: await getStartupUpdateNotice()
+  }));
+}
+
+async function getStartupUpdateNotice(): Promise<string | undefined> {
+  if (!defaultOutput.isTTY) {
+    return undefined;
+  }
+  const result = await checkForPockedioUpdate({ currentVersion: pockedioVersion }).catch(() => null);
+  return result ? formatUpdateNotice(result) ?? undefined : undefined;
+}
+
+async function runUpdateCommand(options: { check?: boolean; yes?: boolean }): Promise<void> {
+  const update = await checkForPockedioUpdate({ currentVersion: pockedioVersion, force: true, timeoutMs: 10_000 });
+  console.log(`Current version: ${update.currentVersion}`);
+  if (update.latestVersion) {
+    console.log(`Latest version:  ${update.latestVersion}`);
+  }
+  if (update.releaseUrl) {
+    console.log(`Release:         ${update.releaseUrl}`);
+  }
+  if (update.error) {
+    console.log(`Update check:    unavailable (${update.error})`);
+    return;
+  }
+  if (!update.updateAvailable) {
+    console.log("Pockedio is up to date.");
+    return;
+  }
+  if (options.check) {
+    console.log("Update available. Run pockedio update to install it.");
+    return;
+  }
+
+  const source = detectSourceInstall();
+  if (source.kind !== "source") {
+    console.log(source.reason);
+    console.log("This release is source-install only. To upgrade manually:");
+    console.log("  cd /path/to/Pockedio");
+    console.log("  git pull origin main");
+    console.log("  npm install");
+    console.log("  npm run build");
+    console.log("  npm link");
+    return;
+  }
+  if (!source.clean) {
+    console.log("Local changes detected. Commit, stash, or discard them before running pockedio update.");
+    for (const file of source.dirtyFiles) {
+      console.log(`  ${file}`);
+    }
+    return;
+  }
+
+  console.log(`Source install:  ${source.root}`);
+  console.log("Pockedio will pull the latest code, install dependencies, rebuild, and refresh the global link.");
+  if (!options.yes) {
+    const answer = (await askLine("Continue? [y/N] ")).trim().toLowerCase();
+    if (answer !== "y" && answer !== "yes") {
+      console.log("Update cancelled.");
+      return;
+    }
+  }
+
+  const result = await runSourceUpdate({
+    root: source.root,
+    onStepStart: (step) => {
+      console.log(`Running: ${step.label}`);
+    }
+  });
+  if (!result.ok) {
+    console.log(`Update failed${result.failedStep ? ` during ${result.failedStep}` : ""}.`);
+    console.log(result.error ?? "Unknown update failure.");
+    process.exitCode = 1;
+    return;
+  }
+  console.log("Pockedio update completed. Restart pockedio to use the updated CLI.");
 }
 
 type SetupConnectionsOutcome = "continue" | "back" | "quit";

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { pockedioVersion } from "../index.js";
 import type { PockedioEnv } from "../config/paths.js";
 import type { PockedioConfig } from "../config/schema.js";
 import { readNetEaseCookie } from "../config/neteaseAuth.js";
@@ -34,9 +35,10 @@ export type WelcomeReadinessItem = {
 
 export type WelcomeReadiness = {
   items: WelcomeReadinessItem[];
+  updateNotice?: string;
 };
 
-export type WelcomeHubAction = "session" | "setup" | "llm_setup" | "voice_setup" | "taste" | "status" | "quit";
+export type WelcomeHubAction = "session" | "setup" | "llm_setup" | "voice_setup" | "taste" | "status" | "update" | "quit";
 export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" | "netease_setup" | "context_setup" | "scheduler_setup" | "back" | "quit";
 export type LlmProviderId = "openai" | "deepseek" | "openrouter" | "local_vllm" | "custom";
 export type LlmSetupAction = LlmProviderId | "test_connection" | "back" | "quit";
@@ -168,7 +170,7 @@ export function renderWelcomeHub(
   const selectedAction = options.selectedAction ?? "session";
   if (options.color) {
     return [
-      renderPockedioSplash(options),
+      renderPockedioSplash(readiness, options),
       "",
       renderTuiSectionLabel("SESSION FLOW", { ...options, accent: "playback" }),
       ...welcomeHubEntries.map((entry, index) => formatHubEntry(entry.action === selectedAction, index + 1, entry.label, entry.description, options)),
@@ -176,40 +178,50 @@ export function renderWelcomeHub(
       renderTuiSectionLabel("READINESS", { ...options, accent: "playback" }),
       ...readiness.items.map((item) => formatReadinessItem(item, options)),
       "",
-      renderTuiFooter("↑↓ Select  |  Enter Open  |  S Setup  |  L LLM  |  V Voice  |  Q Quit", options)
+      renderTuiFooter(formatWelcomeFooter(Boolean(readiness.updateNotice)), options)
     ].join("\n");
   }
   return [
-    renderTuiPageTitle("Pockedio", options),
+    renderPockedioSplash(readiness, options),
     "",
-    renderTuiBulletLine("Personal AI DJ for context-aware listening", options),
-    "",
+    options.color ? renderTuiSectionLabel("SESSION FLOW", { ...options, accent: "playback" }) : "Session Flow",
     ...welcomeHubEntries.map((entry, index) => formatHubEntry(entry.action === selectedAction, index + 1, entry.label, entry.description, options)),
     "",
     options.color ? renderTuiSectionLabel("Readiness", { ...options, accent: "playback" }) : "Readiness",
     ...readiness.items.map((item) => formatReadinessItem(item, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  S Setup  |  L LLM  |  V Voice  |  Q Quit", options)
+    renderTuiFooter(formatWelcomeFooter(Boolean(readiness.updateNotice)), options)
   ].join("\n");
 }
 
-function renderPockedioSplash(options: TuiRenderOptions): string {
-  const note = [
-    "        ████",
-    "        ████",
-    "        ████",
-    "        ████",
-    "   ██████████",
-    "  ██      ████",
-    "  ██      ████",
-    "   ████████"
-  ].join("\n");
+function renderPockedioSplash(readiness: WelcomeReadiness, options: TuiRenderOptions): string {
+  const title = "POCKEDIO";
+  const repo = "https://github.com/wyLeon/Pockedio";
+  const titleGap = " ".repeat(Math.max(2, 36 - title.length));
+  const titleLine = options.color
+    ? `${renderTuiAccentText(title, { ...options, accent: "dj" })}${titleGap}${renderTuiAccentText(repo, { ...options, accent: "playback" })}`
+    : `${title.padEnd(36)}${repo}`;
+  const tagline = "Music tuned to the moment.";
+  const versionLine = `${tagline.padEnd(36)}v${pockedioVersion}`;
   return [
-    renderTuiAccentText(note, { ...options, accent: "dj" }),
+    titleLine,
+    renderTuiAccentText(versionLine, { ...options, accent: "dj" }),
     "",
-    renderTuiAccentText("pockedio", { ...options, accent: "dj" }),
-    renderTuiBulletLine("Music tuned to the moment.", options)
-  ].join("\n");
+    readiness.updateNotice ? renderTuiAccentText(readiness.updateNotice, { ...options, accent: "dj" }) : undefined
+  ].filter((line): line is string => typeof line === "string").join("\n");
+}
+
+function formatWelcomeFooter(hasUpdate: boolean): string {
+  const entries = [
+    "↑↓ Select",
+    "Enter Open",
+    hasUpdate ? "U Update" : undefined,
+    "S Setup",
+    "L LLM",
+    "V Voice",
+    "Q Quit"
+  ].filter((entry): entry is string => typeof entry === "string");
+  return entries.join("  |  ");
 }
 
 export function renderSetupConnectionsSurface(
@@ -572,6 +584,10 @@ export async function promptWelcomeHub(readiness: WelcomeReadiness): Promise<Wel
       }
       if (key.name === "v") {
         cleanup("voice_setup");
+        return;
+      }
+      if (key.name === "u" && readiness.updateNotice) {
+        cleanup("update");
         return;
       }
       if (key.name === "q" || (key.ctrl && key.name === "c")) {
@@ -982,6 +998,9 @@ export function resolveWelcomeHubAction(input: string): WelcomeHubAction {
   }
   if (normalized === "status") {
     return "status";
+  }
+  if (normalized === "u" || normalized === "update") {
+    return "update";
   }
   if (normalized === "q" || normalized === "quit") {
     return "quit";

@@ -64,6 +64,15 @@ npm link
 pockedio
 ```
 
+Upgrade a linked source install:
+
+```bash
+pockedio update --check
+pockedio update
+```
+
+`pockedio update` works for clean Git source installs from this repository. It pulls `main`, installs dependencies, rebuilds, and refreshes the local `npm link`. If you have local changes, commit or stash them first.
+
 ## Start The NetEase Adapter
 
 Pockedio expects a local NetEase Cloud Music API adapter for search and playable URL lookup.
@@ -188,6 +197,8 @@ pockedio setup scheduler
 pockedio import-taste <netease-playlist-link-or-id>
 pockedio refresh-context
 pockedio status
+pockedio update
+pockedio update --check
 pockedio serve
 ```
 

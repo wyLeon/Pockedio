@@ -77,8 +77,11 @@ describe("MOLE-inspired welcome hub", () => {
     const readiness = buildWelcomeReadiness({ config, env, platform: "linux" });
     const text = renderWelcomeHub(readiness);
 
-    expect(text).toContain("Pockedio");
-    expect(text).toContain("Personal AI DJ for context-aware listening");
+    expect(text).toContain("POCKEDIO");
+    expect(text).toContain("https://github.com/wyLeon/Pockedio");
+    expect(text).toContain("Music tuned to the moment.");
+    expect(text).toContain("v0.2.0");
+    expect(text).toContain("Session Flow");
     expect(text).toContain("> 1. Enter DJ Session");
     expect(text).toContain("2. Setup & Connections");
     expect(text).toContain("3. Taste & Memory");
@@ -104,8 +107,10 @@ describe("MOLE-inspired welcome hub", () => {
     const hub = renderWelcomeHub(readiness, { selectedAction: "session", color: true, width: 96 });
     const setup = renderSetupConnectionsSurface({ config, env, platform: "darwin" }, { color: true, width: 96 });
 
-    expect(stripAnsi(hub)).toContain("pockedio");
-    expect(stripAnsi(hub)).toContain("██████████");
+    expect(stripAnsi(hub)).toContain("POCKEDIO");
+    expect(stripAnsi(hub)).toContain("https://github.com/wyLeon/Pockedio");
+    expect(stripAnsi(hub)).toContain("v0.2.0");
+    expect(stripAnsi(hub)).not.toContain("█");
     expect(stripAnsi(hub)).toContain("SESSION FLOW");
     expect(hub).toMatch(/\u001b\[[0-9;]*38;5;116mREADINESS\u001b\[0m/);
     expect(hub).toMatch(/\u001b\[[0-9;]*48;5;23m/);
@@ -123,6 +128,8 @@ describe("MOLE-inspired welcome hub", () => {
     expect(resolveWelcomeHubAction("2")).toBe("setup");
     expect(resolveWelcomeHubAction("3")).toBe("taste");
     expect(resolveWelcomeHubAction("4")).toBe("status");
+    expect(resolveWelcomeHubAction("u")).toBe("update");
+    expect(resolveWelcomeHubAction("update")).toBe("update");
     expect(resolveWelcomeHubAction("quit")).toBe("quit");
   });
 
@@ -465,6 +472,17 @@ describe("MOLE-inspired welcome hub", () => {
     expect(summary).toContain("1. Brian Eno (1)");
     expect(summary).toContain("- ambient reset");
     expect(summary).toContain("- Blue in Green - Miles Davis");
+  });
+
+  it("shows a passive update notice when one is available", () => {
+    const { config } = makeConfig();
+    const text = renderWelcomeHub({
+      ...buildWelcomeReadiness({ config }),
+      updateNotice: "Update available: Pockedio 0.2.1. Run pockedio update."
+    });
+
+    expect(text).toContain("Update available: Pockedio 0.2.1. Run pockedio update.");
+    expect(text).toContain("U Update");
   });
 
   it("moves and submits Taste & Memory actions", () => {
