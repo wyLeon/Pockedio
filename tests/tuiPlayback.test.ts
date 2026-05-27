@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   renderPlaybackSurface,
+  renderTuiChoiceList,
   renderTuiDjNoteBlock,
   renderTuiPrompt,
   renderTuiProgress,
@@ -184,6 +185,27 @@ describe("terminal playback renderer", () => {
 
     expect(new Set(numberColumns).size).toBe(1);
     expect(new Set(stateColumns).size).toBe(1);
+  });
+
+  it("aligns selectable choice rows with CJK labels and metadata", () => {
+    const rendered = renderTuiChoiceList([
+      { label: "献给永远的 - 大粉乐队", meta: "song" },
+      { label: "Build a 5-song station", meta: "vibe" }
+    ], 0, { color: true, width: 72 });
+    const lines = stripAnsi(rendered).split("\n");
+    const numberColumns = lines.map((line) => {
+      const match = /\d+\./.exec(line);
+      expect(match).not.toBeNull();
+      return displayWidth(line.slice(0, match!.index));
+    });
+    const metaColumns = ["song", "vibe"].map((meta) => {
+      const line = lines.find((candidate) => candidate.includes(meta));
+      expect(line).toBeTruthy();
+      return displayWidth(line!.slice(0, line!.indexOf(meta)));
+    });
+
+    expect(new Set(numberColumns).size).toBe(1);
+    expect(new Set(metaColumns).size).toBe(1);
   });
 });
 

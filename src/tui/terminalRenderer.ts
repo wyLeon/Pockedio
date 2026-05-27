@@ -22,13 +22,18 @@ export type TuiPlaybackQueueEntry = {
   track: StationTrack;
 };
 
+export type TuiChoiceListItem = {
+  label: string;
+  meta?: string;
+};
+
 export type RenderPlaybackSurfaceInput = {
   queue: TuiPlaybackQueueEntry[];
   currentIndex: number;
   currentStartedAt?: Date;
   now: Date;
   djDisplayName: string;
-  trackNote: string;
+  trackNote?: string;
   color?: boolean;
   width?: number;
 };
@@ -42,9 +47,11 @@ export function renderPlaybackSurface(input: RenderPlaybackSurfaceInput): string
     renderTuiSectionLabel("NOW PLAYING", { accent: "playback", color: input.color }),
     formatNowPlayingLine(current, input.currentStartedAt, input.now, input.queue.length, input.color, input.width),
     "",
-    input.color
-      ? renderTuiDjNoteHeader(input.djDisplayName, { color: input.color, width: input.width })
-      : `${input.djDisplayName}'s note:`,
+    input.trackNote
+      ? input.color
+        ? renderTuiDjNoteHeader(input.djDisplayName, { color: input.color, width: input.width })
+        : `${input.djDisplayName}'s note:`
+      : "",
     input.trackNote,
     formatQueueSnapshot(input.queue, input.currentIndex, input.color, input.width)
   ].filter(Boolean).join("\n");
@@ -110,6 +117,40 @@ export function renderTuiUserTurn(text: string, options: TuiRenderOptions = {}):
     return `› ${text.trim()}`;
   }
   return renderTuiRow({ marker: "›", text: text.trim(), selected: true, accent: "dim" }, options);
+}
+
+export function renderTuiChoiceList(items: TuiChoiceListItem[], selectedIndex = 0, options: TuiRenderOptions = {}): string {
+  if (items.length === 0) {
+    return "";
+  }
+  const positionWidth = Math.max(...items.map((_item, index) => `${index + 1}.`.length));
+  const rows = items.map((item, index) => {
+    const marker = index === selectedIndex ? ">" : " ";
+    const position = `${index + 1}.`.padStart(positionWidth);
+    const base = `${marker} ${position}  ${item.label}`;
+    return { base, meta: item.meta ?? "", selected: index === selectedIndex };
+  });
+  const metaColumn = Math.max(
+    0,
+    ...rows.filter((row) => row.meta).map((row) => stringDisplayWidth(row.base) + 2)
+  );
+  return rows.map((row) => {
+    const meta = row.meta
+      ? `${" ".repeat(Math.max(2, metaColumn - stringDisplayWidth(row.base)))}${row.meta}`
+      : "";
+    const value = `${row.base}${meta}`;
+    if (row.selected) {
+      return applySelectedRow(value, "playback", options);
+    }
+    if (!options.color) {
+      return value;
+    }
+    const width = Math.max(0, options.width ?? 0);
+    const leading = "  ";
+    return width > leading.length
+      ? `${leading}${fitToDisplayWidth(value, width - leading.length)}`
+      : `${leading}${value}`;
+  }).join("\n");
 }
 
 export function renderTuiRow(input: TuiRowInput, options: TuiRenderOptions = {}): string {

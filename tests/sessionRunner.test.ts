@@ -85,6 +85,19 @@ class AmbiguousSongProvider implements MusicProvider {
   }
 }
 
+class ChineseTitleProvider extends FakeProvider {
+  async search(query: MusicSearchQuery, _limit: number): Promise<MusicTrackCandidate[]> {
+    if (query.keyword === "献给永远的") {
+      return [
+        { provider: "netease", providerTrackId: "forever-main", title: "献给永远的", artists: ["大粉乐队"], album: "Single" },
+        { provider: "netease", providerTrackId: "forever-memory", title: "献给永远的 (也许对你的记忆就是这爱情本身)", artists: ["大粉乐队", "钱正昊"], album: "Single" },
+        { provider: "netease", providerTrackId: "forever-cover", title: "献给永远的", artists: ["曼小步"], album: "Single" }
+      ];
+    }
+    return super.search(query, _limit);
+  }
+}
+
 class ArtistStationProvider implements MusicProvider {
   readonly searches: MusicSearchQuery[] = [];
 
@@ -346,6 +359,7 @@ describe("runSessionTurn", () => {
     expect(formatInitialInteractiveTurnStatus("", {})).toBeUndefined();
     expect(formatInitialInteractiveTurnStatus("", { pendingStationRequest: "soft focus" })).toBe("Starting station...");
     expect(formatInitialInteractiveTurnStatus("dj", { pendingStationRequest: "soft focus" })).toBe("Preparing DJ program...");
+    expect(formatInitialInteractiveTurnStatus("Want some soft jazz, dj mode", {})).toBe("Preparing DJ program...");
     expect(formatInitialInteractiveTurnStatus("", {
       pendingDjProgram: {
         sessionId: "session-1",
@@ -689,9 +703,142 @@ describe("runSessionTurn", () => {
     expect(result.station).toBeUndefined();
     expect(started).toEqual([]);
     expect(result.response).toContain("I found a few close matches:");
-    expect(result.response).toContain("> 1. Intro - The xx");
+    expect(result.response).toContain("> 1.  Intro - The xx");
     expect(result.response).toContain("↑↓ Select  |  Enter Play");
     expect(playbackState.pendingSingleTrackSelection?.candidates).toHaveLength(3);
+  });
+
+  it("asks whether glued play text is a song or station before starting playback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "play献给永远的",
+      config,
+      playbackState,
+      provider: new ChineseTitleProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.station).toBeUndefined();
+    expect(started).toEqual([]);
+    expect(result.response).toContain("How should I use \"献给永远的\"?");
+    expect(result.response).toContain("> 1.  Play a song match");
+    expect(result.response).toContain("  2.  Build a 5-song station");
+    expect(playbackState.pendingSongOrStationSelection?.query).toBe("献给永远的");
+  });
+
+  it("asks whether short CJK play text is a song or station before showing song matches", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "play 献给永远的",
+      config,
+      playbackState,
+      provider: new ChineseTitleProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("single_track_playback");
+    expect(result.station).toBeUndefined();
+    expect(started).toEqual([]);
+    expect(result.response).toContain("How should I use \"献给永远的\"?");
+    expect(result.response).toContain("> 1.  Play a song match");
+    expect(result.response).toContain("  2.  Build a 5-song station");
+    expect(playbackState.pendingSongOrStationSelection?.query).toBe("献给永远的");
+  });
+
+  it("continues to song matches when the user chooses song for ambiguous text", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "play献给永远的",
+      config,
+      playbackState,
+      provider: new ChineseTitleProvider(),
+      llm: fakeLlm()
+    });
+
+    const result = await runSessionTurn({
+      input: "1",
+      config,
+      playbackState,
+      provider: new ChineseTitleProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("single_track_playback");
+    expect(result.response).toContain("I found a few close matches:");
+    expect(result.response).toContain("> 1.  献给永远的 - 大粉乐队");
+    expect(started).toEqual([]);
+    expect(playbackState.pendingSongOrStationSelection).toBeUndefined();
+    expect(playbackState.pendingSingleTrackSelection?.candidates).toHaveLength(3);
+  });
+
+  it("builds a station when the user chooses station for ambiguous text", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "play献给永远的",
+      config,
+      playbackState,
+      provider: new ChineseTitleProvider(),
+      llm: fakeLlm()
+    });
+
+    const result = await runSessionTurn({
+      input: "2",
+      config,
+      playbackState,
+      provider: new ChineseTitleProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.station?.request).toBe("play something for 献给永远的");
+    expect(started).toHaveLength(1);
+    expect(playbackState.pendingSongOrStationSelection).toBeUndefined();
   });
 
   it("plays a requested song from natural listen wording", async () => {
@@ -1402,17 +1549,31 @@ describe("runSessionTurn", () => {
     }
 
     expect(playbackState.currentIndex).toBe(4);
-    const result = await runSessionTurn({
-      input: "what's next?",
-      config,
-      playbackState,
-      provider: new FakeProvider(),
-      llm: fakeLlm()
-    });
+    const originalIsTty = process.stdout.isTTY;
+    const originalColumns = process.stdout.columns;
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    Object.defineProperty(process.stdout, "columns", { value: 96, configurable: true });
+    let result;
+    try {
+      result = await runSessionTurn({
+        input: "what's next?",
+        config,
+        playbackState,
+        provider: new FakeProvider(),
+        llm: fakeLlm()
+      });
+    } finally {
+      Object.defineProperty(process.stdout, "isTTY", { value: originalIsTty, configurable: true });
+      Object.defineProperty(process.stdout, "columns", { value: originalColumns, configurable: true });
+    }
 
     expect(result.intent.type).toBe("playback_status");
-    expect(result.response).toContain("Now playing: 5.");
-    expect(result.response).toContain("Queue:");
+    const plain = stripAnsi(result.response);
+    expect(plain).toContain("NOW PLAYING");
+    expect(plain).toContain("5/5");
+    expect(plain).toContain("QUEUE");
+    expect(plain).not.toContain("Now playing:");
+    expect(plain).not.toContain("Queue:");
     expect(result.response).not.toContain("No playable tracks remain");
     expect(playbackState.currentIndex).toBe(4);
     expect(started).toHaveLength(5);
@@ -1813,8 +1974,10 @@ describe("runSessionTurn", () => {
       now: () => new Date("2026-05-18T10:02:05.000Z")
     });
 
-    expect(result.response).toContain("Now playing: 1.");
+    expect(result.response).toContain("NOW PLAYING");
+    expect(result.response).toContain("Now playing: 1/5");
     expect(result.response).toContain("[====>...............] 02:05 elapsed");
+    expect(result.response).toContain("QUEUE");
     expect(result.response).toContain("> 1.");
     expect(result.response).toContain("  2.");
   });
@@ -5201,6 +5364,144 @@ describe("runSessionTurn", () => {
     expect(started).toHaveLength(1);
     expect(stopCalls).toBe(1);
     expect(playbackState.pendingDjProgram?.requestText).toBe("change to some soft jazz");
+  });
+
+  it("prepares an idle DJ-mode station request without requiring a playback verb", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "Want some soft jazz, dj mode",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Pockedio here. I’ll open this with soft jazz and keep the room low-lit."),
+      buildContext: async () => ({ personality: config.personality }),
+      synthesizeFishAudio: async (_config, text) => ({
+        ok: true,
+        audioPath: `/tmp/${text.length}.wav`,
+        latencyMs: 15
+      }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.response).toBe("● DJ program is ready.\n\n● Press Enter to start it, or tell me how to adjust it.");
+    expect(result.response).not.toContain("DJ voice belongs to a station");
+    expect(started).toHaveLength(0);
+    expect(playbackState.pendingDjProgram?.requestText).toBe("Want some soft jazz");
+  });
+
+  it("keeps prepared DJ program intros aligned to the device-local daypart", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const synthesized: string[] = [];
+    const prompts: string[] = [];
+
+    await runSessionTurn({
+      input: "Want some soft jazz, dj mode",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Tonight, soft jazz can ease into the first track.", prompts),
+      buildContext: async () => ({
+        now: "2026-05-27T03:30:00.000Z",
+        timeOfDay: "morning",
+        personality: config.personality
+      }),
+      synthesizeFishAudio: async (_config, text) => {
+        synthesized.push(text);
+        return {
+          ok: true,
+          audioPath: "/tmp/pockedio-dj-intro.wav",
+          latencyMs: 15
+        };
+      }
+    });
+
+    expect(playbackState.pendingDjProgram?.intro.rawText).toBe("This morning, soft jazz can ease into the first track.");
+    expect(synthesized).toEqual(["This morning, soft jazz can ease into the first track."]);
+    expect(prompts.some((prompt) => prompt.includes("Local time context: device-local daypart=morning"))).toBe(true);
+  });
+
+  it("preserves explicit requested night language in prepared DJ program intros", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "Want some soft jazz for tonight, dj mode",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Tonight, soft jazz can ease into the first track."),
+      buildContext: async () => ({
+        now: "2026-05-27T03:30:00.000Z",
+        timeOfDay: "morning",
+        personality: config.personality
+      }),
+      synthesizeFishAudio: async () => ({
+        ok: true,
+        audioPath: "/tmp/pockedio-dj-intro.wav",
+        latencyMs: 15
+      })
+    });
+
+    expect(playbackState.pendingDjProgram?.intro.rawText).toBe("Tonight, soft jazz can ease into the first track.");
+  });
+
+  it("prepares a new DJ version of the current station when requested mid-playback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play some morning soft jazz",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "a new dj version",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Pockedio here. I’ll reopen this soft jazz morning as a DJ program."),
+      buildContext: async () => ({ personality: config.personality }),
+      synthesizeFishAudio: async (_config, text) => ({
+        ok: true,
+        audioPath: `/tmp/${text.length}.wav`,
+        latencyMs: 15
+      })
+    });
+
+    expect(result.intent.type).toBe("pending_station_dj_program");
+    expect(result.response).toBe("● DJ program is ready.\n\n● Press Enter to start it, or tell me how to adjust it.");
+    expect(result.response).not.toContain("DJ mode is a before-playback choice");
+    expect(started).toHaveLength(1);
+    expect(stopCalls).toBe(1);
+    expect(playbackState.pendingDjProgram?.requestText).toBe("play some morning soft jazz");
   });
 
   it("starts a prepared pending DJ program with ducked music under the spoken intro", async () => {

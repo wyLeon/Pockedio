@@ -20,7 +20,9 @@ describe("parseIntent", () => {
   it("routes DJ program requests through station playback instead of standalone voice", async () => {
     for (const input of [
       "I want a DJ program.",
-      "I want a DJ program for late night focus."
+      "I want a DJ program for late night focus.",
+      "Some soft jazz, dj mode",
+      "Want some soft jazz, dj mode"
     ]) {
       await expect(parseIntent(input)).resolves.toEqual({
         type: "playback_request",

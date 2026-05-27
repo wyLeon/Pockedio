@@ -201,6 +201,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(like this|love this|good pick|nice pick)\b/.test(text)) {
     return { type: "feedback_like", confidence: "high" };
   }
+  if (isInlineDjModeStationText(text)) {
+    return { type: "playback_request", confidence: "high" };
+  }
   if (isDjProgramPlaybackText(text)) {
     return { type: "playback_request", confidence: "high" };
   }
@@ -300,6 +303,18 @@ function isDjProgramPlaybackText(text: string): boolean {
     && /\b(play|start|create|make|build|give me|put on|queue|want|would like|need)\b/.test(text);
 }
 
+function isInlineDjModeStationText(text: string): boolean {
+  if (!/\b(dj mode|dj program|dj version|radio show|radio version|spoken version)\b/.test(text)) {
+    return false;
+  }
+
+  const request = text
+    .replace(/\b(dj mode|dj program|dj version|radio show|radio version|spoken version)\b/g, "")
+    .replace(/\s*,\s*/g, " ")
+    .trim();
+  return hasMusicGenreOrMood(request) || hasMusicSubjectWithAction(request) || hasMusicSubjectWithUseCase(request);
+}
+
 function isSingleTrackPlaybackText(text: string): boolean {
   const directSong = text.match(/^(?:please\s+)?(?:play|put on|queue|start)\s+(.+)$/);
   if (!directSong) {
@@ -335,4 +350,8 @@ function hasMusicSubjectWithAction(text: string): boolean {
 function hasMusicSubjectWithUseCase(text: string): boolean {
   return /\b(music|musics|song|songs|track|tracks|playlist|set|instrumental|instrumentals|pure music|guqin|guzheng|piano|jazz|ambient)\b/.test(text)
     && /\b(calm|calming|meditation|meditate|focus|deep work|reading|sleep|relax|relaxing|study|work|quiet|peaceful)\b/.test(text);
+}
+
+function hasMusicGenreOrMood(text: string): boolean {
+  return /\b(jazz|ambient|classical|piano|lofi|lo-fi|rock|pop|edm|folk|hip hop|r&b|instrumental|chill|relaxing|focus|soft|morning|night|rainy)\b/.test(text);
 }
