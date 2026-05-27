@@ -5146,6 +5146,63 @@ describe("runSessionTurn", () => {
     expect(playbackState.pendingDjProgram).toBeDefined();
   });
 
+  it("prepares a replacement station as a spoken DJ program when the change request includes DJ mode", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    const result = await runSessionTurn({
+      input: "change to some soft jazz, dj mode",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Pockedio here. I’ll open this with soft jazz and keep the room low-lit."),
+      buildContext: async () => ({ personality: config.personality }),
+      synthesizeFishAudio: async (_config, text) => ({
+        ok: true,
+        audioPath: `/tmp/${text.length}.wav`,
+        latencyMs: 15
+      }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("pending_station_dj_program");
+    expect(result.response).toBe("● DJ program is ready.\n\n● Press Enter to start it, or tell me how to adjust it.");
+    expect(result.response).not.toContain("DJ voice belongs to a station");
+    expect(started).toHaveLength(1);
+    expect(stopCalls).toBe(1);
+    expect(playbackState.pendingDjProgram?.requestText).toBe("change to some soft jazz");
+  });
+
   it("starts a prepared pending DJ program with ducked music under the spoken intro", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};

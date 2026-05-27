@@ -651,6 +651,38 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response, shouldExit: false };
     }
 
+    const inlineDjReplacementRequest = extractInlineDjModeReplacementRequest(userText, input.playbackState);
+    if (inlineDjReplacementRequest && input.playbackState) {
+      input.playbackState.pendingStationRequest = undefined;
+      input.playbackState.pendingStationOriginalRequest = undefined;
+      input.playbackState.pendingStationNeedsChoice = false;
+      cancelDjProgramPreparations(input.playbackState);
+      stopActivePlayback(input.playbackState, store);
+      const prepared = await prepareDjProgramRequest({
+        config,
+        sessionId,
+        store,
+        provider,
+        llm,
+        requestText: inlineDjReplacementRequest,
+        buildContext: input.buildContext,
+        writeStatus,
+        playbackState: input.playbackState,
+        synthesize,
+        playFile,
+        signal
+      });
+      store.addMessage(sessionId, "pockedio", prepared.response);
+      writeOutput(prepared.response);
+      return {
+        sessionId,
+        intent: { type: "pending_station_dj_program", confidence: "high" },
+        response: prepared.response,
+        shouldExit: false,
+        station: prepared.station
+      };
+    }
+
     if (isMidStationDjModeRequest(userText, input.playbackState)) {
       const response = formatMidStationDjModeResponse(config);
       store.addMessage(sessionId, "pockedio", response);
@@ -2134,6 +2166,22 @@ function isMidStationDjModeRequest(text: string, playbackState: InteractivePlayb
     && !playbackState?.pendingStationRequest
     && !hasExplicitPlaybackCommand(text)
     && (normalized === "dj" || normalized === "dj mode" || /\b(dj program|dj version|radio version|spoken version)\b/.test(normalized));
+}
+
+function extractInlineDjModeReplacementRequest(text: string, playbackState: InteractivePlaybackState | undefined): string | null {
+  if (!playbackState?.currentTrackId || playbackState.pendingStationRequest) {
+    return null;
+  }
+  if (!/\b(dj mode|dj program|dj version|radio show|radio version|spoken version)\b/i.test(text)) {
+    return null;
+  }
+
+  const request = text
+    .replace(/\b(dj mode|dj program|dj version|radio show|radio version|spoken version)\b/gi, "")
+    .replace(/\s*,\s*/g, ", ")
+    .replace(/^[,\s]+|[,\s.!?]+$/g, "")
+    .trim();
+  return /\b(change|switch|shift|move)\b\s+(to|into|toward|towards)\b\s+\S+/i.test(request) ? request : null;
 }
 
 function formatMidStationDjModeResponse(config: PockedioConfig): string {
