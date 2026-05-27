@@ -133,7 +133,8 @@ describe("status report", () => {
         apiKeySource: "missing"
       },
       fishAudio: { pythonPath: "", scriptPath: "", modelDir: "", pathsPresent: false, missing: [] },
-      voice: { summary: "Text-only DJ copy", showFishMissing: false },
+      kokoroAudio: { pythonPath: "", modelPath: "", voicesPath: "", pathsPresent: false, missing: [] },
+      voice: { summary: "Text-only DJ copy", showFishMissing: false, showKokoroMissing: false },
       calendar: { enabled: false },
       weather: { enabled: false },
       taste: { path: "/tmp/taste.md", present: false },
@@ -177,9 +178,17 @@ describe("status report", () => {
         pathsPresent: true,
         missing: []
       },
+      kokoroAudio: {
+        pythonPath: "/kokoro-python",
+        modelPath: "/kokoro.onnx",
+        voicesPath: "/voices.bin",
+        pathsPresent: true,
+        missing: []
+      },
       voice: {
         summary: "Mina, Fish TTS ready",
-        showFishMissing: false
+        showFishMissing: false,
+        showKokoroMissing: false
       },
       calendar: { enabled: true },
       weather: { enabled: true, location: "Shanghai" },

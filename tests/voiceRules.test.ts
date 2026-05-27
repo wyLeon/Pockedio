@@ -6,6 +6,7 @@ import { loadConfig } from "../src/config/load.js";
 import { shouldUseSpokenDjAudio } from "../src/dj/voiceRules.js";
 import { synthesizeFishAudio, type FishAudioProcessRunner } from "../src/tts/fishAudio.js";
 import { synthesizeDjAudio, type DjAudioProcessRunner } from "../src/tts/djAudio.js";
+import { synthesizeKokoroAudio, type KokoroAudioProcessRunner } from "../src/tts/kokoroAudio.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-voice-test-"));
@@ -115,6 +116,34 @@ describe("FishAudio adapter", () => {
   });
 });
 
+describe("KokoroAudio adapter", () => {
+  it("passes configured model, voices, voice, and language to Kokoro", async () => {
+    const config = makeConfig();
+    config.tts.kokoroVoice = "bf_isabella";
+    config.kokoroAudio.pythonPath = "/kokoro-python";
+    config.kokoroAudio.modelPath = "/kokoro.onnx";
+    config.kokoroAudio.voicesPath = "/voices.bin";
+    let observedCommand = "";
+    let observedArgs: string[] = [];
+    const runner: KokoroAudioProcessRunner = async (command, args) => {
+      observedCommand = command;
+      observedArgs = args;
+      const output = args.at(-1)!;
+      fs.writeFileSync(output, "wav");
+      return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const result = await synthesizeKokoroAudio(config, "Welcome back.", { runner });
+
+    expect(result.ok).toBe(true);
+    expect(observedCommand).toBe("/kokoro-python");
+    expect(observedArgs).toContain("/kokoro.onnx");
+    expect(observedArgs).toContain("/voices.bin");
+    expect(observedArgs).toContain("bf_isabella");
+    expect(observedArgs).toContain("en-gb");
+  });
+});
+
 describe("DJ audio provider resolution", () => {
   it("uses text fallback when TTS provider is text", async () => {
     const config = makeConfig();
@@ -164,6 +193,24 @@ describe("DJ audio provider resolution", () => {
     };
 
     const result = await synthesizeDjAudio(config, "Welcome back.", { fishRunner: runner });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.audioPath).toMatch(/\.wav$/);
+    }
+  });
+
+  it("uses Kokoro when Kokoro TTS is selected", async () => {
+    const config = makeConfig();
+    config.tts.provider = "kokoro";
+    config.tts.kokoroVoice = "am_onyx";
+    const runner: KokoroAudioProcessRunner = async (_command, args) => {
+      const output = args.at(-1)!;
+      fs.writeFileSync(output, "wav");
+      return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const result = await synthesizeDjAudio(config, "Welcome back.", { kokoroRunner: runner });
 
     expect(result.ok).toBe(true);
     if (result.ok) {

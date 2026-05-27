@@ -5,12 +5,15 @@ import { describe, expect, it } from "vitest";
 import { ensureRuntimeDirs, loadConfig } from "../src/config/load.js";
 import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { importTaste } from "../src/taste/importTaste.js";
-import { applyContextSetupKey, applyDjVoiceChooserKey, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveContextSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderContextSetupSurface, renderDjVoiceChooserSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderTasteSummarySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
+import { applyContextSetupKey, applyDjVoiceChooserKey, applyDjVoiceChooserNumberInput, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveContextSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderContextSetupSurface, renderDjVoiceChooserSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderTasteSummarySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-tui-test-"));
   const env = { POCKEDIO_HOME: home };
   const config = loadConfig(env);
+  config.kokoroAudio.pythonPath = path.join(home, "missing-kokoro-python");
+  config.kokoroAudio.modelPath = path.join(home, "missing-kokoro.onnx");
+  config.kokoroAudio.voicesPath = path.join(home, "missing-voices.bin");
   ensureRuntimeDirs(config, env);
   return { config, env };
 }
@@ -360,16 +363,18 @@ describe("MOLE-inspired welcome hub", () => {
 
   it("moves and submits Voice setup actions", () => {
     const { config } = makeConfig();
-    const voice = renderVoiceSetupSurface({ config, platform: "darwin" }, { selectedAction: "fish_tts" });
+    const voice = renderVoiceSetupSurface({ config, platform: "darwin" }, { selectedAction: "kokoro_tts" });
 
     expect(voice).toContain("    1. Choose DJ voice");
-    expect(voice).toContain("▌ > 2. Configure Fish TTS");
-    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit");
+    expect(voice).toContain("▌ > 2. Configure Kokoro TTS");
+    expect(voice).toContain("    3. Configure Fish TTS");
+    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit");
     expect(resolveVoiceSetupAction("1")).toBe("choose_voice");
-    expect(resolveVoiceSetupAction("2")).toBe("fish_tts");
-    expect(resolveVoiceSetupAction("3")).toBe("text_only");
-    expect(resolveVoiceSetupAction("4")).toBeUndefined();
-    expect(applyVoiceSetupKey("choose_voice", { name: "down" })).toEqual({ selectedAction: "fish_tts" });
+    expect(resolveVoiceSetupAction("2")).toBe("kokoro_tts");
+    expect(resolveVoiceSetupAction("3")).toBe("fish_tts");
+    expect(resolveVoiceSetupAction("4")).toBe("text_only");
+    expect(resolveVoiceSetupAction("5")).toBeUndefined();
+    expect(applyVoiceSetupKey("choose_voice", { name: "down" })).toEqual({ selectedAction: "kokoro_tts" });
     expect(applyVoiceSetupKey("fish_tts", { name: "return" })).toEqual({
       selectedAction: "fish_tts",
       submittedAction: "fish_tts"
@@ -384,13 +389,18 @@ describe("MOLE-inspired welcome hub", () => {
     expect(chooser).toContain("SAMPLE");
     expect(chooser).toContain("BUILT-IN VOICES");
     expect(chooser).toContain("   4. Vale      ready, current");
-    expect(chooser).toContain("FISH VOICES");
-    expect(chooser).toContain("▌ > 6. Mina      needs Fish TTS setup");
-    expect(chooser).toContain("Space Preview  |  Enter Save  |  F Fish setup  |  B Back");
+    expect(chooser).toContain("FAST LOCAL VOICES");
+    expect(chooser).toContain("   6. Kore      needs Kokoro TTS setup");
+    expect(chooser).toContain("STUDIO VOICES");
+    expect(chooser).toContain("▌ > 14. Mina");
+    expect(chooser).toContain("needs Fish TTS setup");
+    expect(chooser).toContain("Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B Back");
     expect(applyDjVoiceChooserKey("macos:vale", { name: "down" })).toEqual({ selectedVoice: "macos:sol" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "space" })).toEqual({ selectedVoice: "macos:vale", submit: "preview" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "return" })).toEqual({ selectedVoice: "macos:vale", submit: "save" });
-    expect(applyDjVoiceChooserKey("macos:vale", { name: "7" })).toEqual({ selectedVoice: "fish:nova" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "7" })).toEqual({ selectedVoice: "kokoro:af_nicole" });
+    expect(applyDjVoiceChooserNumberInput("14")).toBe("fish:mina");
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "k" })).toEqual({ selectedVoice: "macos:vale", submit: "kokoro_setup" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "f" })).toEqual({ selectedVoice: "macos:vale", submit: "fish_setup" });
   });
 
@@ -401,6 +411,16 @@ describe("MOLE-inspired welcome hub", () => {
       tts: {
         provider: "macos" as const,
         macosVoice: "sable" as const,
+        kokoroVoice: "af_nicole" as const,
+        fishVoice: "mina" as const
+      }
+    };
+    const kokoroConfig = {
+      ...config,
+      tts: {
+        provider: "kokoro" as const,
+        macosVoice: "vale" as const,
+        kokoroVoice: "bm_george" as const,
         fishVoice: "mina" as const
       }
     };
@@ -409,11 +429,13 @@ describe("MOLE-inspired welcome hub", () => {
       tts: {
         provider: "text" as const,
         macosVoice: "vale" as const,
+        kokoroVoice: "af_nicole" as const,
         fishVoice: "mina" as const
       }
     };
 
     expect(renderVoiceSetupSurface({ config: macosConfig, platform: "darwin" })).toContain("Voice           Sable");
+    expect(renderVoiceSetupSurface({ config: kokoroConfig, platform: "darwin" })).toContain("Voice           George");
     expect(renderVoiceSetupSurface({ config: textConfig, platform: "darwin" })).toContain("Provider        Text-only DJ copy");
   });
 

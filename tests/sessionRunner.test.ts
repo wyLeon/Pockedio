@@ -1099,6 +1099,46 @@ describe("runSessionTurn", () => {
     expect(playbackState.currentIndex).toBe(1);
   });
 
+  it("ignores the killed player process from manual next after replacement playback starts", async () => {
+    const config = makeConfig();
+    const output: string[] = [];
+    const playbackState: InteractivePlaybackState = {};
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null; error?: string }) => void> = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "next",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      writeOutput: (text) => output.push(text)
+    });
+
+    finishers[0]?.({ ok: false, target: "track-1", exitCode: 2, signal: null, error: "Process exited with code 2" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(result.response).toContain("Now playing: 2/5");
+    expect(output.join("\n")).not.toContain("Playback stopped unexpectedly");
+    expect(playbackState.currentIndex).toBe(1);
+  });
+
   it("previous stops the current track and returns to the previous playable track", async () => {
     const config = makeConfig();
     let stopCalls = 0;
@@ -2163,6 +2203,44 @@ describe("runSessionTurn", () => {
       { position: 1, playbackStatus: "failed", failureReason: "Audio output failed." },
       { position: 2, playbackStatus: "playing", failureReason: null }
     ]);
+  });
+
+  it("stops automatic advance after consecutive player process failures", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null; error?: string }) => void> = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          finishers.push(resolve);
+        }),
+        stop: () => undefined
+      })
+    });
+
+    finishers[0]?.({ ok: false, target: "first", exitCode: 2, signal: null, error: "Process exited with code 2" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finishers[1]?.({ ok: false, target: "second", exitCode: 2, signal: null, error: "Process exited with code 2" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const text = output.join("\n");
+    expect(text).toContain("Playback stopped unexpectedly");
+    expect(text).toContain("Trying the next track.");
+    expect(text).toContain("I stopped automatic advance because multiple tracks failed in a row.");
+    expect(text).not.toContain("Now playing: 3/5");
+    expect(playbackState.currentIndex).toBe(1);
+    expect(playbackState.currentTrackId).toBeUndefined();
+    expect(playbackState.activePlayback).toBeUndefined();
   });
 
   it("prints auto-advance playback surfaces after the active conversation response", async () => {

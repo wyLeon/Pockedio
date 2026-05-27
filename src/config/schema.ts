@@ -9,8 +9,9 @@ export const mbtiTypes = [
 
 export const djProgramLengths = ["short", "standard", "extended"] as const;
 export const djStyles = ["direct", "warm", "exploratory", "low-talk"] as const;
-export const ttsProviders = ["auto", "macos", "fish", "text"] as const;
+export const ttsProviders = ["auto", "macos", "kokoro", "fish", "text"] as const;
 export const macosVoices = ["lumen", "sable", "arden", "vale", "sol"] as const;
+export const kokoroVoices = ["af_kore", "af_nicole", "bf_isabella", "am_michael", "am_onyx", "bm_daniel", "bm_george", "bm_lewis"] as const;
 export const fishVoices = ["mina", "nova"] as const;
 export const musicProviders = ["netease"] as const;
 export const neteaseAuthModes = ["anonymous", "account"] as const;
@@ -23,6 +24,10 @@ const scheduledDjProgramSchema = z.object({
 });
 
 export const fishAudioModelDir = ".cache/fishaudio-s2-pro-8bit-mlx";
+export const kokoroAudioDir = ".cache/kokoro-spike";
+export const kokoroAudioPythonPath = `${kokoroAudioDir}/.venv/bin/python`;
+export const kokoroAudioModelPath = `${kokoroAudioDir}/kokoro-v1.0.onnx`;
+export const kokoroAudioVoicesPath = `${kokoroAudioDir}/voices-v1.0.bin`;
 
 export const pockedioConfigSchema = z.object({
   netease: z.object({
@@ -63,6 +68,7 @@ export const pockedioConfigSchema = z.object({
   tts: z.object({
     provider: z.enum(ttsProviders).default("auto"),
     macosVoice: z.enum(macosVoices).default("vale"),
+    kokoroVoice: z.enum(kokoroVoices).default("af_nicole"),
     fishVoice: z.enum(fishVoices).default("mina")
   }).default({}),
   dj: z.object({
@@ -83,6 +89,11 @@ export const pockedioConfigSchema = z.object({
     referenceAudioPath: z.string().min(1).optional(),
     referenceText: z.string().min(1).optional()
   }).default({}),
+  kokoroAudio: z.object({
+    pythonPath: z.string().min(1).default(kokoroAudioPythonPath),
+    modelPath: z.string().min(1).default(kokoroAudioModelPath),
+    voicesPath: z.string().min(1).default(kokoroAudioVoicesPath)
+  }).default({}),
   paths: z.object({
     database: z.string().min(1),
     taste: z.string().min(1),
@@ -99,6 +110,7 @@ export type DjProgramLength = typeof djProgramLengths[number];
 export type DjStyle = typeof djStyles[number];
 export type TtsProvider = typeof ttsProviders[number];
 export type MacosVoice = typeof macosVoices[number];
+export type KokoroVoice = typeof kokoroVoices[number];
 export type FishVoice = typeof fishVoices[number];
 export type ScheduledDjProgramConfig = PockedioConfig["dj"]["schedule"]["morning"];
 export type NetEaseAuthMode = typeof neteaseAuthModes[number];

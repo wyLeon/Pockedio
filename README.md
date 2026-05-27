@@ -20,6 +20,7 @@ See [CHANGELOG.md](CHANGELOG.md) for public release notes.
 - Builds five-track stations from your prompt, taste, context, and memory.
 - Imports NetEase playlists into a local taste profile.
 - Supports built-in macOS voices with no model install.
+- Supports optional Kokoro TTS for fast local DJ voices if you install the local runtime and model.
 - Supports optional Fish TTS for Mina/Nova DJ voices if you already use or install Fish locally.
 - Stores local memory in SQLite and a human-editable `taste.md`.
 
@@ -119,6 +120,8 @@ Do not commit API keys. `.env` and `.env.*` are ignored by git. Use `.env.exampl
 ### Voice
 
 The lowest-friction path is the built-in macOS voice option. It needs no model download.
+
+Kokoro TTS is optional. Use it if you want fast local spoken DJ audio and are comfortable installing a small local Python runtime plus the Kokoro ONNX model and voices file. Pockedio can help detect an existing Kokoro install or guide a local install.
 
 Fish TTS is optional. Use it if you want the local Mina/Nova voice path and are comfortable installing the local runtime and model. Pockedio can help detect an existing Fish install or guide a local install.
 

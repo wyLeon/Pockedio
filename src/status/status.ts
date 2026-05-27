@@ -18,7 +18,7 @@ import {
   type TuiRenderOptions
 } from "../tui/terminalRenderer.js";
 import { resolveRuntimePath } from "../tts/fishAudio.js";
-import { formatFishVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
+import { formatFishVoiceName, formatKokoroVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
 
 export type StatusReport = {
   config: {
@@ -59,9 +59,17 @@ export type StatusReport = {
     pathsPresent: boolean;
     missing: string[];
   };
+  kokoroAudio: {
+    pythonPath: string;
+    modelPath: string;
+    voicesPath: string;
+    pathsPresent: boolean;
+    missing: string[];
+  };
   voice: {
     summary: string;
     showFishMissing: boolean;
+    showKokoroMissing: boolean;
   };
   calendar: {
     enabled: boolean;
@@ -93,6 +101,7 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
   const { config, env } = resolved;
   const provider = new NetEaseProvider(config, resolved.fetchImpl ?? fetch);
   const fishAudio = getFishAudioStatus(config);
+  const kokoroAudio = getKokoroAudioStatus(config);
   const neteaseBase = {
     baseUrl: config.netease.baseUrl,
     authMode: config.netease.authMode,
@@ -121,7 +130,8 @@ export async function getStatusReport(options: PockedioConfig | StatusReportOpti
       apiKeySource: llmApiKeySource
     },
     fishAudio,
-    voice: getVoiceStatus(config, fishAudio),
+    kokoroAudio,
+    voice: getVoiceStatus(config, fishAudio, kokoroAudio),
     calendar: {
       enabled: config.calendar.enabled
     },
@@ -196,16 +206,48 @@ export function getFishAudioStatus(config: PockedioConfig): StatusReport["fishAu
   };
 }
 
-function getVoiceStatus(config: PockedioConfig, fishAudio: StatusReport["fishAudio"]): StatusReport["voice"] {
+export function getKokoroAudioStatus(config: PockedioConfig): StatusReport["kokoroAudio"] {
+  const pythonPath = resolveRuntimePath(config.kokoroAudio.pythonPath);
+  const modelPath = resolveRuntimePath(config.kokoroAudio.modelPath);
+  const voicesPath = resolveRuntimePath(config.kokoroAudio.voicesPath);
+  const checks = [
+    ["python", pythonPath],
+    ["model", modelPath],
+    ["voices", voicesPath]
+  ] as const;
+  const missing = checks
+    .filter(([, targetPath]) => !fs.existsSync(targetPath))
+    .map(([label, targetPath]) => `${label}: ${targetPath}`);
+
+  return {
+    pythonPath,
+    modelPath,
+    voicesPath,
+    pathsPresent: missing.length === 0,
+    missing
+  };
+}
+
+function getVoiceStatus(config: PockedioConfig, fishAudio: StatusReport["fishAudio"], kokoroAudio: StatusReport["kokoroAudio"]): StatusReport["voice"] {
   if (config.tts.provider === "text") {
-    return { summary: "Text-only DJ copy", showFishMissing: false };
+    return { summary: "Text-only DJ copy", showFishMissing: false, showKokoroMissing: false };
   }
   if (config.tts.provider === "macos") {
     return {
       summary: process.platform === "darwin"
         ? `${formatMacosVoiceName(config.tts.macosVoice)}, built-in macOS`
         : "Built-in macOS voice unavailable on this platform",
-      showFishMissing: false
+      showFishMissing: false,
+      showKokoroMissing: false
+    };
+  }
+  if (config.tts.provider === "kokoro") {
+    return {
+      summary: kokoroAudio.pathsPresent
+        ? `${formatKokoroVoiceName(config.tts.kokoroVoice)}, Kokoro TTS ready`
+        : `${formatKokoroVoiceName(config.tts.kokoroVoice)}, Kokoro TTS needs setup`,
+      showFishMissing: false,
+      showKokoroMissing: !kokoroAudio.pathsPresent
     };
   }
   if (config.tts.provider === "fish") {
@@ -213,16 +255,20 @@ function getVoiceStatus(config: PockedioConfig, fishAudio: StatusReport["fishAud
       summary: fishAudio.pathsPresent
         ? `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS ready`
         : `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS needs setup`,
-      showFishMissing: !fishAudio.pathsPresent
+      showFishMissing: !fishAudio.pathsPresent,
+      showKokoroMissing: false
     };
   }
   if (process.platform === "darwin") {
-    return { summary: `${formatMacosVoiceName(config.tts.macosVoice)}, built-in macOS`, showFishMissing: false };
+    return { summary: `${formatMacosVoiceName(config.tts.macosVoice)}, built-in macOS`, showFishMissing: false, showKokoroMissing: false };
   }
   if (fishAudio.pathsPresent) {
-    return { summary: `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS ready`, showFishMissing: false };
+    return { summary: `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS ready`, showFishMissing: false, showKokoroMissing: false };
   }
-  return { summary: "Text-only DJ copy; configure voice for spoken DJ audio", showFishMissing: false };
+  if (kokoroAudio.pathsPresent) {
+    return { summary: `${formatKokoroVoiceName(config.tts.kokoroVoice)}, Kokoro TTS ready`, showFishMissing: false, showKokoroMissing: false };
+  }
+  return { summary: "Text-only DJ copy; configure voice for spoken DJ audio", showFishMissing: false, showKokoroMissing: false };
 }
 
 function getDatabaseStatus(config: PockedioConfig): StatusReport["database"] {
@@ -379,6 +425,10 @@ export function formatStatusReport(report: StatusReport, options: TuiRenderOptio
   if (report.voice.showFishMissing && report.fishAudio.missing.length > 0) {
     lines.push("FishAudio missing:");
     lines.push(...report.fishAudio.missing.map((item) => `- ${item}`));
+  }
+  if (report.voice.showKokoroMissing && report.kokoroAudio.missing.length > 0) {
+    lines.push("Kokoro missing:");
+    lines.push(...report.kokoroAudio.missing.map((item) => `- ${item}`));
   }
   return lines.join("\n");
 }

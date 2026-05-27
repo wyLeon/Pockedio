@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildFishVoicePreview,
   buildMacosVoicePreview,
+  kokoroVoiceLanguage,
+  kokoroVoiceOptions,
   macosVoiceOptions,
   voicePreviewText
 } from "../src/tts/voiceSetup.js";
@@ -25,5 +27,20 @@ describe("voice setup previews", () => {
       label: "Nova",
       sampleText: voicePreviewText
     });
+  });
+
+  it("exposes the curated Kokoro fast local voices", () => {
+    expect(kokoroVoiceOptions.map((voice) => voice.id)).toEqual([
+      "af_kore",
+      "af_nicole",
+      "bf_isabella",
+      "am_michael",
+      "am_onyx",
+      "bm_daniel",
+      "bm_george",
+      "bm_lewis"
+    ]);
+    expect(kokoroVoiceLanguage("bf_isabella")).toBe("en-gb");
+    expect(kokoroVoiceLanguage("af_nicole")).toBe("en-us");
   });
 });

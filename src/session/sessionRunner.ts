@@ -41,7 +41,7 @@ import type { GeneratedStation, StationTrack } from "../station/stationTypes.js"
 import { updateTasteProfile } from "../taste/profile.js";
 import { synthesizeDjAudio as synthesizeFishAudioDefault, type DjAudioOptions as FishAudioOptions } from "../tts/djAudio.js";
 import type { FishAudioResult } from "../tts/fishAudio.js";
-import { formatFishVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
+import { formatFishVoiceName, formatKokoroVoiceName, formatMacosVoiceName } from "../tts/voiceSetup.js";
 import {
   renderPlaybackSurface,
   renderTuiBulletLine,
@@ -127,6 +127,7 @@ export type InteractivePlaybackState = {
   activePlayback?: PlaybackHandle;
   activePlaybackPaused?: boolean;
   lastIntroPlaybackResult?: PlayerResult;
+  consecutivePlaybackFailures?: number;
   djProgram?: DjProgramPlaybackState;
   startUrlPlayback?: StartUrlPlayback;
   startDuckedIntroPlayback?: StartDuckedIntroPlayback;
@@ -231,6 +232,9 @@ export function formatInteractiveStartupDisplayName(config: PockedioConfig, plat
   if (config.tts.provider === "fish") {
     return formatFishVoiceName(config.tts.fishVoice);
   }
+  if (config.tts.provider === "kokoro") {
+    return formatKokoroVoiceName(config.tts.kokoroVoice);
+  }
   if (config.tts.provider === "macos" || (config.tts.provider === "auto" && platform === "darwin")) {
     return formatMacosVoiceName(config.tts.macosVoice);
   }
@@ -243,6 +247,9 @@ export function formatInteractiveStartupDisplayName(config: PockedioConfig, plat
 export function formatRuntimeDjDisplayName(config: PockedioConfig, platform: NodeJS.Platform = process.platform): string {
   if (config.tts.provider === "fish") {
     return formatFishVoiceName(config.tts.fishVoice);
+  }
+  if (config.tts.provider === "kokoro") {
+    return formatKokoroVoiceName(config.tts.kokoroVoice);
   }
   if (config.tts.provider === "macos") {
     return formatMacosVoiceName(config.tts.macosVoice);
@@ -3654,6 +3661,7 @@ async function startTrackAt(
   options: {
     intro?: GeneratedDjProgramIntro;
     startDuckedIntroPlayback?: StartDuckedIntroPlayback;
+    preserveFailureCount?: boolean;
   } = {}
 ): Promise<string> {
   const storedTracks = playbackState.storedTracks ?? [];
@@ -3695,6 +3703,9 @@ async function startTrackAt(
   playbackState.currentStartedAt = now();
   playbackState.activePlayback = handle;
   playbackState.activePlaybackPaused = false;
+  if (!options.preserveFailureCount) {
+    playbackState.consecutivePlaybackFailures = 0;
+  }
   if (options.intro?.rawText) {
     playbackState.djProgram?.spokenTrackIndexes.add(nextIndex);
   }
@@ -3711,6 +3722,7 @@ async function startTrackAt(
       void handleActivePlaybackFailure(playbackState, config, entry, result, nextIndex + 1, startUrlPlayback);
       return;
     }
+    playbackState.consecutivePlaybackFailures = 0;
     void autoAdvancePlayback(playbackState, config, entry.dbId, nextIndex + 1, startUrlPlayback);
   }).catch(() => undefined);
   store.updateTrackPlayback(entry.dbId, "playing");
@@ -3727,6 +3739,16 @@ function formatPlaybackProcessFailure(track: StationTrack, result: PlayerResult)
     `Playback stopped unexpectedly for ${track.title} - ${track.artist}.`,
     `Playback detail: ${detail}`,
     "Trying the next track."
+  ].join("\n");
+}
+
+function formatPlaybackProcessFailureStop(track: StationTrack, result: PlayerResult): string {
+  const detail = result.error
+    ?? (result.signal ? `Process ended with signal ${result.signal}.` : `Process exited with code ${result.exitCode ?? "null"}.`);
+  return [
+    `Playback stopped unexpectedly for ${track.title} - ${track.artist}.`,
+    `Playback detail: ${detail}`,
+    "I stopped automatic advance because multiple tracks failed in a row. Type next to try the following track, or ask for a new station."
   ].join("\n");
 }
 
@@ -3758,11 +3780,23 @@ async function handleActivePlaybackFailure(
     const reason = result.error
       ?? (result.signal ? `Process ended with signal ${result.signal}.` : `Process exited with code ${result.exitCode ?? "null"}.`);
     store.updateTrackPlayback(failedEntry.dbId, "failed", reason);
+    const consecutiveFailures = playbackState.consecutivePlaybackFailures ?? 0;
+    playbackState.consecutivePlaybackFailures = consecutiveFailures + 1;
+    if (consecutiveFailures > 0) {
+      playbackState.activePlayback = undefined;
+      playbackState.activePlaybackPaused = false;
+      playbackState.currentTrackId = undefined;
+      const response = formatPlaybackProcessFailureStop(failedEntry.track, result);
+      storePlaybackOutputMessage(store, playbackState, response);
+      emitPlaybackOutput(playbackState, response);
+      return;
+    }
     const failureNotice = formatPlaybackProcessFailure(failedEntry.track, result);
     const preparedIntro = getPreparedDjIntro(playbackState, startIndex);
     const nextResponse = await startTrackAt(playbackState, config, store, startIndex, startUrlPlayback, () => new Date(), {
       intro: preparedIntro,
-      startDuckedIntroPlayback: playbackState.startDuckedIntroPlayback
+      startDuckedIntroPlayback: playbackState.startDuckedIntroPlayback,
+      preserveFailureCount: true
     });
     const response = [failureNotice, nextResponse].filter(Boolean).join("\n\n");
     storePlaybackOutputMessage(store, playbackState, response);

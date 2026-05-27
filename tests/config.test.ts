@@ -87,7 +87,13 @@ describe("config load and save", () => {
     expect(config.tts).toEqual({
       provider: "auto",
       macosVoice: "vale",
+      kokoroVoice: "af_nicole",
       fishVoice: "mina"
+    });
+    expect(config.kokoroAudio).toEqual({
+      pythonPath: ".cache/kokoro-spike/.venv/bin/python",
+      modelPath: ".cache/kokoro-spike/kokoro-v1.0.onnx",
+      voicesPath: ".cache/kokoro-spike/voices-v1.0.bin"
     });
     expect(config.dj.language).toBe("English");
     expect(config.dj.displayName).toBe("Pockedio");

@@ -486,9 +486,29 @@ Then setup asks for the actual DJ:
 
 ```text
 Choose your DJ
-  Mina - warm, calm, young personal radio
-  Nova - calm male broadcast voice
+  Built-in voices
+    Lumen - clear, familiar, easygoing
+    Sable - soft, intimate, late-night
+    Arden - steady, polished, radio-like
+    Vale - warm, neutral, default
+    Sol - bright, relaxed, upbeat
+
+  Fast local voices
+    Kore - clear, composed, fast local voice
+    Nicole - soft, close, fast local voice
+    Isabella - polished British fast local voice
+    Michael - steady, grounded, fast local voice
+    Onyx - low, direct, fast local voice
+    Daniel - clean British fast local voice
+    George - warm British fast local voice
+    Lewis - relaxed British fast local voice
+
+  Studio voices
+    Mina - warm, calm, young personal radio
+    Nova - calm male broadcast voice
 ```
+
+If a fast local Kokoro voice is selected before Kokoro is ready, the CLI must route the user to Configure Kokoro TTS. Setup must guide the user through local runtime creation, Kokoro package installation, `kokoro-v1.0.onnx` download, `voices-v1.0.bin` download, and a real synthesis test before saving that voice.
 
 ### Taste
 

@@ -9,7 +9,9 @@ import type { TasteImportResult } from "../taste/importTaste.js";
 import {
   fishVoiceOptions,
   formatFishVoiceName,
+  formatKokoroVoiceName,
   formatMacosVoiceName,
+  kokoroVoiceOptions,
   macosVoiceOptions,
   voicePreviewText
 } from "../tts/voiceSetup.js";
@@ -39,12 +41,13 @@ export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" 
 export type LlmProviderId = "openai" | "deepseek" | "openrouter" | "local_vllm" | "custom";
 export type LlmSetupAction = LlmProviderId | "test_connection" | "back" | "quit";
 export type LlmProviderAction = "paste_key" | "use_shell_env" | "change_model" | "change_base_url" | "change_api_key_env" | "check_server" | "discover_models" | "test_connection" | "back" | "quit";
-export type VoiceSetupAction = "choose_voice" | "fish_tts" | "text_only" | "back" | "quit";
+export type VoiceSetupAction = "choose_voice" | "kokoro_tts" | "fish_tts" | "text_only" | "back" | "quit";
 export type ContextSetupAction = "calendar" | "weather" | "diary" | "back" | "quit";
 export type DjVoiceChoiceId =
   | `macos:${PockedioConfig["tts"]["macosVoice"]}`
+  | `kokoro:${PockedioConfig["tts"]["kokoroVoice"]}`
   | `fish:${PockedioConfig["tts"]["fishVoice"]}`;
-export type DjVoiceChooserSubmit = "preview" | "save" | "fish_setup" | "back" | "quit";
+export type DjVoiceChooserSubmit = "preview" | "save" | "kokoro_setup" | "fish_setup" | "back" | "quit";
 export type DjVoiceChooserResult = {
   selectedVoice: DjVoiceChoiceId;
   submit?: DjVoiceChooserSubmit;
@@ -127,7 +130,8 @@ const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string
 ];
 
 const voiceSetupEntries: Array<{ action: VoiceSetupAction; label: string; description: string }> = [
-  { action: "choose_voice", label: "Choose DJ voice", description: "preview Mina, Nova, or built-in voices" },
+  { action: "choose_voice", label: "Choose DJ voice", description: "preview built-in, fast local, or studio voices" },
+  { action: "kokoro_tts", label: "Configure Kokoro TTS", description: "enable fast local voices" },
   { action: "fish_tts", label: "Configure Fish TTS", description: "enable generated Mina or Nova audio" },
   { action: "text_only", label: "Use text-only DJ copy", description: "keep DJ notes without spoken audio" }
 ];
@@ -351,18 +355,19 @@ export function renderVoiceSetupSurface(
 ): string {
   const platform = options.platform ?? process.platform;
   const fishConfigured = isFishTtsReady(options.config);
-  const provider = formatVoiceProvider(options.config, platform, fishConfigured);
+  const kokoroConfigured = isKokoroTtsReady(options.config);
+  const provider = formatVoiceProvider(options.config, platform, fishConfigured, kokoroConfigured);
   const voice = formatConfiguredVoice(options.config, platform);
   const selectedAction = renderOptions.selectedAction ?? "choose_voice";
   return [
     renderTuiPageTitle("VOICE SETUP", renderOptions),
     "",
-    formatVoiceSetupSummaryLine(options.config, platform, fishConfigured, renderOptions),
+    formatVoiceSetupSummaryLine(options.config, platform, fishConfigured, kokoroConfigured, renderOptions),
     "",
     renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
-    formatSetupLine("Provider", fishConfigured ? "Fish TTS" : provider, renderOptions),
-    formatSetupLine("Voice", fishConfigured ? "Mina or Nova" : voice, renderOptions),
-    formatSetupLine("Advanced", fishConfigured ? "Fish TTS configured" : "Fish TTS not configured", renderOptions),
+    formatSetupLine("Provider", provider, renderOptions),
+    formatSetupLine("Voice", voice, renderOptions),
+    formatSetupLine("Advanced", formatVoiceSetupAdvancedStatus(fishConfigured, kokoroConfigured), renderOptions),
     "",
     renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
     ...voiceSetupEntries.map((entry, index) => formatSetupConnectionAction(
@@ -383,7 +388,8 @@ export function renderDjVoiceChooserSurface(
 ): string {
   const platform = options.platform ?? process.platform;
   const fishReady = isFishTtsReady(options.config);
-  const selectedVoice = renderOptions.selectedVoice ?? getCurrentVoiceChoice(options.config, platform, fishReady);
+  const kokoroReady = isKokoroTtsReady(options.config);
+  const selectedVoice = renderOptions.selectedVoice ?? getCurrentVoiceChoice(options.config, platform, fishReady, kokoroReady);
   return [
     renderTuiPageTitle("CHOOSE DJ VOICE", renderOptions),
     "",
@@ -399,14 +405,21 @@ export function renderDjVoiceChooserSurface(
       return formatVoiceChoiceLine(id === selectedVoice, index + 1, voice.label, status, voice.description, renderOptions);
     }),
     "",
-    renderTuiSectionLabel("FISH VOICES", { ...renderOptions, accent: "playback" }),
-    ...fishVoiceOptions.map((voice, index) => {
-      const id: DjVoiceChoiceId = `fish:${voice.id}`;
-      const status = fishReady ? currentVoiceLabel(id, options.config, "ready") : "needs Fish TTS setup";
+    renderTuiSectionLabel("FAST LOCAL VOICES", { ...renderOptions, accent: "playback" }),
+    ...kokoroVoiceOptions.map((voice, index) => {
+      const id: DjVoiceChoiceId = `kokoro:${voice.id}`;
+      const status = kokoroReady ? currentVoiceLabel(id, options.config, "ready") : "needs Kokoro TTS setup";
       return formatVoiceChoiceLine(id === selectedVoice, index + 1 + macosVoiceOptions.length, voice.label, status, voice.description, renderOptions);
     }),
     "",
-    renderTuiFooter("↑↓ Select  |  Space Preview  |  Enter Save  |  F Fish setup  |  B Back", renderOptions)
+    renderTuiSectionLabel("STUDIO VOICES", { ...renderOptions, accent: "playback" }),
+    ...fishVoiceOptions.map((voice, index) => {
+      const id: DjVoiceChoiceId = `fish:${voice.id}`;
+      const status = fishReady ? currentVoiceLabel(id, options.config, "ready") : "needs Fish TTS setup";
+      return formatVoiceChoiceLine(id === selectedVoice, index + 1 + macosVoiceOptions.length + kokoroVoiceOptions.length, voice.label, status, voice.description, renderOptions);
+    }),
+    "",
+    renderTuiFooter("↑↓ Select  |  Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B Back", renderOptions)
   ].join("\n");
 }
 
@@ -647,11 +660,14 @@ export async function promptDjVoiceChooser(
     let selectedVoice = initialVoice ?? getCurrentVoiceChoice(
       options.config,
       options.platform ?? process.platform,
-      isFishTtsReady(options.config)
+      isFishTtsReady(options.config),
+      isKokoroTtsReady(options.config)
     );
     const input = process.stdin;
     const output = process.stdout;
     const previousRawMode = input.isRaw;
+    let pendingNumber = "";
+    let pendingNumberTimer: NodeJS.Timeout | undefined;
 
     const render = () => {
       output.write("\x1B[?25l");
@@ -663,6 +679,9 @@ export async function promptDjVoiceChooser(
       }));
     };
     const cleanup = (submit: DjVoiceChooserSubmit) => {
+      if (pendingNumberTimer) {
+        clearTimeout(pendingNumberTimer);
+      }
       input.off("keypress", onKeypress);
       if (input.isTTY) {
         input.setRawMode(previousRawMode);
@@ -671,7 +690,37 @@ export async function promptDjVoiceChooser(
       output.write("\x1B[?25h\n");
       resolve({ selectedVoice, submit });
     };
+    const flushPendingNumber = (): boolean => {
+      if (!pendingNumber) {
+        return false;
+      }
+      if (pendingNumberTimer) {
+        clearTimeout(pendingNumberTimer);
+        pendingNumberTimer = undefined;
+      }
+      const result = applyDjVoiceChooserNumberInput(pendingNumber);
+      pendingNumber = "";
+      if (result) {
+        selectedVoice = result;
+        return true;
+      }
+      return false;
+    };
     const onKeypress = (_value: string, key: readline.Key) => {
+      if (/^\d$/.test(key.name ?? "")) {
+        pendingNumber += key.name;
+        if (pendingNumberTimer) {
+          clearTimeout(pendingNumberTimer);
+        }
+        pendingNumberTimer = setTimeout(() => {
+          if (flushPendingNumber()) {
+            render();
+          }
+        }, 350);
+        pendingNumberTimer.unref();
+        return;
+      }
+      flushPendingNumber();
       const result = applyDjVoiceChooserKey(selectedVoice, key);
       selectedVoice = result.selectedVoice;
       if (result.submit) {
@@ -781,6 +830,9 @@ export function applyDjVoiceChooserKey(
   if (key.name === "f") {
     return { selectedVoice, submit: "fish_setup" };
   }
+  if (key.name === "k") {
+    return { selectedVoice, submit: "kokoro_setup" };
+  }
   if (key.name === "b") {
     return { selectedVoice, submit: "back" };
   }
@@ -790,6 +842,15 @@ export function applyDjVoiceChooserKey(
   return {
     selectedVoice
   };
+}
+
+export function applyDjVoiceChooserNumberInput(input: string): DjVoiceChoiceId | undefined {
+  const entries = getDjVoiceChoiceEntries();
+  const numericIndex = Number(input) - 1;
+  if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < entries.length) {
+    return entries[numericIndex]!;
+  }
+  return undefined;
 }
 
 export function applyTasteMemoryKey(
@@ -1082,6 +1143,9 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction | undef
   if (normalized === "" || normalized === "enter" || normalized === "choose" || normalized === "voice") {
     return "choose_voice";
   }
+  if (normalized === "kokoro" || normalized === "fast") {
+    return "kokoro_tts";
+  }
   if (normalized === "fish") {
     return "fish_tts";
   }
@@ -1274,6 +1338,7 @@ function formatVoiceSetupSummaryLine(
   config: PockedioConfig,
   platform: NodeJS.Platform,
   fishConfigured: boolean,
+  kokoroConfigured: boolean,
   options: TuiRenderOptions = {}
 ): string {
   if (config.tts.provider === "text") {
@@ -1282,10 +1347,13 @@ function formatVoiceSetupSummaryLine(
   if (fishConfigured || config.tts.provider === "fish") {
     return renderTuiBulletLine("Fish TTS is ready for generated Mina or Nova voice.", options);
   }
-  if (platform === "darwin") {
-    return renderTuiBulletLine("Built-in macOS voice is ready. Fish TTS can add Mina or Nova later.", options);
+  if (kokoroConfigured || config.tts.provider === "kokoro") {
+    return renderTuiBulletLine("Kokoro TTS is ready for fast local voices.", options);
   }
-  return renderTuiBulletLine("Spoken DJ audio needs Fish TTS on this platform.", options);
+  if (platform === "darwin") {
+    return renderTuiBulletLine("Built-in macOS voice is ready. Kokoro or Fish can add generated voices later.", options);
+  }
+  return renderTuiBulletLine("Spoken DJ audio needs Kokoro TTS or Fish TTS on this platform.", options);
 }
 
 function formatScheduledDjSummary(config: PockedioConfig): string {
@@ -1361,18 +1429,24 @@ function formatProviderLine(label: string, value: string): string {
   return `${label.padEnd(12)}${value}`;
 }
 
-function formatVoiceProvider(config: PockedioConfig, platform: NodeJS.Platform, fishConfigured: boolean): string {
+function formatVoiceProvider(config: PockedioConfig, platform: NodeJS.Platform, fishConfigured: boolean, kokoroConfigured: boolean): string {
   if (config.tts.provider === "text") {
     return "Text-only DJ copy";
   }
   if (config.tts.provider === "fish") {
     return "Fish TTS";
   }
+  if (config.tts.provider === "kokoro") {
+    return "Kokoro TTS";
+  }
   if (config.tts.provider === "macos") {
     return platform === "darwin" ? "Built-in macOS voice" : "macOS voice unavailable here";
   }
   if (fishConfigured) {
     return "Fish TTS";
+  }
+  if (kokoroConfigured) {
+    return "Kokoro TTS";
   }
   return platform === "darwin" ? "Built-in macOS voice" : "Text-only DJ copy";
 }
@@ -1384,10 +1458,26 @@ function formatConfiguredVoice(config: PockedioConfig, platform: NodeJS.Platform
   if (config.tts.provider === "fish") {
     return formatFishVoiceName(config.tts.fishVoice);
   }
+  if (config.tts.provider === "kokoro") {
+    return formatKokoroVoiceName(config.tts.kokoroVoice);
+  }
   if (config.tts.provider === "macos" || platform === "darwin") {
     return formatMacosVoiceName(config.tts.macosVoice);
   }
   return "None";
+}
+
+function formatVoiceSetupAdvancedStatus(fishConfigured: boolean, kokoroConfigured: boolean): string {
+  if (fishConfigured && kokoroConfigured) {
+    return "Fish TTS and Kokoro TTS configured";
+  }
+  if (fishConfigured) {
+    return "Fish TTS configured";
+  }
+  if (kokoroConfigured) {
+    return "Kokoro TTS configured";
+  }
+  return "Local generated voices not configured";
 }
 
 export function isFishTtsReady(config: PockedioConfig): boolean {
@@ -1410,6 +1500,20 @@ export function isFishTtsReady(config: PockedioConfig): boolean {
   );
 }
 
+export function isKokoroTtsReady(config: PockedioConfig): boolean {
+  const pythonPath = resolveLocalPath(config.kokoroAudio.pythonPath);
+  const modelPath = resolveLocalPath(config.kokoroAudio.modelPath);
+  const voicesPath = resolveLocalPath(config.kokoroAudio.voicesPath);
+  return Boolean(
+    pythonPath
+    && fs.existsSync(pythonPath)
+    && modelPath
+    && fs.existsSync(modelPath)
+    && voicesPath
+    && fs.existsSync(voicesPath)
+  );
+}
+
 function resolveLocalPath(value: string): string {
   return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
 }
@@ -1417,6 +1521,7 @@ function resolveLocalPath(value: string): string {
 function getDjVoiceChoiceEntries(): DjVoiceChoiceId[] {
   return [
     ...macosVoiceOptions.map((voice) => `macos:${voice.id}` as const),
+    ...kokoroVoiceOptions.map((voice) => `kokoro:${voice.id}` as const),
     ...fishVoiceOptions.map((voice) => `fish:${voice.id}` as const)
   ];
 }
@@ -1424,10 +1529,14 @@ function getDjVoiceChoiceEntries(): DjVoiceChoiceId[] {
 function getCurrentVoiceChoice(
   config: PockedioConfig,
   platform: NodeJS.Platform,
-  fishReady: boolean
+  fishReady: boolean,
+  kokoroReady: boolean
 ): DjVoiceChoiceId {
   if (config.tts.provider === "fish" && fishReady) {
     return `fish:${config.tts.fishVoice}`;
+  }
+  if (config.tts.provider === "kokoro" && kokoroReady) {
+    return `kokoro:${config.tts.kokoroVoice}`;
   }
   if ((config.tts.provider === "macos" || config.tts.provider === "auto") && platform === "darwin") {
     return `macos:${config.tts.macosVoice}`;
@@ -1442,8 +1551,10 @@ function currentVoiceLabel(
 ): string {
   const isCurrent = (id.startsWith("macos:")
     && config.tts.provider !== "fish"
+    && config.tts.provider !== "kokoro"
     && config.tts.provider !== "text"
     && id === `macos:${config.tts.macosVoice}`)
+    || (id.startsWith("kokoro:") && config.tts.provider === "kokoro" && id === `kokoro:${config.tts.kokoroVoice}`)
     || (id.startsWith("fish:") && config.tts.provider === "fish" && id === `fish:${config.tts.fishVoice}`);
   return isCurrent ? `${status}, current` : status;
 }

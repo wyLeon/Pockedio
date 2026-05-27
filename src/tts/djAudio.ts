@@ -10,6 +10,7 @@ import {
   type FishAudioProcessRunner,
   type FishAudioResult
 } from "./fishAudio.js";
+import { synthesizeKokoroAudio, type KokoroAudioProcessRunner } from "./kokoroAudio.js";
 import { buildMacosVoicePreview } from "./voiceSetup.js";
 
 export type DjAudioProcessResult = {
@@ -32,6 +33,7 @@ export type DjAudioOptions = Omit<FishAudioOptions, "runner"> & {
   platform?: NodeJS.Platform;
   runner?: DjAudioProcessRunner;
   fishRunner?: FishAudioProcessRunner;
+  kokoroRunner?: KokoroAudioProcessRunner;
 };
 
 export async function synthesizeDjAudio(
@@ -48,6 +50,14 @@ export async function synthesizeDjAudio(
     return synthesizeFishAudio(config, text, {
       timeoutMs: options.timeoutMs,
       runner: options.fishRunner,
+      signal: options.signal
+    });
+  }
+
+  if (provider === "kokoro") {
+    return synthesizeKokoroAudio(config, text, {
+      timeoutMs: options.timeoutMs,
+      runner: options.kokoroRunner,
       signal: options.signal
     });
   }

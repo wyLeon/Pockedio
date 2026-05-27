@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import fs from "node:fs";
+import path from "node:path";
 import readline from "node:readline/promises";
 import { emitKeypressEvents, type Key } from "node:readline";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
@@ -25,10 +26,13 @@ import {
   buildFishVoicePreview,
   buildMacosVoicePreview,
   fishVoiceOptions,
+  formatKokoroVoiceName,
+  kokoroVoiceOptions,
   macosVoiceOptions,
   voicePreviewText
 } from "./tts/voiceSetup.js";
 import { synthesizeFishAudio } from "./tts/fishAudio.js";
+import { synthesizeKokoroAudio } from "./tts/kokoroAudio.js";
 import {
   buildFishSetupInstallCommands,
   detectFishTtsInstall,
@@ -36,8 +40,15 @@ import {
   type FishSetupDetection
 } from "./tts/fishSetup.js";
 import {
+  buildKokoroSetupInstallCommands,
+  detectKokoroInstall,
+  formatDetectedKokoroSetup,
+  type KokoroSetupDetection
+} from "./tts/kokoroSetup.js";
+import {
   buildWelcomeReadiness,
   isFishTtsReady,
+  isKokoroTtsReady,
   promptDjVoiceChooser,
   promptContextSetup,
   promptLlmProvider,
@@ -423,6 +434,9 @@ async function runVoiceSetupAction(
   if (action === "choose_voice") {
     return chooseDjVoice(undefined, options);
   }
+  if (action === "kokoro_tts") {
+    return await configureKokoroTts() === "quit" ? "quit" : "continue";
+  }
   if (action === "fish_tts") {
     return await configureFishTts() === "quit" ? "quit" : "continue";
   }
@@ -453,6 +467,12 @@ async function chooseDjVoice(
       await saveDjVoiceChoice(result.selectedVoice);
       return options.returnOnConfigured ? "done" : "continue";
     }
+    if (result.submit === "kokoro_setup") {
+      if (await configureKokoroTts() === "quit") {
+        return "quit";
+      }
+      continue;
+    }
     if (result.submit === "fish_setup") {
       if (await configureFishTts() === "quit") {
         return "quit";
@@ -478,6 +498,14 @@ async function previewDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
     await previewMacosVoice(parsed.voice);
     return;
   }
+  if (parsed.provider === "kokoro") {
+    if (!isKokoroTtsReady(loadConfig())) {
+      await pauseWithMessage(formatKokoroTtsMissingMessage());
+      return;
+    }
+    await previewKokoroVoice(parsed.voice);
+    return;
+  }
   if (!isFishTtsReady(loadConfig())) {
     await pauseWithMessage(formatFishTtsMissingMessage());
     return;
@@ -496,6 +524,27 @@ async function saveDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
     await pauseWithMessage(`Saved built-in voice: ${macosVoiceOptions.find((voice) => voice.id === parsed.voice)?.label ?? parsed.voice}`);
     return;
   }
+  if (parsed.provider === "kokoro") {
+    if (!isKokoroTtsReady(loadConfig())) {
+      await pauseWithMessage([
+        `Configure Kokoro TTS before saving ${formatKokoroVoiceName(parsed.voice)}.`,
+        "",
+        formatKokoroTtsMissingMessage()
+      ].join("\n"));
+      await configureKokoroTts();
+      return;
+    }
+    const config = loadConfig();
+    config.tts.kokoroVoice = parsed.voice;
+    const test = await withCliProgress(`Testing ${formatKokoroVoiceName(parsed.voice)}...`, () => synthesizeKokoroAudio(config, voicePreviewText, { timeoutMs: 60_000 }));
+    if (!test.ok) {
+      await pauseWithMessage(`Kokoro voice test failed:\n${test.error}`);
+      return;
+    }
+    saveTtsConfig({ provider: "kokoro", kokoroVoice: parsed.voice });
+    await pauseWithMessage(`Saved fast local voice: ${formatKokoroVoiceName(parsed.voice)}`);
+    return;
+  }
   if (!isFishTtsReady(loadConfig())) {
     await pauseWithMessage([
       "Configure Fish TTS before saving Mina or Nova.",
@@ -512,6 +561,167 @@ async function saveDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
     fishReferenceText: fishReferenceText(parsed.voice)
   });
   await pauseWithMessage(`Saved Fish voice: ${fishVoiceOptions.find((voice) => voice.id === parsed.voice)?.label ?? parsed.voice}`);
+}
+
+async function configureKokoroTts(): Promise<"back" | "quit"> {
+  while (true) {
+    const config = loadConfig();
+    const answer = await promptFishNumberedSurface(4, (selected, options) => renderKokoroTtsSetupSurface(config, selected, options));
+    if (answer === "back" || answer === "quit") {
+      return answer;
+    }
+    if (answer === 1) {
+      await installKokoroTtsLocally();
+      continue;
+    }
+    if (answer === 2) {
+      await useExistingKokoroInstall();
+      continue;
+    }
+    if (answer === 3) {
+      await editKokoroPathsManually();
+      continue;
+    }
+    if (answer === 4) {
+      const next = await testKokoroTtsSetup();
+      if (next === "choose") {
+        await chooseDjVoice(`kokoro:${loadConfig().tts.kokoroVoice}`);
+      }
+      return "back";
+    }
+  }
+}
+
+async function installKokoroTtsLocally(): Promise<void> {
+  const commands = buildKokoroSetupInstallCommands();
+  console.log([
+    "Install Kokoro TTS locally",
+    "",
+    "Kokoro adds fast local DJ voices without a cloud account.",
+    "",
+    "Requirements:",
+    "- Python available through uv",
+    "- Network access for PyPI and GitHub release assets",
+    "- About 350 MB of disk space for the model and voices",
+    "",
+    "Commands:",
+    ...commands.map((command) => `- ${formatCommand(command.command, command.args)}`)
+  ].join("\n"));
+  const confirm = (await askLine("Run these commands now? [y/N] ")).trim().toLowerCase();
+  if (confirm !== "y" && confirm !== "yes") {
+    await pauseWithMessage("Kokoro install was not started. You can run the shown commands yourself, then choose Use existing Kokoro install.");
+    return;
+  }
+
+  for (const command of commands) {
+    const outputArgIndex = command.args.indexOf("-o");
+    if (outputArgIndex >= 0 && fs.existsSync(command.args[outputArgIndex + 1]!)) {
+      continue;
+    }
+    const result = await withCliProgress(`Running ${command.label}...`, () => runProcess(command.command, command.args, 600_000));
+    if (!result.ok) {
+      await pauseWithMessage(`Kokoro install failed during "${command.label}".\n${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
+      return;
+    }
+  }
+
+  const detection = detectKokoroInstall(loadConfig());
+  saveDetectedKokoroSetup(detection);
+  await pauseWithMessage([
+    "Kokoro TTS install completed.",
+    "",
+    formatDetectedKokoroSetup(detection),
+    "",
+    "Run Test Kokoro TTS next to verify synthesis."
+  ].join("\n"));
+}
+
+async function useExistingKokoroInstall(): Promise<void> {
+  while (true) {
+    const detection = await withCliProgress("Searching Kokoro TTS install...", async () => detectKokoroInstall(loadConfig()));
+    const answer = await promptFishNumberedSurface(3, (selected, options) => renderUseExistingKokoroSurface(detection, selected, options));
+    if (answer === "back" || answer === "quit") {
+      return;
+    }
+    if (answer === 1) {
+      if (detection.missing.length > 0) {
+        await pauseWithMessage([
+          "Detected setup is incomplete.",
+          ...detection.missing.map((item) => `- Missing: ${item}`),
+          "",
+          "Choose Edit paths, Install Kokoro TTS locally, or add the missing files and search again."
+        ].join("\n"));
+        continue;
+      }
+      await withCliProgress("Saving detected Kokoro TTS setup...", async () => saveDetectedKokoroSetup(detection));
+      await pauseWithMessage("Saved detected Kokoro TTS setup. Run Test Kokoro TTS next.");
+      return;
+    }
+    if (answer === 2) {
+      await editKokoroPathsManually();
+      return;
+    }
+    if (answer === 3) {
+      continue;
+    }
+  }
+}
+
+async function editKokoroPathsManually(): Promise<void> {
+  while (true) {
+    const config = loadConfig();
+    const answer = await promptFishNumberedSurface(4, (selected, options) => renderKokoroManualPathSurface(config, selected, options));
+    if (answer === "back" || answer === "quit") {
+      return;
+    }
+    if (answer === 1) {
+      const pythonPath = await askLineWithBack("Python path", config.kokoroAudio.pythonPath);
+      if (pythonPath !== "back") {
+        saveKokoroAudioConfig({ pythonPath: pythonPath || config.kokoroAudio.pythonPath });
+      }
+      continue;
+    }
+    if (answer === 2) {
+      const modelPath = await askLineWithBack("Model path", config.kokoroAudio.modelPath);
+      if (modelPath !== "back") {
+        saveKokoroAudioConfig({ modelPath: modelPath || config.kokoroAudio.modelPath });
+      }
+      continue;
+    }
+    if (answer === 3) {
+      const voicesPath = await askLineWithBack("Voices path", config.kokoroAudio.voicesPath);
+      if (voicesPath !== "back") {
+        saveKokoroAudioConfig({ voicesPath: voicesPath || config.kokoroAudio.voicesPath });
+      }
+      continue;
+    }
+    if (answer === 4) {
+      await testKokoroTtsSetup();
+      return;
+    }
+  }
+}
+
+async function testKokoroTtsSetup(): Promise<"choose" | "return" | "keep"> {
+  const config = loadConfig();
+  if (!isKokoroTtsReady(config)) {
+    await pauseWithMessage(formatKokoroTtsMissingMessage());
+    return "return";
+  }
+  const result = await withCliProgress("Testing Kokoro TTS...", () => synthesizeKokoroAudio(config, voicePreviewText, { timeoutMs: 60_000 }));
+  if (!result.ok) {
+    await pauseWithMessage(`Kokoro TTS test failed:\n${result.error}`);
+    return "return";
+  }
+  await previewGeneratedFishAudio(result.audioPath);
+  const answer = await promptFishNumberedSurface(3, (selected, options) => renderKokoroTtsSuccessSurface(selected, options));
+  if (answer === 1) {
+    return "choose";
+  }
+  if (answer === 3) {
+    return "keep";
+  }
+  return "return";
 }
 
 async function configureFishTts(): Promise<"back" | "quit"> {
@@ -583,7 +793,7 @@ async function installFishTtsLocally(): Promise<void> {
     "",
     formatDetectedFishSetup(detection),
     "",
-    "Run Test Fish TTS next to verify synthesis."
+    "If references are missing, choose Edit paths and generate Mina/Nova references. Then run Test Fish TTS."
   ].join("\n"));
 }
 
@@ -600,7 +810,7 @@ async function useExistingFishTtsInstall(): Promise<void> {
           "Detected setup is incomplete.",
           ...detection.missing.map((item) => `- Missing: ${item}`),
           "",
-          "Choose Edit paths, Install Fish TTS locally, or add the missing files and search again."
+          "Choose Edit paths to generate missing Mina/Nova references, install Fish TTS locally, or add the missing files and search again."
         ].join("\n"));
         continue;
       }
@@ -647,13 +857,11 @@ async function editFishTtsPathsManually(): Promise<void> {
       continue;
     }
     if (answer === 4) {
-      saveFishReference("mina");
-      await pauseWithMessage("Saved Mina as the Fish reference voice.");
+      await generateFishReference("mina");
       continue;
     }
     if (answer === 5) {
-      saveFishReference("nova");
-      await pauseWithMessage("Saved Nova as the Fish reference voice.");
+      await generateFishReference("nova");
       continue;
     }
     if (answer === 6) {
@@ -694,6 +902,18 @@ async function previewMacosVoice(voiceId: ReturnType<typeof loadConfig>["tts"]["
   }
 }
 
+async function previewKokoroVoice(voiceId: ReturnType<typeof loadConfig>["tts"]["kokoroVoice"]): Promise<void> {
+  const config = loadConfig();
+  config.tts.kokoroVoice = voiceId;
+  const label = formatKokoroVoiceName(voiceId);
+  const result = await withCliProgress(`Generating ${label} preview...`, () => synthesizeKokoroAudio(config, voicePreviewText, { timeoutMs: 60_000 }));
+  if (!result.ok) {
+    await pauseWithMessage(`Kokoro voice preview failed:\n${result.error}`);
+    return;
+  }
+  await previewGeneratedFishAudio(result.audioPath);
+}
+
 async function previewFishVoice(voiceId: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): Promise<void> {
   const preview = buildFishVoicePreview(voiceId, getPockedioHome());
   if (!fs.existsSync(preview.args[0]!)) {
@@ -714,18 +934,105 @@ async function previewFishVoice(voiceId: ReturnType<typeof loadConfig>["tts"]["f
 async function previewGeneratedFishAudio(audioPath: string): Promise<void> {
   const result = await runProcess("afplay", [audioPath], 12_000);
   if (!result.ok) {
-    await pauseWithMessage(`Fish TTS generated audio, but preview playback failed: ${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
+    await pauseWithMessage(`Generated audio, but preview playback failed: ${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
   }
 }
 
 function parseDjVoiceChoice(choice: DjVoiceChoiceId):
   | { provider: "macos"; voice: ReturnType<typeof loadConfig>["tts"]["macosVoice"] }
+  | { provider: "kokoro"; voice: ReturnType<typeof loadConfig>["tts"]["kokoroVoice"] }
   | { provider: "fish"; voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"] } {
-  const [provider, voice] = choice.split(":") as ["macos" | "fish", string];
+  const [provider, voice] = choice.split(":") as ["macos" | "kokoro" | "fish", string];
   if (provider === "fish") {
     return { provider, voice: voice as ReturnType<typeof loadConfig>["tts"]["fishVoice"] };
   }
+  if (provider === "kokoro") {
+    return { provider, voice: voice as ReturnType<typeof loadConfig>["tts"]["kokoroVoice"] };
+  }
   return { provider, voice: voice as ReturnType<typeof loadConfig>["tts"]["macosVoice"] };
+}
+
+function renderKokoroTtsSetupSurface(config: ReturnType<typeof loadConfig>, selected = 1, options: TuiRenderOptions = {}): string {
+  const detection = detectKokoroInstall(config);
+  const actions = [
+    { label: "Install Kokoro TTS locally", description: "create runtime and download model files" },
+    { label: "Use existing Kokoro install", description: "detect local runtime and model paths" },
+    { label: "Edit paths manually", description: "set Python, model, and voices paths" },
+    { label: "Test Kokoro TTS", description: "generate and play a voice sample" }
+  ];
+  return [
+    renderTuiPageTitle("KOKORO TTS SETUP", options),
+    "",
+    renderTuiBulletLine("Kokoro TTS adds fast local voices. Studio Fish voices remain available separately.", options),
+    "",
+    renderTuiSectionLabel("STATUS", { ...options, accent: "playback" }),
+    renderTuiKeyValue("Runtime", detection.pythonReady ? "Found" : "Missing", 15, options),
+    renderTuiKeyValue("Model", detection.modelPath ? "Found" : "Missing", 15, options),
+    renderTuiKeyValue("Voices", detection.voicesPath ? "Found" : "Missing", 15, options),
+    "",
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+  ].join("\n");
+}
+
+function renderUseExistingKokoroSurface(detection: ReturnType<typeof detectKokoroInstall>, selected = 1, options: TuiRenderOptions = {}): string {
+  const actions = [
+    { label: "Use detected setup", description: "save the found runtime and model paths" },
+    { label: "Edit paths", description: "correct anything that was missed" },
+    { label: "Search again", description: "rescan common local locations" }
+  ];
+  return [
+    renderTuiPageTitle("USE EXISTING KOKORO TTS", options),
+    "",
+    renderTuiBulletLine("Pockedio found these Kokoro TTS paths from common local locations.", options),
+    "",
+    renderTuiSectionLabel("FOUND", { ...options, accent: "playback" }),
+    ...formatDetectedKokoroSetup(detection).split("\n").map((line) => formatFishDetectedLine(line, options)),
+    "",
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit", options)
+  ].join("\n");
+}
+
+function renderKokoroManualPathSurface(config: ReturnType<typeof loadConfig>, selected = 1, options: TuiRenderOptions = {}): string {
+  const actions = [
+    { label: "Python path", description: config.kokoroAudio.pythonPath },
+    { label: "Model path", description: config.kokoroAudio.modelPath },
+    { label: "Voices path", description: config.kokoroAudio.voicesPath },
+    { label: "Test Kokoro TTS", description: "generate and play a voice sample" }
+  ];
+  return [
+    renderTuiPageTitle("KOKORO TTS PATHS", options),
+    "",
+    renderTuiBulletLine("Edit only the path that is wrong, then test Kokoro TTS.", options),
+    "",
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+  ].join("\n");
+}
+
+function renderKokoroTtsSuccessSurface(selected = 1, options: TuiRenderOptions = {}): string {
+  const actions = [
+    { label: "Choose a fast local voice", description: "save a Kokoro voice" },
+    { label: "Return to Voice Setup", description: "review voice settings" },
+    { label: "Keep current voice", description: "leave the active voice unchanged" }
+  ];
+  return [
+    renderTuiPageTitle("KOKORO TTS READY", options),
+    "",
+    renderTuiBulletLine("Fast local voice playback works. You can now choose a Kokoro voice.", options),
+    "",
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open", options)
+  ].join("\n");
 }
 
 function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, selected = 1, options: TuiRenderOptions = {}): string {
@@ -780,8 +1087,8 @@ function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>, s
     { label: "Python path", description: config.fishAudio.pythonPath },
     { label: "Fish script path", description: config.fishAudio.scriptPath },
     { label: "Model directory", description: config.fishAudio.modelDir },
-    { label: "Mina reference", description: fs.existsSync(detection.minaReferencePath) ? "Available" : "Missing" },
-    { label: "Nova reference", description: fs.existsSync(detection.novaReferencePath) ? "Available" : "Missing" },
+    { label: "Generate Mina reference", description: fs.existsSync(detection.minaReferencePath) ? "Available" : "Missing" },
+    { label: "Generate Nova reference", description: fs.existsSync(detection.novaReferencePath) ? "Available" : "Missing" },
     { label: "Test Fish TTS", description: "generate and play a voice sample" }
   ];
   return [
@@ -837,8 +1144,39 @@ function formatFishTtsMissingMessage(): string {
     "Fish TTS is not ready.",
     ...missing.map((item) => `- ${item}`),
     "",
-    "Open Configure Fish TTS and choose Install, Use existing install, or Edit paths manually."
+    "Open Configure Fish TTS. Install or detect the runtime, then choose Edit paths to generate missing Mina/Nova references."
   ].join("\n");
+}
+
+function formatKokoroTtsMissingMessage(): string {
+  const config = loadConfig();
+  const detection = detectKokoroInstall(config);
+  const missing: string[] = [];
+  if (!detection.pythonPath) {
+    missing.push(`Python runtime was not found. Current path: ${config.kokoroAudio.pythonPath}`);
+  } else if (!detection.pythonReady) {
+    missing.push(`Python runtime cannot import kokoro-onnx and soundfile: ${detection.pythonPath}`);
+  }
+  if (!detection.modelPath) {
+    missing.push(`Kokoro model was not found. Current path: ${config.kokoroAudio.modelPath}`);
+  }
+  if (!detection.voicesPath) {
+    missing.push(`Kokoro voices file was not found. Current path: ${config.kokoroAudio.voicesPath}`);
+  }
+  return [
+    "Kokoro TTS is not ready.",
+    ...missing.map((item) => `- ${item}`),
+    "",
+    "Open Configure Kokoro TTS and choose Install, Use existing install, or Edit paths manually."
+  ].join("\n");
+}
+
+function saveDetectedKokoroSetup(detection: KokoroSetupDetection): void {
+  saveKokoroAudioConfig({
+    pythonPath: detection.pythonPath,
+    modelPath: detection.modelPath,
+    voicesPath: detection.voicesPath
+  });
 }
 
 function saveDetectedFishSetup(detection: FishSetupDetection): void {
@@ -892,10 +1230,63 @@ function saveFishReference(voice: ReturnType<typeof loadConfig>["tts"]["fishVoic
   });
 }
 
+async function generateFishReference(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): Promise<void> {
+  const config = loadConfig();
+  const detection = detectFishTtsInstall(config, getPockedioHome());
+  const missingRuntime = detection.missing.filter((item) => item !== "Mina/Nova reference preview audio");
+  if (missingRuntime.length > 0 || !detection.pythonPath || !detection.scriptPath || !detection.modelDir) {
+    await pauseWithMessage([
+      "Fish reference generation needs a complete runtime and model first.",
+      ...missingRuntime.map((item) => `- Missing: ${item}`),
+      "",
+      "Install Fish TTS locally, use an existing install, or edit the runtime/model paths before generating references."
+    ].join("\n"));
+    return;
+  }
+  const preview = buildFishVoicePreview(voice, getPockedioHome());
+  const referenceConfig = {
+    ...config,
+    paths: {
+      ...config.paths,
+      djAudioDir: path.dirname(preview.args[0]!)
+    },
+    fishAudio: {
+      ...config.fishAudio,
+      pythonPath: detection.pythonPath,
+      scriptPath: detection.scriptPath,
+      modelDir: detection.modelDir,
+      referenceAudioPath: undefined,
+      referenceText: undefined
+    }
+  };
+  const result = await withCliProgress(`Generating ${voice} reference...`, () => synthesizeFishAudio(referenceConfig, fishReferenceSeedText(voice), { timeoutMs: 120_000 }));
+  if (!result.ok) {
+    await pauseWithMessage(`Fish reference generation failed:\n${result.error}`);
+    return;
+  }
+  fs.mkdirSync(path.dirname(preview.args[0]!), { recursive: true });
+  if (result.audioPath !== preview.args[0]) {
+    fs.copyFileSync(result.audioPath, preview.args[0]!);
+  }
+  saveFishAudioConfig({
+    pythonPath: detection.pythonPath,
+    scriptPath: detection.scriptPath,
+    modelDir: detection.modelDir
+  });
+  saveFishReference(voice);
+  await pauseWithMessage(`Generated and saved ${fishVoiceOptions.find((candidate) => candidate.id === voice)?.label ?? voice} as the Fish reference voice.`);
+}
+
 function fishReferenceText(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): string {
   return voice === "mina"
     ? "Mina is here. Soft lights, warm songs, and a little room to breathe."
     : "Nova here. Bright rhythm, clean motion, and just enough spark to move.";
+}
+
+function fishReferenceSeedText(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): string {
+  return voice === "mina"
+    ? "[soft young voice][warm tone][low volume] Mina is here. [short pause] Soft lights, warm songs, and room to breathe."
+    : "[calm male voice][warm baritone][professional broadcast tone] Nova here. [short pause] Steady rhythm, clean motion, and just enough spark to move.";
 }
 
 function saveFishAudioConfig(input: {
@@ -915,9 +1306,27 @@ function saveFishAudioConfig(input: {
   });
 }
 
+function saveKokoroAudioConfig(input: {
+  pythonPath?: string;
+  modelPath?: string;
+  voicesPath?: string;
+}): void {
+  const config = loadConfig();
+  saveConfig({
+    ...config,
+    kokoroAudio: {
+      ...config.kokoroAudio,
+      pythonPath: input.pythonPath?.trim() || config.kokoroAudio.pythonPath,
+      modelPath: input.modelPath?.trim() || config.kokoroAudio.modelPath,
+      voicesPath: input.voicesPath?.trim() || config.kokoroAudio.voicesPath
+    }
+  });
+}
+
 function saveTtsConfig(input: {
   provider: ReturnType<typeof loadConfig>["tts"]["provider"];
   macosVoice?: ReturnType<typeof loadConfig>["tts"]["macosVoice"];
+  kokoroVoice?: ReturnType<typeof loadConfig>["tts"]["kokoroVoice"];
   fishVoice?: ReturnType<typeof loadConfig>["tts"]["fishVoice"];
   fishReferenceAudioPath?: string;
   fishReferenceText?: string;
@@ -929,6 +1338,7 @@ function saveTtsConfig(input: {
       ...config.tts,
       provider: input.provider,
       macosVoice: input.macosVoice ?? config.tts.macosVoice,
+      kokoroVoice: input.kokoroVoice ?? config.tts.kokoroVoice,
       fishVoice: input.fishVoice ?? config.tts.fishVoice
     },
     fishAudio: {
