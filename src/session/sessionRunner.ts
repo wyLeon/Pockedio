@@ -77,6 +77,14 @@ type PendingSingleTrackCandidate = {
 type PendingSingleTrackSelection = {
   originalRequest: string;
   candidates: PendingSingleTrackCandidate[];
+  mode?: "initial" | "version";
+  selectedProviderTrackId?: string | null;
+};
+
+type RecentSingleTrackSelection = {
+  originalRequest: string;
+  candidates: PendingSingleTrackCandidate[];
+  selectedProviderTrackId: string | null;
 };
 
 type PreparedDjIntro = GeneratedDjProgramIntro & {
@@ -127,6 +135,7 @@ export type InteractivePlaybackState = {
   pendingStationOriginalRequest?: string;
   pendingStationNeedsChoice?: boolean;
   pendingSingleTrackSelection?: PendingSingleTrackSelection;
+  recentSingleTrackSelection?: RecentSingleTrackSelection;
   pendingSongOrStationSelection?: PendingSongOrStationSelection;
   pendingDjProgram?: PendingDjProgramState;
   currentIndex?: number;
@@ -402,6 +411,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     const pendingSingleTrackCandidate = pendingSingleTrackCancel ? undefined : getPendingSingleTrackCandidate(input.playbackState, userText);
     const pendingSongOrStationCancel = isPendingSongOrStationCancel(input.playbackState, userText);
     const pendingSongOrStationChoice = pendingSongOrStationCancel ? undefined : getPendingSongOrStationChoice(input.playbackState, userText);
+    const singleTrackVersionRequest = !input.playbackState?.pendingSingleTrackSelection
+      && !input.playbackState?.pendingSongOrStationSelection
+      && isSingleTrackVersionRequest(userText);
     const queuePositionIndex = !input.playbackState?.pendingSingleTrackSelection
       && !input.playbackState?.pendingSongOrStationSelection
       ? getRequestedQueuePositionIndex(input.playbackState, userText)
@@ -415,6 +427,8 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       : pendingSongOrStationChoice === "station"
         ? { type: "playback_request" as const, confidence: "high" as const }
       : pendingSongOrStationCancel
+        ? { type: "conversation" as const, confidence: "high" as const }
+      : singleTrackVersionRequest
         ? { type: "conversation" as const, confidence: "high" as const }
       : queuePositionIndex !== undefined
         ? { type: "queue_position_playback" as const, confidence: "high" as const }
@@ -448,6 +462,21 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     if (pendingSongOrStationCancel) {
       input.playbackState!.pendingSongOrStationSelection = undefined;
       const response = "Selection cancelled.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
+    if (singleTrackVersionRequest) {
+      const versionSelection = getRecentSingleTrackVersionSelection(input.playbackState);
+      if (!versionSelection) {
+        const response = "No alternate versions are available for the current track.";
+        store.addMessage(sessionId, "pockedio", response);
+        writeOutput(response);
+        return { sessionId, intent, response, shouldExit: false };
+      }
+      input.playbackState!.pendingSingleTrackSelection = versionSelection;
+      const response = formatSingleTrackChoices(versionSelection);
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -515,6 +544,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (intent.type === "single_track_selection" && pendingSingleTrackCandidate) {
+      const selection = input.playbackState!.pendingSingleTrackSelection;
       input.playbackState!.pendingSingleTrackSelection = undefined;
       input.playbackState!.pendingSongOrStationSelection = undefined;
       input.playbackState!.pendingStationRequest = undefined;
@@ -532,9 +562,19 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         now,
         signal
       });
-      store.addMessage(sessionId, "pockedio", playback.response);
-      writeOutput(playback.response);
-      return { sessionId, intent, response: playback.response, shouldExit: false };
+      if (selection && selection.candidates.length > 1) {
+        input.playbackState!.recentSingleTrackSelection = {
+          originalRequest: selection.originalRequest,
+          candidates: selection.candidates,
+          selectedProviderTrackId: pendingSingleTrackCandidate.track.providerTrackId
+        };
+      }
+      const response = selection && selection.candidates.length > 1
+        ? addVersionHintToDirectPlaybackResponse(playback.response)
+        : playback.response;
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
     }
 
     if (intent.type === "queue_position_playback" && queuePositionIndex !== undefined) {
@@ -957,6 +997,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         input.playbackState.pendingStationRequest = undefined;
         input.playbackState.pendingStationOriginalRequest = undefined;
         input.playbackState.pendingStationNeedsChoice = false;
+        input.playbackState.recentSingleTrackSelection = undefined;
       }
       const playback = await handleFavoritePlaybackRequest({
         config,
@@ -1567,6 +1608,9 @@ async function handleSingleTrackRequest(input: {
   if (!parsed) {
     return { response: "I can play a specific song if you give me the title, or title and artist." };
   }
+  if (input.playbackState) {
+    input.playbackState.recentSingleTrackSelection = undefined;
+  }
 
   const candidates = await withStatus(input.writeStatus, "Searching NetEase...", () => resolveSingleTrackCandidates({
     provider: input.provider,
@@ -1867,20 +1911,27 @@ function storeSingleTrack(sessionId: string, store: MemoryStore, track: StationT
 }
 
 function formatSingleTrackChoices(selection: PendingSingleTrackSelection): string {
-  return formatSingleTrackChoiceSurface(selection, 0);
+  const selectedIndex = selection.selectedProviderTrackId
+    ? Math.max(0, selection.candidates.findIndex((candidate) => candidate.track.providerTrackId === selection.selectedProviderTrackId))
+    : 0;
+  return formatSingleTrackChoiceSurface(selection, selectedIndex);
 }
 
 function formatSingleTrackChoiceSurface(selection: PendingSingleTrackSelection, selectedIndex: number): string {
+  const isVersionSelection = selection.mode === "version";
   return [
-    "I found a few close matches:",
+    isVersionSelection ? "Choose another version:" : "I found a few close matches:",
     renderTuiChoiceList(selection.candidates.map((candidate) => ({
-      label: `${candidate.track.title} - ${candidate.track.artist}`
+      label: `${candidate.track.title} - ${candidate.track.artist}`,
+      meta: isVersionSelection && candidate.track.providerTrackId === selection.selectedProviderTrackId ? "now" : undefined
     })), selectedIndex, {
       color: Boolean(defaultOutput.isTTY),
       width: defaultOutput.columns
     }),
     "",
-    "↑↓ Select  |  Enter Play  |  B Back  |  Esc Cancel"
+    isVersionSelection
+      ? "↑↓ Select  |  Enter Switch  |  B Back  |  Esc Cancel"
+      : "↑↓ Select  |  Enter Play  |  B Back  |  Esc Cancel"
   ].join("\n");
 }
 
@@ -1926,6 +1977,27 @@ function getPendingSongOrStationChoice(
 
 function isPendingSingleTrackCancel(playbackState: InteractivePlaybackState | undefined, text: string): boolean {
   return Boolean(playbackState?.pendingSingleTrackSelection) && /^(b|back|cancel|esc|escape|q)$/i.test(text.trim());
+}
+
+function isSingleTrackVersionRequest(text: string): boolean {
+  return /^(v|versions?|other version|another version|change version|choose another version)$/i.test(text.trim());
+}
+
+function getRecentSingleTrackVersionSelection(playbackState: InteractivePlaybackState | undefined): PendingSingleTrackSelection | undefined {
+  const recent = playbackState?.recentSingleTrackSelection;
+  const current = playbackState?.storedTracks?.[playbackState.currentIndex ?? -1]?.track;
+  if (!recent || !current || !playbackState?.currentTrackId || playbackState.station) {
+    return undefined;
+  }
+  if (!recent.candidates.some((candidate) => candidate.track.providerTrackId === current.providerTrackId)) {
+    return undefined;
+  }
+  return {
+    originalRequest: recent.originalRequest,
+    candidates: recent.candidates,
+    mode: "version",
+    selectedProviderTrackId: current.providerTrackId
+  };
 }
 
 function getPendingSingleTrackCandidate(
@@ -2035,6 +2107,7 @@ async function handlePlaybackRequest(input: {
   }
   if (input.playbackState) {
     cancelDjProgramPreparations(input.playbackState);
+    input.playbackState.recentSingleTrackSelection = undefined;
     input.playbackState.station = station;
     input.playbackState.storedTracks = storedTracks;
     input.playbackState.djProgram = input.djProgramIntro && input.synthesize
@@ -3855,6 +3928,7 @@ function stopActivePlayback(playbackState: InteractivePlaybackState, store: Memo
   playbackState.currentIndex = undefined;
   playbackState.currentTrackId = undefined;
   playbackState.currentStartedAt = undefined;
+  playbackState.recentSingleTrackSelection = undefined;
   activePlayback.stop();
 }
 
@@ -4196,6 +4270,7 @@ async function autoAdvancePlayback(
       const completedTrack = playbackState.storedTracks?.find((entry) => entry.dbId === completedTrackId)?.track;
       if (completedTrack && isDirectSingleTrackPlayback(completedTrack)) {
         const stationRequest = `music like ${completedTrack.title} - ${completedTrack.artist}`;
+        playbackState.recentSingleTrackSelection = undefined;
         playbackState.pendingStationRequest = stationRequest;
         playbackState.pendingStationOriginalRequest = stationRequest;
         playbackState.pendingStationNeedsChoice = true;
@@ -4527,6 +4602,13 @@ function formatDjTrackNote(track: StationTrack): string {
     return formatRationaleNote(track, normalizeTrackRationale(rationale));
   }
   return formatRationaleNote(track, "it fits the station’s direction and keeps the set moving naturally");
+}
+
+function addVersionHintToDirectPlaybackResponse(response: string): string {
+  return response.replace(
+    "Playing this one directly. If you want, I can keep the station door open after it lands.",
+    "Playing this one directly. Type \"v\" for another version."
+  );
 }
 
 function formatRationaleNote(track: StationTrack, rationale: string): string {

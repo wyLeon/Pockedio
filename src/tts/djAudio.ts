@@ -11,6 +11,7 @@ import {
   type FishAudioResult
 } from "./fishAudio.js";
 import { synthesizeKokoroAudio, type KokoroAudioProcessRunner } from "./kokoroAudio.js";
+import { prepareKokoroSpokenText } from "./spokenText.js";
 import { buildMacosVoicePreview } from "./voiceSetup.js";
 
 export type DjAudioProcessResult = {
@@ -55,7 +56,7 @@ export async function synthesizeDjAudio(
   }
 
   if (provider === "kokoro") {
-    return synthesizeKokoroAudio(config, text, {
+    return synthesizeKokoroAudio(config, prepareKokoroSpokenText(text), {
       timeoutMs: options.timeoutMs,
       runner: options.kokoroRunner,
       signal: options.signal

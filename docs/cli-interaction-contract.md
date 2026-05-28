@@ -1384,6 +1384,8 @@ Press Enter to start it, or tell me how to adjust it.
 
 Only after the user presses Enter should Pockedio start the first song quietly under the DJ voice, then hand off to normal-volume playback. This avoids audio appearing from nowhere after a long generation step. It should not speak before every song. Pockedio should treat each transition as a possible DJ cue and decide whether to speak based on program pacing, meaningful mood/artist/context shifts, and the selected program length.
 
+Spoken DJ audio may use provider-specific pronunciation-safe text while the visible transcript preserves original track and artist metadata. Kokoro English voices should avoid unknown CJK/Japanese/Korean artist strings in synthesized speech; FishAudio may receive the original mixed-language script.
+
 Default DJ program pacing:
 
 ```text
@@ -1487,6 +1489,26 @@ Which one?
 Starting playback...
 Now playing: Intro - M83
 ```
+
+After a user chooses from close matches, keep that version list available while the chosen direct track is playing:
+
+```text
+Mina's note:
+Playing this one directly. Type "v" for another version.
+```
+
+The user may type `v` or `versions` to reopen the same list:
+
+```text
+Choose another version:
+> 1. Intro - The xx       now
+  2. Intro - M83
+  3. Intro - Ariana Grande
+
+↑↓ Select  |  Enter Switch  |  B Back  |  Esc Cancel
+```
+
+Selecting another version stops the current direct track and starts the selected one. The same `v` command should remain available after each switch, so the user can move between versions repeatedly. `v` is a typed command plus Enter, not a global hotkey. Bare `1`, `2`, or `3` must only select a version while the version picker is active.
 
 Rules:
 - `play [song] by [artist]` plays one track.

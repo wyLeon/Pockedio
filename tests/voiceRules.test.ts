@@ -186,15 +186,18 @@ describe("DJ audio provider resolution", () => {
   it("uses FishAudio when Fish TTS is selected", async () => {
     const config = makeConfig();
     config.tts.provider = "fish";
+    let observedText = "";
     const runner: FishAudioProcessRunner = async (_command, args) => {
+      observedText = args[args.indexOf("--text") + 1]!;
       const output = args[args.indexOf("--output") + 1]!;
       fs.writeFileSync(output, "wav");
       return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
     };
 
-    const result = await synthesizeDjAudio(config, "Welcome back.", { fishRunner: runner });
+    const result = await synthesizeDjAudio(config, "Here's \"Sway It Hula Girl\" by 小野リサ.", { fishRunner: runner });
 
     expect(result.ok).toBe(true);
+    expect(observedText).toBe("Here's \"Sway It Hula Girl\" by 小野リサ.");
     if (result.ok) {
       expect(result.audioPath).toMatch(/\.wav$/);
     }
@@ -204,17 +207,72 @@ describe("DJ audio provider resolution", () => {
     const config = makeConfig();
     config.tts.provider = "kokoro";
     config.tts.kokoroVoice = "am_onyx";
+    let observedText = "";
     const runner: KokoroAudioProcessRunner = async (_command, args) => {
+      observedText = args.at(-2)!;
       const output = args.at(-1)!;
       fs.writeFileSync(output, "wav");
       return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
     };
 
-    const result = await synthesizeDjAudio(config, "Welcome back.", { kokoroRunner: runner });
+    const result = await synthesizeDjAudio(config, "Here's \"Sway It Hula Girl\" by 小野リサ.", { kokoroRunner: runner });
 
     expect(result.ok).toBe(true);
+    expect(observedText).toBe("Here's \"Sway It Hula Girl\" by Lisa Ono.");
     if (result.ok) {
       expect(result.audioPath).toMatch(/\.wav$/);
     }
+  });
+
+  it("keeps unknown CJK artist names out of Kokoro spoken text", async () => {
+    const config = makeConfig();
+    config.tts.provider = "kokoro";
+    let observedText = "";
+    const runner: KokoroAudioProcessRunner = async (_command, args) => {
+      observedText = args.at(-2)!;
+      const output = args.at(-1)!;
+      fs.writeFileSync(output, "wav");
+      return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const result = await synthesizeDjAudio(config, "Here's \"Midnight\" by 王小明.", { kokoroRunner: runner });
+
+    expect(result.ok).toBe(true);
+    expect(observedText).toBe("Here's \"Midnight\" next.");
+  });
+
+  it("keeps Kokoro unknown-artist fallback from swallowing the rest of the sentence", async () => {
+    const config = makeConfig();
+    config.tts.provider = "kokoro";
+    let observedText = "";
+    const runner: KokoroAudioProcessRunner = async (_command, args) => {
+      observedText = args.at(-2)!;
+      const output = args.at(-1)!;
+      fs.writeFileSync(output, "wav");
+      return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const result = await synthesizeDjAudio(config, "Here's \"Midnight\" by 王小明, a soft opener.", { kokoroRunner: runner });
+
+    expect(result.ok).toBe(true);
+    expect(observedText).toBe("Here's \"Midnight\" next, a soft opener.");
+  });
+
+  it("keeps unknown CJK lead artist names out of Kokoro first-up copy", async () => {
+    const config = makeConfig();
+    config.tts.provider = "kokoro";
+    config.tts.kokoroVoice = "af_nicole";
+    let observedText = "";
+    const runner: KokoroAudioProcessRunner = async (_command, args) => {
+      observedText = args.at(-2)!;
+      const output = args.at(-1)!;
+      fs.writeFileSync(output, "wav");
+      return { ok: true, exitCode: 0, signal: null, stdout: "", stderr: "" };
+    };
+
+    const result = await synthesizeDjAudio(config, "First up, 陶喆 with that playful, funky vibe.", { kokoroRunner: runner });
+
+    expect(result.ok).toBe(true);
+    expect(observedText).toBe("First up, this track with that playful, funky vibe.");
   });
 });
