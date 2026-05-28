@@ -8,10 +8,10 @@ This checklist maps the approved v1 design criteria to implementation and verifi
 - [x] `npm test`
 - [x] `npm run build`
 
-Latest automated pass on 2026-05-27:
+Latest automated pass on 2026-05-28:
 
 - `npm run typecheck`: passed.
-- `npm test`: 381 tests passed.
+- `npm test`: 404 tests passed across 25 files.
 - `npm run build`: passed.
 
 ## Manual Setup
@@ -104,6 +104,12 @@ Latest automated pass on 2026-05-27:
   - `npm run build`: passed.
   - `git diff --check`: passed.
   - `npm pack --dry-run`: package surface reviewed for `pockedio@0.2.0`, 65 files, 133.6 kB package size.
+- Automated release-prep verification passed on 2026-05-28:
+  - `npm run typecheck`: passed.
+  - `npm test`: 404 tests passed across 25 files.
+  - `npm run build`: passed.
+  - `git diff --check`: passed.
+  - `npm pack --dry-run`: package surface reviewed for `pockedio@0.3.0`, 68 files, 140.8 kB package size.
 - Automated verification passed on 2026-05-25:
   - `npm test`: 363 tests passed.
   - `npm run build`: passed.

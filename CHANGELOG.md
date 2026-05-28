@@ -2,6 +2,18 @@
 
 All notable public release changes are documented here.
 
+## 0.3.0 - 2026-05-28
+
+Source update, DJ-mode, and direct-song version release.
+
+- Add `pockedio update --check` and source-tree update guidance for source installs.
+- Improve inline DJ-mode station requests and mid-playback DJ-mode guidance.
+- Keep generated DJ program intros aligned to the local daypart.
+- Ask whether short ambiguous CJK `play` requests should be treated as a song match or a five-song station.
+- Let direct song playback reopen close matches with `v` or `versions` so users can switch between versions repeatedly.
+- Improve Kokoro spoken DJ audio by using provider-specific pronunciation-safe text while preserving visible metadata.
+- Align close-match and choice-list rows with the terminal playback design language.
+
 ## 0.2.0 - 2026-05-27
 
 Voice setup and CLI polish release.
