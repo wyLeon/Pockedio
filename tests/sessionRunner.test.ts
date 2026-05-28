@@ -933,6 +933,138 @@ describe("runSessionTurn", () => {
     expect(started).toEqual(["https://example.com/intro-m83.mp3"]);
     expect(result.response).toContain("Now playing: Intro - M83");
     expect(playbackState.pendingSingleTrackSelection).toBeUndefined();
+    expect(playbackState.recentSingleTrackSelection?.candidates).toHaveLength(3);
+  });
+
+  it("reopens recent single-track versions and lets the user switch repeatedly", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    let stopCalls = 0;
+
+    await runSessionTurn({
+      input: "play Intro",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm()
+    });
+
+    await runSessionTurn({
+      input: "1",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    const picker = await runSessionTurn({
+      input: "v",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(picker.response).toContain("Choose another version:");
+    expect(picker.response).toContain("> 1.  Intro - The xx");
+    expect(picker.response).toContain("now");
+    expect(picker.response).toContain("Enter Switch");
+    expect(playbackState.pendingSingleTrackSelection).toBeDefined();
+
+    const switched = await runSessionTurn({
+      input: "2",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => {
+            stopCalls += 1;
+          }
+        };
+      }
+    });
+
+    expect(switched.response).toContain("Now playing: Intro - M83");
+    expect(started).toEqual(["https://example.com/intro-the-xx.mp3", "https://example.com/intro-m83.mp3"]);
+    expect(stopCalls).toBe(1);
+
+    const reopened = await runSessionTurn({
+      input: "versions",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(reopened.response).toContain("Choose another version:");
+    expect(reopened.response).toContain("Intro - M83");
+    expect(reopened.response).toContain("now");
+  });
+
+  it("clears recent single-track versions when direct playback finishes", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    let finishPlayback: ((result: { ok: boolean; target: string; exitCode: number; signal: null }) => void) | undefined;
+
+    await runSessionTurn({
+      input: "play Intro",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm()
+    });
+
+    await runSessionTurn({
+      input: "1",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise((resolve) => {
+          finishPlayback = resolve;
+        }),
+        stop: () => undefined
+      })
+    });
+
+    expect(playbackState.recentSingleTrackSelection).toBeDefined();
+    finishPlayback?.({ ok: true, target: "direct-track", exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(playbackState.recentSingleTrackSelection).toBeUndefined();
+  });
+
+  it("does not treat v as a version command when no recent versions exist", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    const result = await runSessionTurn({
+      input: "v",
+      config,
+      playbackState,
+      provider: new AmbiguousSongProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.response).toBe("No alternate versions are available for the current track.");
   });
 
   it("lets the user back out of an ambiguous single-track picker", async () => {
