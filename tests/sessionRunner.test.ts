@@ -1173,11 +1173,12 @@ describe("runSessionTurn", () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
 
+    const prompts: string[] = [];
     const result = await runSessionTurn({
       input: "play something soft for my exhausted mood",
       config,
       provider: new FakeProvider(),
-      llm: conversationalLlm("Tonight, soft songs will wrap around you."),
+      llm: conversationalLlm("Tonight, soft songs will wrap around you.", prompts),
       buildContext: async () => ({
         now: "2026-05-25T06:30:00.000Z",
         timeOfDay: "afternoon",
@@ -1188,6 +1189,29 @@ describe("runSessionTurn", () => {
 
     expect(result.response).toContain("This afternoon, soft songs will wrap around you.");
     expect(result.response).not.toContain("Tonight, soft songs");
+    expect(prompts[0]).toContain("device-local daypart=afternoon");
+    expect(prompts[0]).toContain("Do not mention an exact clock time.");
+    expect(prompts[0]).not.toContain("2026-05-25T06:30:00.000Z");
+  });
+
+  it("removes invented exact clock times from generated station intros", async () => {
+    const config = makeConfig();
+
+    const result = await runSessionTurn({
+      input: "play some morning jazz",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Good morning. It's 3 AM, and only jazz can make this hour feel like a sunrise."),
+      buildContext: async () => ({
+        now: "2026-05-27T03:30:00.000Z",
+        timeOfDay: "morning",
+        personality: config.personality
+      }),
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null })
+    });
+
+    expect(result.response).toContain("Good morning. Only jazz can make this hour feel like a sunrise.");
+    expect(result.response).not.toMatch(/\b3\s*a\.?m\.?\b/i);
   });
 
   it("preserves a generated daypart when the user explicitly asks for it", async () => {
@@ -2756,6 +2780,167 @@ describe("runSessionTurn", () => {
     expect(started).toHaveLength(6);
   });
 
+  it("continues a completed station when the user asks for this vibe", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null }) => void> = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            finishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      finishers[index]?.({ ok: true, target: `track-${index + 1}`, exitCode: 0, signal: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const playback = await runSessionTurn({
+      input: "continue this vibe",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(playback.intent.type).toBe("pending_station_confirmation");
+    expect(playback.response).toContain("Now playing: 1/5");
+    expect(started).toHaveLength(6);
+  });
+
+  it("continues the persisted last vibe across interactive state", async () => {
+    const config = makeConfig();
+    const started: string[] = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState: {},
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    const playback = await runSessionTurn({
+      input: "continue last vibe",
+      config,
+      playbackState: {},
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(playback.intent.type).toBe("last_vibe_continuation");
+    expect(playback.response).toContain("Now playing: 1/5");
+    expect(started).toHaveLength(2);
+  });
+
+  it("asks for a direction when no last vibe exists", async () => {
+    const config = makeConfig();
+    const started: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "continue last vibe",
+      config,
+      playbackState: {},
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("last_vibe_continuation");
+    expect(result.response).toBe("I do not have a recent vibe to continue yet. Tell me the direction you want to start from.");
+    expect(started).toHaveLength(0);
+  });
+
+  it("keeps a completed-station continuation available when normal playback is cancelled before it starts", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {
+      pendingStationRequest: "play something for deep work",
+      pendingStationOriginalRequest: "play something for deep work",
+      pendingStationNeedsChoice: false
+    };
+    const controller = new AbortController();
+
+    await expect(runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      signal: controller.signal,
+      buildContext: async () => {
+        controller.abort();
+        return { personality: config.personality };
+      }
+    })).rejects.toThrow("Turn cancelled.");
+
+    expect(playbackState.pendingStationRequest).toBe("play something for deep work");
+    expect(playbackState.pendingStationNeedsChoice).toBe(false);
+
+    const dj = await runSessionTurn({
+      input: "dj",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      synthesizeFishAudio: async (_config, text) => ({ ok: true, audioPath: `/tmp/${text.length}.wav`, latencyMs: 5 }),
+      playFile: async (filePath) => ({ ok: true, target: filePath, exitCode: 0, signal: null })
+    });
+
+    expect(dj.intent.type).toBe("pending_station_dj_program");
+    expect(dj.response).not.toContain("DJ voice belongs to a station");
+  });
+
   it("attaches feedback to the current playing track", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -3525,6 +3710,151 @@ describe("runSessionTurn", () => {
       "1. something deep work - Test Artist"
     ].join("\n"));
     expect(started).toHaveLength(1);
+    expect(playbackState.pendingFavoriteListSelection?.favorites).toHaveLength(1);
+  });
+
+  it("plays a selected favorite from the displayed list", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    withDatabase(config, (db) => {
+      db.prepare(`
+        INSERT INTO taste_signals (id, source_feedback_id, track_id, signal_type, target_type, target_value, weight, context_json, created_at)
+        VALUES (?, NULL, NULL, 'favorite', 'track', ?, 5, NULL, ?)
+      `).run("favorite-city", "City Of Stars - 王OK", "2026-05-21T15:39:37.832Z");
+    });
+
+    await runSessionTurn({
+      input: "List my favorite songs",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    const result = await runSessionTurn({
+      input: "play favorite 1",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("favorite_playback_request");
+    expect(result.response).toContain("Now playing: City Of Stars - 王OK");
+    expect(started).toEqual(["https://example.com/City%20Of%20Stars%20%E7%8E%8BOK.mp3"]);
+    expect(playbackState.pendingFavoriteListSelection).toBeUndefined();
+  });
+
+  it("removes a favorite by displayed list position", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    withDatabase(config, (db) => {
+      const insert = db.prepare(`
+        INSERT INTO taste_signals (id, source_feedback_id, track_id, signal_type, target_type, target_value, weight, context_json, created_at)
+        VALUES (?, NULL, NULL, 'favorite', 'track', ?, 5, NULL, ?)
+      `);
+      insert.run("favorite-a", "City Of Stars - 王OK", "2026-05-21T15:39:37.832Z");
+      insert.run("favorite-b", "City Of Stars - 王OK", "2026-05-21T15:21:11.514Z");
+      insert.run("favorite-c", "Moon River - Vince Guaraldi Trio", "2026-05-21T15:00:22.128Z");
+    });
+
+    await runSessionTurn({
+      input: "List my favorite songs",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    const result = await runSessionTurn({
+      input: "remove favorite 1",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("favorite_remove_request");
+    expect(result.response).toBe("Removed \"City Of Stars - 王OK\" from your favorites.");
+    expect(playbackState.pendingFavoriteListSelection?.favorites.map((favorite) => favorite.targetValue)).toEqual([
+      "Moon River - Vince Guaraldi Trio"
+    ]);
+    const remainingFavorites = withDatabase(config, (db) => db.prepare(`
+      SELECT target_value as targetValue
+      FROM taste_signals
+      WHERE signal_type = 'favorite'
+      ORDER BY created_at DESC
+    `).all());
+    expect(remainingFavorites).toEqual([{ targetValue: "Moon River - Vince Guaraldi Trio" }]);
+  });
+
+  it("removes a favorite by name", async () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const insert = db.prepare(`
+        INSERT INTO taste_signals (id, source_feedback_id, track_id, signal_type, target_type, target_value, weight, context_json, created_at)
+        VALUES (?, NULL, NULL, 'favorite', 'track', ?, 5, NULL, ?)
+      `);
+      insert.run("favorite-city", "City Of Stars - 王OK", "2026-05-21T15:39:37.832Z");
+      insert.run("favorite-moon", "Moon River - Vince Guaraldi Trio", "2026-05-21T15:00:22.128Z");
+    });
+
+    const result = await runSessionTurn({
+      input: "remove City Of Stars from favorites",
+      config,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("favorite_remove_request");
+    expect(result.response).toBe("Removed \"City Of Stars - 王OK\" from your favorites.");
+
+    const list = await runSessionTurn({
+      input: "List my favorite songs",
+      config,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+    expect(list.response).toBe([
+      "Your favorite songs:",
+      "1. Moon River - Vince Guaraldi Trio"
+    ].join("\n"));
+  });
+
+  it("asks which favorite to remove when a name matches multiple favorites", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    withDatabase(config, (db) => {
+      const insert = db.prepare(`
+        INSERT INTO taste_signals (id, source_feedback_id, track_id, signal_type, target_type, target_value, weight, context_json, created_at)
+        VALUES (?, NULL, NULL, 'favorite', 'track', ?, 5, NULL, ?)
+      `);
+      insert.run("favorite-butterfly", "蝴蝶 - 陶喆", "2026-05-21T15:39:37.832Z");
+      insert.run("favorite-butterfly-live", "蝴蝶 (Live) - 陶喆", "2026-05-21T15:21:11.514Z");
+    });
+
+    const result = await runSessionTurn({
+      input: "remove 蝴蝶 from favorites",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("favorite_remove_request");
+    expect(result.response).toContain("Which favorite should I delete?");
+    expect(result.response).toContain("> 1.  蝴蝶 - 陶喆");
+    expect(result.response).toContain("  2.  蝴蝶 (Live) - 陶喆");
+    expect(playbackState.pendingFavoriteListSelection?.mode).toBe("remove");
   });
 
   it("deduplicates historical favorite rows when listing favorite songs", async () => {

@@ -226,10 +226,9 @@ function formatStationLocalTimeContext(context: GenerateStationInput["context"])
     return "Local time context: not available. Do not invent a specific daypart unless the user states one.";
   }
   const parts = [
-    context.timeOfDay ? `device-local daypart=${context.timeOfDay}` : "",
-    context.now ? `timestamp=${context.now}` : ""
+    context.timeOfDay ? `device-local daypart=${context.timeOfDay}` : ""
   ].filter(Boolean).join(", ");
-  return `Local time context: ${parts}. Treat the device-local daypart as authoritative; do not choose or describe tracks as morning, evening, or night if it conflicts.`;
+  return `Local time context: ${parts || "device-local daypart unavailable"}. Treat the device-local daypart as authoritative; do not choose or describe tracks as morning, evening, or night if it conflicts. Do not mention an exact clock time.`;
 }
 
 function formatTasteSignalsForPrompt(signals: PockedioContext["tasteSignals"]): string {

@@ -1340,6 +1340,8 @@ That station’s done. Press Enter to choose how to continue this vibe, or tell 
 
 When the final playable track finishes, return control to the user with this closure message. Keep the finished station’s request as a pending station direction. The first Enter after completion should show the pending-station choice prompt, including the spoken DJ option, instead of immediately starting playback. A second Enter from that choice prompt starts normal playback, while `dj` prepares the spoken DJ version.
 
+Pockedio should also persist the latest station direction as a lightweight last-vibe snapshot. If the user later says `continue this vibe`, `continue last vibe`, `pick up where we left off`, or `same vibe`, use the pending station first, then the persisted snapshot. If neither exists, ask for a direction instead of treating the phrase as a single-song request or pause/resume control. During active playback, `more like this` remains current-track feedback, not last-vibe continuation.
+
 The DJ note should be text in normal station mode and should use the selected DJ name in the label, for example `Mina's note:`. It should sound warm and first-person. It may mention one useful angle:
 
 - why the track fits the user request
@@ -1824,6 +1826,21 @@ play my favorite song / play one of my favorites / play something from my favori
   -> start it through the normal single-track playback surface
   -> if no favorites exist, explain that `favorite this` saves the current song locally
   -> if saved favorites cannot resolve to playable streams, explain the provider limitation and keep the session open
+
+list my favorite songs / show my favorite tracks
+  -> read local high-confidence favorite track signals
+  -> display them as an aligned selectable list when the terminal supports interactive input
+  -> Enter plays the selected favorite through the normal single-track playback surface
+  -> D opens a delete confirmation for the selected favorite
+  -> Esc closes the favorite list without changing playback
+  -> in non-interactive output, print the same favorite order as a plain numbered list
+
+remove favorite 2 / delete City Of Stars from favorites / unfavorite Moon River
+  -> delete only local `favorite` track taste signals for the selected or matched favorite
+  -> do not delete feedback rows, session history, or provider account data
+  -> if a name matches multiple saved favorites, show an aligned selection list in delete mode
+  -> in delete mode, Enter deletes the selected favorite and B/Esc returns without deleting
+  -> if no matching favorite exists, say so and keep the session open
 
 save this vibe / remember this vibe
   -> record save_vibe on current station

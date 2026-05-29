@@ -179,6 +179,17 @@ describe("parseIntent", () => {
     });
   });
 
+  it("classifies favorite removal requests", async () => {
+    await expect(parseIntent("remove favorite 2")).resolves.toEqual({
+      type: "favorite_remove_request",
+      confidence: "high"
+    });
+    await expect(parseIntent("delete City Of Stars from favorites")).resolves.toEqual({
+      type: "favorite_remove_request",
+      confidence: "high"
+    });
+  });
+
   it("classifies playback status requests", async () => {
     await expect(parseIntent("what's playing?")).resolves.toEqual({
       type: "playback_status",
@@ -202,6 +213,14 @@ describe("parseIntent", () => {
   });
 
   it("classifies pause and resume as separate controls", async () => {
+    await expect(parseIntent("continue this vibe")).resolves.toEqual({
+      type: "last_vibe_continuation",
+      confidence: "high"
+    });
+    await expect(parseIntent("continue last vibe")).resolves.toEqual({
+      type: "last_vibe_continuation",
+      confidence: "high"
+    });
     await expect(parseIntent("pause")).resolves.toEqual({
       type: "pause",
       confidence: "high"

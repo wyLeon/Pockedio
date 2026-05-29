@@ -15,6 +15,7 @@ export type SessionIntentType =
   | "single_track_selection"
   | "favorite_playback_request"
   | "favorite_list_request"
+  | "favorite_remove_request"
   | "feedback_like"
   | "feedback_skip"
   | "feedback_ban"
@@ -23,6 +24,7 @@ export type SessionIntentType =
   | "feedback_less_like_this"
   | "feedback_favorite"
   | "feedback_save_vibe"
+  | "last_vibe_continuation"
   | "taste_profile_update"
   | "session_memory_update"
   | "playback_status"
@@ -60,6 +62,7 @@ const intentTypes = new Set<SessionIntentType>([
   "single_track_selection",
   "favorite_playback_request",
   "favorite_list_request",
+  "favorite_remove_request",
   "feedback_like",
   "feedback_skip",
   "feedback_ban",
@@ -68,6 +71,7 @@ const intentTypes = new Set<SessionIntentType>([
   "feedback_less_like_this",
   "feedback_favorite",
   "feedback_save_vibe",
+  "last_vibe_continuation",
   "taste_profile_update",
   "session_memory_update",
   "playback_status",
@@ -95,6 +99,7 @@ export async function parseIntent(input: string, llm?: LlmClient, options: LlmRe
       "Use conversation for artist/song background questions, current-track questions, daily chat, personal reflections, or listening observations.",
       "Use playback_request only when the user asks to start music with words like play, put on, queue, or start.",
       "Use favorite_list_request when the user asks to list, show, or see locally saved favorite songs.",
+      "Use favorite_remove_request when the user asks to remove, delete, or unfavorite a locally saved favorite song.",
       "Use pause for natural stop-temporarily wording like pause, hold on, wait a second, or stop for a moment.",
       "Use resume for natural continuation wording like resume, keep playing, continue the music, carry on, or go on.",
       "Use replay when the user asks to replay, restart, or play the current song again.",
@@ -103,6 +108,7 @@ export async function parseIntent(input: string, llm?: LlmClient, options: LlmRe
       "Use single_track_playback when the user asks to play one specific song title, especially 'play [song] by [artist]'.",
       "Use music_recommendation when the user asks what music they should listen to but does not ask to play it.",
       "Use explicit_dj_audio_request only when the user asks for standalone spoken/audio DJ narration; the runner will redirect this toward station DJ mode.",
+      "Use last_vibe_continuation when the user asks to continue this vibe, continue the last vibe, pick up the last station, or stay in the same vibe without naming a new direction.",
       "Use session_exit only when the user explicitly says quit or exit.",
       `Message: ${input}`
     ].join("\n"),
@@ -129,6 +135,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
     return { type: "conversation", confidence: "low" };
   }
 
+  if (isLastVibeContinuationText(text)) {
+    return { type: "last_vibe_continuation", confidence: "high" };
+  }
   if (isPauseText(text)) {
     return { type: "pause", confidence: "high" };
   }
@@ -216,6 +225,9 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (isFavoritePlaybackRequestText(text)) {
     return { type: "favorite_playback_request", confidence: "high" };
   }
+  if (isFavoriteRemoveRequestText(text)) {
+    return { type: "favorite_remove_request", confidence: "high" };
+  }
   if (isFavoriteListRequestText(text)) {
     return { type: "favorite_list_request", confidence: "high" };
   }
@@ -278,6 +290,12 @@ function isOpenEndedStationSuggestionText(text: string): boolean {
     || /^(?:give me|give something|something for)\b/.test(text);
 }
 
+export function isLastVibeContinuationText(text: string): boolean {
+  return /^(please\s+)?(?:continue|keep|resume|pick up|carry on)\s+(?:this|that|the last|last|same)\s+(?:vibe|station|set|queue|mood|lane)(?:\s+please)?[.!?]*$/.test(text)
+    || /^(please\s+)?(?:continue|pick up|carry on)\s+(?:where we left off|from the last station|from that vibe)(?:\s+please)?[.!?]*$/.test(text)
+    || /^(please\s+)?(?:same vibe|same lane)(?:\s+please)?[.!?]*$/.test(text);
+}
+
 function isPlaybackRequestText(text: string): boolean {
   return hasPlaybackCommand(text)
     || hasMusicSubjectWithAction(text)
@@ -296,6 +314,12 @@ function isFavoritePlaybackRequestText(text: string): boolean {
 function isFavoriteListRequestText(text: string): boolean {
   return /\b(list|show|see|view|what are|what're|tell me)\b.*\b(my )?(favorite|favourite|saved|liked)\s+(songs|tracks|music)\b/.test(text)
     || /\b(my )?(favorite|favourite|saved|liked)\s+(songs|tracks|music)\b.*\b(list|show|see|view)\b/.test(text);
+}
+
+function isFavoriteRemoveRequestText(text: string): boolean {
+  return /^(remove|delete|unfavorite)\s+(favorite\s+)?(?:song\s+|track\s+|#)?[1-9]\d*$/.test(text)
+    || /^(remove|delete|unfavorite)\s+.+\s+from\s+(my\s+)?favou?rites?\.?$/.test(text)
+    || /^unfavorite\s+.+/.test(text);
 }
 
 function isDjProgramPlaybackText(text: string): boolean {

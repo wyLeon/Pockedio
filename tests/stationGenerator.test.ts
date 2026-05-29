@@ -261,6 +261,8 @@ describe("generateStation", () => {
     expect(observedPrompt).toContain("Avoid guidance from memory:");
     expect(observedPrompt).toContain("Local time context: device-local daypart=afternoon");
     expect(observedPrompt).toContain("Treat the device-local daypart as authoritative");
+    expect(observedPrompt).toContain("Do not mention an exact clock time.");
+    expect(observedPrompt).not.toContain("2026-05-24T06:05:00.000Z");
     expect(observedPrompt).toContain("Calendar listening hint:");
     expect(observedPrompt).toContain("Diary listening hint:");
   });

@@ -212,6 +212,31 @@ describe("database migrations", () => {
     });
   });
 
+  it("stores the latest station snapshot for vibe continuation", () => {
+    const config = makeConfig();
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+      const sessionId = store.createSession("conversation", "play something warm");
+
+      store.saveLastStationSnapshot({
+        request: "play something warm",
+        originalRequest: "play something warm",
+        source: "station_completed",
+        sessionId,
+        tracks: [{ title: "Warm Track", artist: "Test Artist" }]
+      });
+
+      expect(store.getLastStationSnapshot()).toMatchObject({
+        request: "play something warm",
+        originalRequest: "play something warm",
+        source: "station_completed",
+        sessionId,
+        tracks: [{ title: "Warm Track", artist: "Test Artist" }],
+        updatedAt: expect.any(String)
+      });
+    });
+  });
+
   it("stores and queries full transcript messages", () => {
     const config = makeConfig();
     withDatabase(config, (db) => {

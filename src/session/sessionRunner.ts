@@ -55,7 +55,7 @@ import {
   renderTuiUserTurn,
   type TuiRenderOptions
 } from "../tui/terminalRenderer.js";
-import { parseDeterministicIntent, parseIntent, type SessionIntent } from "./intent.js";
+import { isLastVibeContinuationText, parseDeterministicIntent, parseIntent, type SessionIntent } from "./intent.js";
 
 type OutputWriter = (text: string) => void;
 type StatusDone = () => void;
@@ -136,6 +136,18 @@ type PendingQueueToneChangeSelection = {
   remainingCount: number;
 };
 
+type FavoriteListMode = "browse" | "remove";
+
+type PendingFavoriteListSelection = {
+  favorites: FavoriteTrackCandidate[];
+  mode: FavoriteListMode;
+};
+
+type FavoriteListAction = {
+  type: "play" | "delete";
+  index: number;
+};
+
 export type InteractivePlaybackState = {
   sessionId?: string;
   station?: GeneratedStation;
@@ -147,6 +159,7 @@ export type InteractivePlaybackState = {
   recentSingleTrackSelection?: RecentSingleTrackSelection;
   pendingSongOrStationSelection?: PendingSongOrStationSelection;
   pendingQueueToneChangeSelection?: PendingQueueToneChangeSelection;
+  pendingFavoriteListSelection?: PendingFavoriteListSelection;
   pendingDjProgram?: PendingDjProgramState;
   currentIndex?: number;
   currentTrackId?: string;
@@ -423,13 +436,17 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     const pendingSongOrStationChoice = pendingSongOrStationCancel ? undefined : getPendingSongOrStationChoice(input.playbackState, userText);
     const pendingQueueToneChangeCancel = isPendingQueueToneChangeCancel(input.playbackState, userText);
     const pendingQueueToneChangeChoice = pendingQueueToneChangeCancel ? undefined : getPendingQueueToneChangeChoice(input.playbackState, userText);
+    const pendingFavoriteListCancel = isPendingFavoriteListCancel(input.playbackState, userText);
+    const pendingFavoriteListAction = pendingFavoriteListCancel ? undefined : getPendingFavoriteListAction(input.playbackState, userText);
     const singleTrackVersionRequest = !input.playbackState?.pendingSingleTrackSelection
       && !input.playbackState?.pendingSongOrStationSelection
       && !input.playbackState?.pendingQueueToneChangeSelection
+      && !input.playbackState?.pendingFavoriteListSelection
       && isSingleTrackVersionRequest(userText);
     const queuePositionIndex = !input.playbackState?.pendingSingleTrackSelection
       && !input.playbackState?.pendingSongOrStationSelection
       && !input.playbackState?.pendingQueueToneChangeSelection
+      && !input.playbackState?.pendingFavoriteListSelection
       ? getRequestedQueuePositionIndex(input.playbackState, userText)
       : undefined;
     let intent = pendingSingleTrackCandidate
@@ -446,6 +463,12 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         ? { type: "feedback_change_vibe" as const, confidence: "high" as const }
       : pendingQueueToneChangeCancel
         ? { type: "conversation" as const, confidence: "high" as const }
+      : pendingFavoriteListAction?.type === "play"
+        ? { type: "favorite_playback_request" as const, confidence: "high" as const }
+      : pendingFavoriteListAction?.type === "delete"
+        ? { type: "favorite_remove_request" as const, confidence: "high" as const }
+      : pendingFavoriteListCancel
+        ? { type: "conversation" as const, confidence: "high" as const }
       : singleTrackVersionRequest
         ? { type: "conversation" as const, confidence: "high" as const }
       : queuePositionIndex !== undefined
@@ -455,6 +478,8 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       : input.playbackState?.pendingStationRequest && isPendingStationDjProgramRequest(userText)
         ? { type: "pending_station_dj_program" as const, confidence: "high" as const }
       : input.playbackState?.pendingStationRequest && isPendingStationConfirmation(input.input)
+        ? { type: "pending_station_confirmation" as const, confidence: "high" as const }
+      : input.playbackState?.pendingStationRequest && isLastVibeContinuationText(userText)
         ? { type: "pending_station_confirmation" as const, confidence: "high" as const }
       : input.playbackState?.pendingStationRequest && isPendingStationDecline(userText)
         ? { type: "pending_station_decline" as const, confidence: "high" as const }
@@ -493,6 +518,14 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     if (pendingQueueToneChangeCancel) {
       input.playbackState!.pendingQueueToneChangeSelection = undefined;
       const response = "Keeping the current queue.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
+    if (pendingFavoriteListCancel) {
+      input.playbackState!.pendingFavoriteListSelection = undefined;
+      const response = "Favorite list closed.";
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -623,6 +656,47 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
+    }
+
+    if (pendingFavoriteListAction && input.playbackState?.pendingFavoriteListSelection) {
+      const favorite = input.playbackState.pendingFavoriteListSelection.favorites[pendingFavoriteListAction.index];
+      if (!favorite) {
+        input.playbackState.pendingFavoriteListSelection = undefined;
+        const response = "That favorite is no longer available.";
+        store.addMessage(sessionId, "pockedio", response);
+        writeOutput(response);
+        return { sessionId, intent, response, shouldExit: false };
+      }
+      if (pendingFavoriteListAction.type === "delete") {
+        const response = removeFavoriteTrackFromSelection(store, input.playbackState, favorite);
+        store.addMessage(sessionId, "pockedio", response);
+        writeOutput(response);
+        return { sessionId, intent, response, shouldExit: false };
+      }
+
+      const resolved = await withStatus(writeStatus, "Finding a favorite...", () => resolveFavoriteTrackCandidate(provider, [favorite]), signal);
+      if (!resolved) {
+        const response = `I could not find a playable stream for ${favorite.title} - ${favorite.artist} right now.`;
+        store.addMessage(sessionId, "pockedio", response);
+        writeOutput(response);
+        return { sessionId, intent, response, shouldExit: false };
+      }
+      input.playbackState.pendingFavoriteListSelection = undefined;
+      const playback = await handleSingleTrackStart({
+        config,
+        sessionId,
+        store,
+        track: resolved,
+        writeStatus,
+        playUrl,
+        startUrlPlayback,
+        playbackState: input.playbackState,
+        now,
+        signal
+      });
+      store.addMessage(sessionId, "pockedio", playback.response);
+      writeOutput(playback.response);
+      return { sessionId, intent, response: playback.response, shouldExit: false };
     }
 
     if (intent.type === "single_track_selection" && pendingSingleTrackCandidate) {
@@ -909,7 +983,20 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     }
 
     if (intent.type === "favorite_list_request") {
-      const response = formatFavoriteSongsList(store.getFavoriteTrackCandidates(20));
+      const favorites = store.getFavoriteTrackCandidates(20);
+      if (input.playbackState && favorites.length > 0) {
+        input.playbackState.pendingFavoriteListSelection = { favorites, mode: "browse" };
+      }
+      const response = input.playbackState && favorites.length > 0 && defaultOutput.isTTY
+        ? formatFavoriteListChoiceSurface({ favorites, mode: "browse" }, 0)
+        : formatFavoriteSongsList(favorites);
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
+    if (intent.type === "favorite_remove_request") {
+      const response = removeFavoriteFromRequest(store, input.playbackState, userText);
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -959,22 +1046,30 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       input.playbackState.pendingStationRequest = undefined;
       input.playbackState.pendingStationOriginalRequest = undefined;
       input.playbackState.pendingStationNeedsChoice = false;
-      const playback = await handlePlaybackRequest({
-        config,
-        sessionId,
-        store,
-        provider,
-        llm,
-        requestText: pendingRequest,
-        intentType: "playback_request",
-        buildContext: input.buildContext,
-        writeStatus,
-        playUrl,
-        startUrlPlayback,
-        playbackState: input.playbackState,
-        now,
-        signal
-      });
+      let playback: Awaited<ReturnType<typeof handlePlaybackRequest>>;
+      try {
+        playback = await handlePlaybackRequest({
+          config,
+          sessionId,
+          store,
+          provider,
+          llm,
+          requestText: pendingRequest,
+          intentType: "playback_request",
+          buildContext: input.buildContext,
+          writeStatus,
+          playUrl,
+          startUrlPlayback,
+          playbackState: input.playbackState,
+          now,
+          signal
+        });
+      } catch (error) {
+        if (isCancellationError(error)) {
+          restorePendingStationRequest(input.playbackState, pendingRequest);
+        }
+        throw error;
+      }
       store.addMessage(sessionId, "pockedio", playback.response);
       writeOutput(playback.response);
       return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
@@ -987,20 +1082,28 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       input.playbackState.pendingStationNeedsChoice = false;
       cancelDjProgramPreparations(input.playbackState);
       stopActivePlayback(input.playbackState, store);
-      const prepared = await prepareDjProgramRequest({
-        config,
-        sessionId,
-        store,
-        provider,
-        llm,
-        requestText: pendingRequest,
-        buildContext: input.buildContext,
-        writeStatus,
-        playbackState: input.playbackState,
-        synthesize,
-        playFile,
-        signal
-      });
+      let prepared: Awaited<ReturnType<typeof prepareDjProgramRequest>>;
+      try {
+        prepared = await prepareDjProgramRequest({
+          config,
+          sessionId,
+          store,
+          provider,
+          llm,
+          requestText: pendingRequest,
+          buildContext: input.buildContext,
+          writeStatus,
+          playbackState: input.playbackState,
+          synthesize,
+          playFile,
+          signal
+        });
+      } catch (error) {
+        if (isCancellationError(error)) {
+          restorePendingStationRequest(input.playbackState, pendingRequest);
+        }
+        throw error;
+      }
       store.addMessage(sessionId, "pockedio", prepared.response);
       writeOutput(prepared.response);
       return { sessionId, intent, response: prepared.response, shouldExit: false, station: prepared.station };
@@ -1023,6 +1126,35 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         response,
         shouldExit: false
       };
+    }
+
+    if (intent.type === "last_vibe_continuation") {
+      const snapshot = store.getLastStationSnapshot();
+      if (!snapshot?.request.trim()) {
+        const response = "I do not have a recent vibe to continue yet. Tell me the direction you want to start from.";
+        store.addMessage(sessionId, "pockedio", response);
+        writeOutput(response);
+        return { sessionId, intent, response, shouldExit: false };
+      }
+      const playback = await handlePlaybackRequest({
+        config,
+        sessionId,
+        store,
+        provider,
+        llm,
+        requestText: snapshot.request,
+        intentType: "playback_request",
+        buildContext: input.buildContext,
+        writeStatus,
+        playUrl,
+        startUrlPlayback,
+        playbackState: input.playbackState,
+        now,
+        signal
+      });
+      store.addMessage(sessionId, "pockedio", playback.response);
+      writeOutput(playback.response);
+      return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
     }
 
     if (intent.type === "music_recommendation") {
@@ -1256,6 +1388,12 @@ function isCancellationError(error: unknown): boolean {
     || (error instanceof Error && (error.name === "AbortError" || /aborted|cancelled|canceled/i.test(error.message)));
 }
 
+function restorePendingStationRequest(playbackState: InteractivePlaybackState, requestText: string): void {
+  playbackState.pendingStationRequest = requestText;
+  playbackState.pendingStationOriginalRequest = requestText;
+  playbackState.pendingStationNeedsChoice = false;
+}
+
 function recordCancelledTurn(config: PockedioConfig, sessionId: string): void {
   const store = new MemoryStore(config);
   try {
@@ -1290,6 +1428,7 @@ function isInstantLocalIntent(type: SessionIntent["type"]): boolean {
     || type === "queue_position_playback"
     || type === "playback_status"
     || type === "favorite_list_request"
+    || type === "favorite_remove_request"
     || type === "feedback_like"
     || type === "feedback_skip"
     || type === "feedback_ban"
@@ -1791,6 +1930,7 @@ async function handleSingleTrackStart(input: {
     input.playbackState.station = undefined;
     input.playbackState.djProgram = undefined;
     input.playbackState.pendingQueueToneChangeSelection = undefined;
+    input.playbackState.pendingFavoriteListSelection = undefined;
     input.playbackState.storedTracks = [storedTrack];
     cancelDjProgramPreparations(input.playbackState);
     stopActivePlayback(input.playbackState, input.store);
@@ -1885,6 +2025,150 @@ function formatFavoriteSongsList(favorites: FavoriteTrackCandidate[]): string {
     "Your favorite songs:",
     ...favorites.map((favorite, index) => `${index + 1}. ${favorite.title} - ${favorite.artist}`)
   ].join("\n");
+}
+
+function formatFavoriteListChoiceSurface(selection: PendingFavoriteListSelection, selectedIndex: number): string {
+  return [
+    selection.mode === "remove" ? "Which favorite should I delete?" : "Your favorite songs:",
+    renderTuiChoiceList(selection.favorites.map((favorite) => ({
+      label: `${favorite.title} - ${favorite.artist}`
+    })), selectedIndex, {
+      color: Boolean(defaultOutput.isTTY),
+      width: defaultOutput.columns
+    }),
+    "",
+    selection.mode === "remove"
+      ? "↑↓ Select  |  Enter Delete  |  B Back  |  Esc Cancel"
+      : "↑↓ Select  |  Enter Play  |  D Delete  |  Esc Close"
+  ].join("\n");
+}
+
+function formatFavoriteDeleteConfirm(favorite: FavoriteTrackCandidate): string {
+  return [
+    "Delete this favorite?",
+    "",
+    `${favorite.title} - ${favorite.artist}`,
+    "",
+    "Y Delete  |  N Cancel"
+  ].join("\n");
+}
+
+function isPendingFavoriteListCancel(playbackState: InteractivePlaybackState | undefined, text: string): boolean {
+  return Boolean(playbackState?.pendingFavoriteListSelection) && /^(b|back|cancel|esc|escape|q)$/i.test(text.trim());
+}
+
+function getPendingFavoriteListAction(
+  playbackState: InteractivePlaybackState | undefined,
+  text: string
+): FavoriteListAction | undefined {
+  const selection = playbackState?.pendingFavoriteListSelection;
+  if (!selection) {
+    return undefined;
+  }
+  const normalized = text.trim().toLowerCase();
+  const encoded = normalized.match(/^favorite:(play|delete):([1-9]\d*)$/);
+  if (encoded) {
+    return getFavoriteListActionFromPosition(selection, encoded[1] === "delete" ? "delete" : "play", Number(encoded[2]));
+  }
+  const numbered = normalized.match(/^([1-9]\d*)$/);
+  if (numbered) {
+    return getFavoriteListActionFromPosition(selection, selection.mode === "remove" ? "delete" : "play", Number(numbered[1]));
+  }
+  const play = normalized.match(/^play\s+(?:favorite\s+)?([1-9]\d*)$/);
+  if (play) {
+    return getFavoriteListActionFromPosition(selection, "play", Number(play[1]));
+  }
+  const removal = normalized.match(/^(?:d|delete|remove|unfavorite)\s*(?:favorite\s+)?(?:song\s+|track\s+|#)?([1-9]\d*)?$/);
+  if (removal?.[1]) {
+    return getFavoriteListActionFromPosition(selection, "delete", Number(removal[1]));
+  }
+  return undefined;
+}
+
+function getFavoriteListActionFromPosition(
+  selection: PendingFavoriteListSelection,
+  type: FavoriteListAction["type"],
+  position: number
+): FavoriteListAction | undefined {
+  const index = position - 1;
+  return index >= 0 && index < selection.favorites.length ? { type, index } : undefined;
+}
+
+function removeFavoriteTrackFromSelection(
+  store: MemoryStore,
+  playbackState: InteractivePlaybackState | undefined,
+  favorite: FavoriteTrackCandidate
+): string {
+  const removed = store.removeFavoriteTrackTarget(favorite.targetValue);
+  const remaining = store.getFavoriteTrackCandidates(20);
+  if (playbackState) {
+    playbackState.pendingFavoriteListSelection = remaining.length > 0
+      ? { favorites: remaining, mode: "browse" }
+      : undefined;
+  }
+  if (removed === 0) {
+    return `"${favorite.title} - ${favorite.artist}" was not in your favorites.`;
+  }
+  return `Removed "${favorite.title} - ${favorite.artist}" from your favorites.`;
+}
+
+function removeFavoriteFromRequest(
+  store: MemoryStore,
+  playbackState: InteractivePlaybackState | undefined,
+  text: string
+): string {
+  const favorites = playbackState?.pendingFavoriteListSelection?.favorites ?? store.getFavoriteTrackCandidates(100);
+  if (favorites.length === 0) {
+    return "No favorite songs saved yet. While a song is playing, type \"favorite this\" to save it here.";
+  }
+
+  const position = parseFavoriteRemovalPosition(text);
+  if (position !== undefined) {
+    const favorite = favorites[position - 1];
+    return favorite
+      ? removeFavoriteTrackFromSelection(store, playbackState, favorite)
+      : `Favorite ${position} is not in the current list.`;
+  }
+
+  const query = parseFavoriteRemovalQuery(text);
+  if (!query) {
+    return "Tell me which favorite to remove, for example: remove favorite 1.";
+  }
+  const matches = findMatchingFavoriteTracks(favorites, query);
+  if (matches.length === 0) {
+    return `I could not find "${query}" in your favorites.`;
+  }
+  if (matches.length > 1) {
+    if (playbackState) {
+      playbackState.pendingFavoriteListSelection = { favorites: matches, mode: "remove" };
+    }
+    return formatFavoriteListChoiceSurface({ favorites: matches, mode: "remove" }, 0);
+  }
+  return removeFavoriteTrackFromSelection(store, playbackState, matches[0]!);
+}
+
+function parseFavoriteRemovalPosition(text: string): number | undefined {
+  const match = text.trim().toLowerCase().match(/^(?:remove|delete|unfavorite)\s+(?:favorite\s+)?(?:song\s+|track\s+|#)?([1-9]\d*)$/);
+  return match ? Number(match[1]) : undefined;
+}
+
+function parseFavoriteRemovalQuery(text: string): string | undefined {
+  const trimmed = text.trim().replace(/[.!?]+$/g, "").trim();
+  const fromFavorites = trimmed.match(/^(?:remove|delete|unfavorite)\s+(.+?)\s+from\s+(?:my\s+)?favou?rites?$/i);
+  if (fromFavorites?.[1]) {
+    return fromFavorites[1].trim();
+  }
+  const unfavorite = trimmed.match(/^unfavorite\s+(.+)$/i);
+  return unfavorite?.[1]?.trim();
+}
+
+function findMatchingFavoriteTracks(favorites: FavoriteTrackCandidate[], query: string): FavoriteTrackCandidate[] {
+  const normalizedQuery = normalizeFavoriteMatchText(query);
+  return favorites.filter((favorite) => normalizeFavoriteMatchText(`${favorite.title} - ${favorite.artist}`).includes(normalizedQuery));
+}
+
+function normalizeFavoriteMatchText(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 async function resolveSingleTrackCandidates(input: {
@@ -2202,6 +2486,7 @@ async function handlePlaybackRequest(input: {
     signal: input.signal
   }), input.signal);
   const storedTracks = storeStation(input.sessionId, input.store, station, input.playbackState === undefined);
+  saveLastStationSnapshot(input.store, input.sessionId, station, "station_started");
   const firstPlayable = station.tracks.find((track) => track.playable.available);
   let playbackFailure: string | undefined;
   let nowPlaying = "";
@@ -2241,6 +2526,7 @@ async function handlePlaybackRequest(input: {
     cancelDjProgramPreparations(input.playbackState);
     input.playbackState.recentSingleTrackSelection = undefined;
     input.playbackState.pendingQueueToneChangeSelection = undefined;
+    input.playbackState.pendingFavoriteListSelection = undefined;
     input.playbackState.station = station;
     input.playbackState.storedTracks = storedTracks;
     input.playbackState.djProgram = input.djProgramIntro && input.synthesize
@@ -2325,6 +2611,7 @@ async function prepareDjProgramRequest(input: {
     signal: input.signal
   }), input.signal);
   const storedTracks = storeStation(input.sessionId, input.store, station, false);
+  saveLastStationSnapshot(input.store, input.sessionId, station, "station_started");
   const firstPlayable = station.tracks.find((track) => track.playable.available);
   if (!firstPlayable) {
     input.playbackState.pendingDjProgram = undefined;
@@ -2387,6 +2674,7 @@ async function startPreparedDjProgram(input: {
   input.playbackState.pendingStationOriginalRequest = undefined;
   input.playbackState.pendingStationNeedsChoice = false;
   input.playbackState.pendingQueueToneChangeSelection = undefined;
+  input.playbackState.pendingFavoriteListSelection = undefined;
   input.playbackState.station = pending.station;
   input.playbackState.storedTracks = pending.storedTracks;
   input.playbackState.djProgram = createDjProgramPlaybackState(pending);
@@ -2748,6 +3036,7 @@ function isProtectedOperationalIntent(type: SessionIntent["type"]): boolean {
     || type === "feedback_more_like_this"
     || type === "feedback_change_vibe"
     || type === "explicit_dj_audio_request"
+    || type === "favorite_remove_request"
     || type === "session_memory_update"
     || type === "pending_station_confirmation"
     || type === "pending_station_dj_program"
@@ -2767,6 +3056,7 @@ function shouldHandlePendingStationFollowup(intent: SessionIntent, userText: str
     || intent.type === "replay"
     || intent.type === "playback_status"
     || intent.type === "favorite_list_request"
+    || intent.type === "favorite_remove_request"
     || intent.type === "identity_capability"
     || intent.type === "explicit_dj_audio_request"
     || intent.type === "session_memory_update"
@@ -3005,10 +3295,9 @@ function formatLocalTimeContextInstruction(context: Partial<PockedioContext> | u
   }
 
   const parts = [
-    context.timeOfDay ? `device-local daypart=${context.timeOfDay}` : "",
-    context.now ? `timestamp=${context.now}` : ""
+    context.timeOfDay ? `device-local daypart=${context.timeOfDay}` : ""
   ].filter(Boolean).join(", ");
-  return `Local time context: ${parts}. Treat the device-local daypart as authoritative; do not call it morning, evening, or night if it conflicts.`;
+  return `Local time context: ${parts || "device-local daypart unavailable"}. Treat the device-local daypart as authoritative; do not call it morning, evening, or night if it conflicts. Do not mention an exact clock time.`;
 }
 
 function alignGeneratedTextToLocalDaypart(
@@ -3082,7 +3371,22 @@ function sanitizeDjNameAsUserAddress(response: string, config?: PockedioConfig):
 }
 
 function sanitizeGeneratedDjCopy(response: string, config?: PockedioConfig): string {
-  return rewriteListenerReferences(rewriteDjSelfIdentification(sanitizeDjNameAsUserAddress(response, config), config));
+  return removeGeneratedExactClockClaims(
+    rewriteListenerReferences(rewriteDjSelfIdentification(sanitizeDjNameAsUserAddress(response, config), config))
+  );
+}
+
+function removeGeneratedExactClockClaims(response: string): string {
+  return restoreSentenceCapitalization(response
+    .replace(/\b(?:it['’]?s|it is)\s+(?:around\s+|about\s+)?\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\s*,?\s*(?:and\s+)?/gi, "")
+    .replace(/\b(?:at|around|about)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b,?\s*/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.!?])/g, "$1")
+    .trim());
+}
+
+function restoreSentenceCapitalization(response: string): string {
+  return response.replace(/(^|[.!?]\s+)([a-z])/g, (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`);
 }
 
 function rewriteDjSelfIdentification(text: string, config?: PockedioConfig): string {
@@ -3420,24 +3724,28 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
         const pendingSingleTrackSelection = playbackState.pendingSingleTrackSelection;
         const pendingSongOrStationSelection = playbackState.pendingSongOrStationSelection;
         const pendingQueueToneChangeSelection = playbackState.pendingQueueToneChangeSelection;
+        const pendingFavoriteListSelection = playbackState.pendingFavoriteListSelection;
         const usesSingleTrackInlinePicker = Boolean(pendingSingleTrackSelection && defaultInput.isTTY && defaultOutput.isTTY);
         const usesSongOrStationInlinePicker = Boolean(!usesSingleTrackInlinePicker && pendingSongOrStationSelection && defaultInput.isTTY && defaultOutput.isTTY);
         const usesQueueToneChangeInlinePicker = Boolean(!usesSingleTrackInlinePicker && !usesSongOrStationInlinePicker && pendingQueueToneChangeSelection && defaultInput.isTTY && defaultOutput.isTTY);
+        const usesFavoriteListInlinePicker = Boolean(!usesSingleTrackInlinePicker && !usesSongOrStationInlinePicker && !usesQueueToneChangeInlinePicker && pendingFavoriteListSelection && defaultInput.isTTY && defaultOutput.isTTY);
         line = usesSingleTrackInlinePicker
           ? await promptPendingSingleTrackSelection(pendingSingleTrackSelection!)
           : usesSongOrStationInlinePicker
             ? await promptPendingSongOrStationSelection(pendingSongOrStationSelection!)
             : usesQueueToneChangeInlinePicker
               ? await promptPendingQueueToneChangeSelection(pendingQueueToneChangeSelection!)
-              : await questionWithInteractiveFrame(rl, defaultInput, defaultOutput, livePromptView, handleInterrupt, {
-                  color: Boolean(defaultOutput.isTTY),
-                  width: defaultOutput.columns
-                });
+              : usesFavoriteListInlinePicker
+                ? await promptPendingFavoriteListSelection(pendingFavoriteListSelection!)
+                : await questionWithInteractiveFrame(rl, defaultInput, defaultOutput, livePromptView, handleInterrupt, {
+                    color: Boolean(defaultOutput.isTTY),
+                    width: defaultOutput.columns
+                  });
         const submittedTurn = formatInteractiveSubmittedUserTurn(line, {
           color: Boolean(defaultOutput.isTTY),
           width: defaultOutput.columns
         });
-        if (!usesSingleTrackInlinePicker && !usesSongOrStationInlinePicker && !usesQueueToneChangeInlinePicker) {
+        if (!usesSingleTrackInlinePicker && !usesSongOrStationInlinePicker && !usesQueueToneChangeInlinePicker && !usesFavoriteListInlinePicker) {
           clearInteractiveSubmittedInputEcho(defaultOutput);
         }
         if (submittedTurn) {
@@ -3679,6 +3987,82 @@ function promptPendingQueueToneChangeSelection(selection: PendingQueueToneChange
   });
 }
 
+function promptPendingFavoriteListSelection(selection: PendingFavoriteListSelection): Promise<string> {
+  return new Promise((resolve) => {
+    let selectedIndex = 0;
+    let confirmingDelete = false;
+    const input = defaultInput;
+    const output = defaultOutput;
+    const previousRawMode = input.isRaw;
+
+    const selectedFavorite = () => selection.favorites[Math.min(selectedIndex, selection.favorites.length - 1)];
+    const render = () => {
+      output.write("\x1B[?25l");
+      output.write("\x1B[H\x1B[2J");
+      const favorite = selectedFavorite();
+      output.write(confirmingDelete && favorite
+        ? formatFavoriteDeleteConfirm(favorite)
+        : formatFavoriteListChoiceSurface(selection, selectedIndex));
+    };
+    const cleanup = (value: string) => {
+      input.off("keypress", onKeypress);
+      restoreInputAfterInlinePrompt(input, previousRawMode);
+      output.write("\x1B[?25h\n");
+      resolve(value);
+    };
+    const onKeypress = (_value: string, key: Key) => {
+      if (confirmingDelete) {
+        if (key.name === "y") {
+          cleanup(`delete favorite ${selectedIndex + 1}`);
+          return;
+        }
+        if (key.name === "n" || key.name === "escape" || key.name === "b" || key.name === "q") {
+          confirmingDelete = false;
+          render();
+        }
+        return;
+      }
+      if (key.name === "up") {
+        selectedIndex = (selectedIndex - 1 + selection.favorites.length) % selection.favorites.length;
+        render();
+        return;
+      }
+      if (key.name === "down") {
+        selectedIndex = (selectedIndex + 1) % selection.favorites.length;
+        render();
+        return;
+      }
+      if (key.name === "return") {
+        cleanup(selection.mode === "remove" ? `delete favorite ${selectedIndex + 1}` : `play favorite ${selectedIndex + 1}`);
+        return;
+      }
+      if (key.name === "d" || key.name === "delete") {
+        confirmingDelete = true;
+        render();
+        return;
+      }
+      if (key.name === "escape") {
+        cleanup("cancel");
+        return;
+      }
+      const numericIndex = Number(key.name) - 1;
+      if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < selection.favorites.length) {
+        cleanup(selection.mode === "remove" ? `delete favorite ${numericIndex + 1}` : `play favorite ${numericIndex + 1}`);
+        return;
+      }
+      if (key.name === "b" || key.name === "q" || (key.ctrl && key.name === "c")) {
+        cleanup("cancel");
+      }
+    };
+
+    emitKeypressEvents(input);
+    input.resume();
+    input.setRawMode(true);
+    input.on("keypress", onKeypress);
+    render();
+  });
+}
+
 type InlinePromptInput = Pick<typeof defaultInput, "isTTY" | "isRaw" | "setRawMode" | "resume">;
 
 export function restoreInputAfterInlinePrompt(input: InlinePromptInput, previousRawMode: boolean | undefined): void {
@@ -3782,6 +4166,24 @@ function storeStation(
     storedTracks.push({ dbId, track });
   }
   return storedTracks;
+}
+
+function saveLastStationSnapshot(
+  store: MemoryStore,
+  sessionId: string | undefined,
+  station: GeneratedStation,
+  source: "station_started" | "station_completed"
+): void {
+  store.saveLastStationSnapshot({
+    request: station.request,
+    originalRequest: station.request,
+    source,
+    sessionId: sessionId ?? null,
+    tracks: station.tracks.map((track) => ({
+      title: track.title,
+      artist: track.artist
+    }))
+  });
 }
 
 function buildStationAvoidTracks(store: MemoryStore, playbackState?: InteractivePlaybackState): StationTrackIdentity[] {
@@ -4232,6 +4634,7 @@ async function advancePlayback(
     playbackState.currentTrackId = undefined;
     playbackState.currentStartedAt = undefined;
     if (playbackState.station) {
+      saveLastStationSnapshot(store, playbackState.sessionId, playbackState.station, "station_completed");
       playbackState.pendingStationRequest = playbackState.station.request;
       playbackState.pendingStationOriginalRequest = playbackState.station.request;
       playbackState.pendingStationNeedsChoice = true;
@@ -4528,6 +4931,7 @@ async function autoAdvancePlayback(
       storePlaybackOutputMessage(store, playbackState, response);
       emitPlaybackOutput(playbackState, response);
     } else if (playbackState.station) {
+      saveLastStationSnapshot(store, playbackState.sessionId, playbackState.station, "station_completed");
       playbackState.pendingStationRequest = playbackState.station.request;
       playbackState.pendingStationOriginalRequest = playbackState.station.request;
       playbackState.pendingStationNeedsChoice = true;
@@ -4542,6 +4946,13 @@ async function autoAdvancePlayback(
         playbackState.pendingStationRequest = stationRequest;
         playbackState.pendingStationOriginalRequest = stationRequest;
         playbackState.pendingStationNeedsChoice = true;
+        store.saveLastStationSnapshot({
+          request: stationRequest,
+          originalRequest: stationRequest,
+          source: "single_track_completed",
+          sessionId: playbackState.sessionId ?? null,
+          tracks: [{ title: completedTrack.title, artist: completedTrack.artist }]
+        });
         const completeResponse = formatSingleTrackCompleteResponse();
         storePlaybackOutputMessage(store, playbackState, completeResponse);
         emitPlaybackOutput(playbackState, completeResponse);

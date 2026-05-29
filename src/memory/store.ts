@@ -125,6 +125,26 @@ export type FavoriteTrackCandidate = {
   createdAt: string;
 };
 
+export type LastStationSnapshotTrack = {
+  title: string;
+  artist: string;
+};
+
+export type LastStationSnapshotInput = {
+  request: string;
+  originalRequest?: string | null;
+  source: "station_started" | "station_completed" | "single_track_completed";
+  sessionId?: string | null;
+  tracks?: LastStationSnapshotTrack[];
+};
+
+export type LastStationSnapshotRecord = LastStationSnapshotInput & {
+  originalRequest: string | null;
+  sessionId: string | null;
+  tracks: LastStationSnapshotTrack[];
+  updatedAt: string;
+};
+
 export class MemoryStore {
   private readonly db: Database.Database;
   private readonly ownsConnection: boolean;
@@ -329,6 +349,14 @@ export class MemoryStore {
     return row !== undefined;
   }
 
+  removeFavoriteTrackTarget(targetValue: string): number {
+    const result = this.db.prepare(`
+      DELETE FROM taste_signals
+      WHERE signal_type = 'favorite' AND target_type = 'track' AND target_value = ?
+    `).run(targetValue);
+    return result.changes;
+  }
+
   addTasteProfileSnapshot(summary: string, metadata?: unknown): string {
     const id = randomUUID();
     this.db.prepare(`
@@ -354,6 +382,36 @@ export class MemoryStore {
       metadata: parseJson(row.metadataJson),
       createdAt: row.createdAt
     };
+  }
+
+  saveLastStationSnapshot(snapshot: LastStationSnapshotInput): void {
+    const value: LastStationSnapshotRecord = {
+      request: snapshot.request,
+      originalRequest: snapshot.originalRequest ?? null,
+      source: snapshot.source,
+      sessionId: snapshot.sessionId ?? null,
+      tracks: snapshot.tracks ?? [],
+      updatedAt: nowIso()
+    };
+    this.db.prepare(`
+      INSERT INTO settings (key, value_json, updated_at)
+      VALUES ('last_station_snapshot', json(?), ?)
+      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+    `).run(JSON.stringify(value), value.updatedAt);
+  }
+
+  getLastStationSnapshot(): LastStationSnapshotRecord | null {
+    const row = this.db.prepare(`
+      SELECT value_json as valueJson
+      FROM settings
+      WHERE key = 'last_station_snapshot'
+      LIMIT 1
+    `).get() as { valueJson: string } | undefined;
+    const parsed = parseJson(row?.valueJson ?? null);
+    if (!isLastStationSnapshot(parsed)) {
+      return null;
+    }
+    return parsed;
   }
 
   addMemoryItem(kind: MemoryKind, content: string, metadata?: unknown, sourceSessionId?: string): string {
@@ -609,6 +667,26 @@ function parseJson(value: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+function isLastStationSnapshot(value: unknown): value is LastStationSnapshotRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.request === "string"
+    && (record.originalRequest === null || typeof record.originalRequest === "string")
+    && (record.source === "station_started" || record.source === "station_completed" || record.source === "single_track_completed")
+    && (record.sessionId === null || typeof record.sessionId === "string")
+    && typeof record.updatedAt === "string"
+    && Array.isArray(record.tracks)
+    && record.tracks.every((track) => {
+      if (!track || typeof track !== "object") {
+        return false;
+      }
+      const candidate = track as Record<string, unknown>;
+      return typeof candidate.title === "string" && typeof candidate.artist === "string";
+    });
 }
 
 function scoreSessionMemory(memory: MemorySummaryRecord, query: string): number {
