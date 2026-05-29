@@ -8,7 +8,7 @@ import { withDatabase } from "../src/db/database.js";
 import { runMigrations } from "../src/db/migrations.js";
 import type { LlmClient } from "../src/llm/llmClient.js";
 import type { MusicProvider, MusicSearchQuery, MusicTrackCandidate, PlayableTrack } from "../src/providers/musicProvider.js";
-import { clearInteractiveSubmittedInputEcho, createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatInitialInteractiveTurnStatus, formatInteractiveLivePrompt, formatInteractiveLivePromptBox, formatInteractiveLivePromptRule, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatInteractiveStatusDisplayText, formatInteractiveSubmittedUserTurn, formatRuntimeDjDisplayName, formatStartupSetupNote, handleInteractiveInterrupt, questionWithInteractiveFrame, restoreInputAfterInlinePrompt, runSessionTurn, stopPlaybackForSessionExit, watchProcessingQuitKeypress, type InteractiveInterruptState, type InteractivePlaybackState } from "../src/session/sessionRunner.js";
+import { clearInteractiveSubmittedInputEcho, createDefaultInteractiveStartUrlPlayback, createPromptSafeOutputWriter, createTurnScopedOutputWriter, formatFavoriteListChoiceSurface, formatInitialInteractiveTurnStatus, formatInteractiveLivePrompt, formatInteractiveLivePromptBox, formatInteractiveLivePromptRule, formatInteractiveStartupDisplayName, formatInteractiveStartupGuide, formatInteractiveStatusDisplayText, formatInteractiveSubmittedUserTurn, formatRuntimeDjDisplayName, formatStartupSetupNote, handleInteractiveInterrupt, questionWithInteractiveFrame, restoreInputAfterInlinePrompt, runSessionTurn, stopPlaybackForSessionExit, watchProcessingQuitKeypress, type InteractiveInterruptState, type InteractivePlaybackState, type PendingFavoriteListSelection } from "../src/session/sessionRunner.js";
 import type { GeneratedStation } from "../src/station/stationTypes.js";
 import type { FishAudioResult } from "../src/tts/fishAudio.js";
 
@@ -3711,6 +3711,28 @@ describe("runSessionTurn", () => {
     ].join("\n"));
     expect(started).toHaveLength(1);
     expect(playbackState.pendingFavoriteListSelection?.favorites).toHaveLength(1);
+  });
+
+  it("windows long favorite picker lists around the selected favorite", () => {
+    const selection: PendingFavoriteListSelection = {
+      mode: "browse",
+      favorites: Array.from({ length: 20 }, (_value, index) => ({
+        title: `Favorite ${index + 1}`,
+        artist: "Test Artist",
+        targetValue: `Favorite ${index + 1} - Test Artist`,
+        weight: 5,
+        context: null,
+        createdAt: "2026-05-29T00:00:00.000Z"
+      }))
+    };
+
+    const rendered = formatFavoriteListChoiceSurface(selection, 18, 8);
+
+    expect(rendered).toContain("... 12 more above");
+    expect(rendered).toContain("> 19.  Favorite 19 - Test Artist");
+    expect(rendered).toContain("20.  Favorite 20 - Test Artist");
+    expect(rendered).not.toContain("1.  Favorite 1 - Test Artist");
+    expect(rendered).not.toContain("Favorite 10 - Test Artist");
   });
 
   it("plays a selected favorite from the displayed list", async () => {

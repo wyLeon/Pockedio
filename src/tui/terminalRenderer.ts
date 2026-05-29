@@ -6,6 +6,7 @@ export type TuiRenderOptions = {
   color?: boolean;
   accent?: TuiAccent;
   width?: number;
+  startIndex?: number;
 };
 
 export type TuiRowInput = {
@@ -123,10 +124,11 @@ export function renderTuiChoiceList(items: TuiChoiceListItem[], selectedIndex = 
   if (items.length === 0) {
     return "";
   }
-  const positionWidth = Math.max(...items.map((_item, index) => `${index + 1}.`.length));
+  const startIndex = options.startIndex ?? 0;
+  const positionWidth = Math.max(...items.map((_item, index) => `${startIndex + index + 1}.`.length));
   const rows = items.map((item, index) => {
     const marker = index === selectedIndex ? ">" : " ";
-    const position = `${index + 1}.`.padStart(positionWidth);
+    const position = `${startIndex + index + 1}.`.padStart(positionWidth);
     const base = `${marker} ${position}  ${item.label}`;
     return { base, meta: item.meta ?? "", selected: index === selectedIndex };
   });

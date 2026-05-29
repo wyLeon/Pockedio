@@ -138,7 +138,7 @@ type PendingQueueToneChangeSelection = {
 
 type FavoriteListMode = "browse" | "remove";
 
-type PendingFavoriteListSelection = {
+export type PendingFavoriteListSelection = {
   favorites: FavoriteTrackCandidate[];
   mode: FavoriteListMode;
 };
@@ -1755,6 +1755,7 @@ type ReadlinePromptView = {
 type TerminalOutput = NodeJS.WritableStream & {
   isTTY?: boolean;
   columns?: number;
+  rows?: number;
 };
 
 export function createPromptSafeOutputWriter(
@@ -2027,20 +2028,47 @@ function formatFavoriteSongsList(favorites: FavoriteTrackCandidate[]): string {
   ].join("\n");
 }
 
-function formatFavoriteListChoiceSurface(selection: PendingFavoriteListSelection, selectedIndex: number): string {
-  return [
+export function formatFavoriteListChoiceSurface(selection: PendingFavoriteListSelection, selectedIndex: number, visibleRows = selection.favorites.length): string {
+  const window = getFavoriteListWindow(selection.favorites, selectedIndex, visibleRows);
+  const lines = [
     selection.mode === "remove" ? "Which favorite should I delete?" : "Your favorite songs:",
-    renderTuiChoiceList(selection.favorites.map((favorite) => ({
+    ...(window.hiddenAbove > 0 ? [`... ${window.hiddenAbove} more above`] : []),
+    renderTuiChoiceList(window.favorites.map((favorite) => ({
       label: `${favorite.title} - ${favorite.artist}`
-    })), selectedIndex, {
+    })), window.selectedIndex, {
       color: Boolean(defaultOutput.isTTY),
-      width: defaultOutput.columns
+      width: defaultOutput.columns,
+      startIndex: window.startIndex
     }),
+    ...(window.hiddenBelow > 0 ? [`... ${window.hiddenBelow} more below`] : []),
     "",
     selection.mode === "remove"
       ? "↑↓ Select  |  Enter Delete  |  B Back  |  Esc Cancel"
       : "↑↓ Select  |  Enter Play  |  D Delete  |  Esc Close"
-  ].join("\n");
+  ];
+  return lines.join("\n");
+}
+
+function getFavoriteListWindow(favorites: FavoriteTrackCandidate[], selectedIndex: number, visibleRows: number): {
+  favorites: FavoriteTrackCandidate[];
+  selectedIndex: number;
+  startIndex: number;
+  hiddenAbove: number;
+  hiddenBelow: number;
+} {
+  const rowCount = Math.max(1, Math.min(favorites.length, Math.floor(visibleRows)));
+  const clampedSelectedIndex = Math.max(0, Math.min(selectedIndex, favorites.length - 1));
+  const halfWindow = Math.floor(rowCount / 2);
+  const maxStartIndex = Math.max(0, favorites.length - rowCount);
+  const startIndex = Math.max(0, Math.min(maxStartIndex, clampedSelectedIndex - halfWindow));
+  const endIndex = startIndex + rowCount;
+  return {
+    favorites: favorites.slice(startIndex, endIndex),
+    selectedIndex: clampedSelectedIndex - startIndex,
+    startIndex,
+    hiddenAbove: startIndex,
+    hiddenBelow: Math.max(0, favorites.length - endIndex)
+  };
 }
 
 function formatFavoriteDeleteConfirm(favorite: FavoriteTrackCandidate): string {
@@ -3830,14 +3858,13 @@ function promptPendingSingleTrackSelection(selection: PendingSingleTrackSelectio
     const previousRawMode = input.isRaw;
 
     const render = () => {
-      output.write("\x1B[?25l");
       output.write("\x1B[H\x1B[2J");
       output.write(formatSingleTrackChoiceSurface(selection, selectedIndex));
     };
     const cleanup = (value: string) => {
       input.off("keypress", onKeypress);
       restoreInputAfterInlinePrompt(input, previousRawMode);
-      output.write("\x1B[?25h\n");
+      output.write("\x1B[?25h\x1B[?1049l\n");
       resolve(value);
     };
     const onKeypress = (_value: string, key: Key) => {
@@ -3873,6 +3900,7 @@ function promptPendingSingleTrackSelection(selection: PendingSingleTrackSelectio
     input.resume();
     input.setRawMode(true);
     input.on("keypress", onKeypress);
+    output.write("\x1B[?1049h\x1B[?25l");
     render();
   });
 }
@@ -3885,14 +3913,13 @@ function promptPendingSongOrStationSelection(selection: PendingSongOrStationSele
     const previousRawMode = input.isRaw;
 
     const render = () => {
-      output.write("\x1B[?25l");
       output.write("\x1B[H\x1B[2J");
       output.write(formatSongOrStationChoiceSurface(selection, selectedIndex));
     };
     const cleanup = (value: string) => {
       input.off("keypress", onKeypress);
       restoreInputAfterInlinePrompt(input, previousRawMode);
-      output.write("\x1B[?25h\n");
+      output.write("\x1B[?25h\x1B[?1049l\n");
       resolve(value);
     };
     const onKeypress = (_value: string, key: Key) => {
@@ -3928,6 +3955,7 @@ function promptPendingSongOrStationSelection(selection: PendingSongOrStationSele
     input.resume();
     input.setRawMode(true);
     input.on("keypress", onKeypress);
+    output.write("\x1B[?1049h\x1B[?25l");
     render();
   });
 }
@@ -3940,14 +3968,13 @@ function promptPendingQueueToneChangeSelection(selection: PendingQueueToneChange
     const previousRawMode = input.isRaw;
 
     const render = () => {
-      output.write("\x1B[?25l");
       output.write("\x1B[H\x1B[2J");
       output.write(formatQueueToneChangeChoiceSurface(selection, selectedIndex));
     };
     const cleanup = (value: string) => {
       input.off("keypress", onKeypress);
       restoreInputAfterInlinePrompt(input, previousRawMode);
-      output.write("\x1B[?25h\n");
+      output.write("\x1B[?25h\x1B[?1049l\n");
       resolve(value);
     };
     const onKeypress = (_value: string, key: Key) => {
@@ -3983,6 +4010,7 @@ function promptPendingQueueToneChangeSelection(selection: PendingQueueToneChange
     input.resume();
     input.setRawMode(true);
     input.on("keypress", onKeypress);
+    output.write("\x1B[?1049h\x1B[?25l");
     render();
   });
 }
@@ -3994,20 +4022,20 @@ function promptPendingFavoriteListSelection(selection: PendingFavoriteListSelect
     const input = defaultInput;
     const output = defaultOutput;
     const previousRawMode = input.isRaw;
+    const visibleRows = Math.max(3, Math.min(selection.favorites.length, (output.rows ?? 12) - 5));
 
     const selectedFavorite = () => selection.favorites[Math.min(selectedIndex, selection.favorites.length - 1)];
     const render = () => {
-      output.write("\x1B[?25l");
       output.write("\x1B[H\x1B[2J");
       const favorite = selectedFavorite();
       output.write(confirmingDelete && favorite
         ? formatFavoriteDeleteConfirm(favorite)
-        : formatFavoriteListChoiceSurface(selection, selectedIndex));
+        : formatFavoriteListChoiceSurface(selection, selectedIndex, visibleRows));
     };
     const cleanup = (value: string) => {
       input.off("keypress", onKeypress);
       restoreInputAfterInlinePrompt(input, previousRawMode);
-      output.write("\x1B[?25h\n");
+      output.write("\x1B[?25h\x1B[?1049l\n");
       resolve(value);
     };
     const onKeypress = (_value: string, key: Key) => {
@@ -4059,6 +4087,7 @@ function promptPendingFavoriteListSelection(selection: PendingFavoriteListSelect
     input.resume();
     input.setRawMode(true);
     input.on("keypress", onKeypress);
+    output.write("\x1B[?1049h\x1B[?25l");
     render();
   });
 }
