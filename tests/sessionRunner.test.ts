@@ -1149,6 +1149,26 @@ describe("runSessionTurn", () => {
     expect(prompts[0]).toContain("Do not claim a different track count");
   });
 
+  it("uses the selected DJ name instead of Pockedio in generated station intros", async () => {
+    const config = makeConfig();
+    config.dj.displayName = "Nicole";
+    const prompts: string[] = [];
+
+    const result = await runSessionTurn({
+      input: "play something soft for my sleepy noontime",
+      config,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("This sleepy noontime calls for music that hugs you. I'm Pockedio, your afternoon companion easing into a hazy, gentle set.", prompts),
+      buildContext: async () => ({ personality: config.personality }),
+      playUrl: async (url) => ({ ok: true, target: url, exitCode: 0, signal: null })
+    });
+
+    expect(result.response).toContain("I'm Nicole, your afternoon companion");
+    expect(result.response).not.toContain("I'm Pockedio");
+    expect(prompts[0]).toContain("Pockedio is the app name, not your DJ name.");
+    expect(prompts[0]).toContain("say you are Nicole, never Pockedio");
+  });
+
   it("keeps generated station intros aligned to the device-local daypart", async () => {
     const config = makeConfig();
     config.dj.displayName = "Mina";
@@ -2929,29 +2949,11 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("the user's");
   });
 
-  it("reshapes the remaining queue for grief-informed tone changes during playback", async () => {
+  it("asks before reshaping grief-informed tone changes during playback", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
-    let stationPlanCalls = 0;
     const llm: LlmClient = {
-      generateJson: async () => {
-        stationPlanCalls += 1;
-        if (stationPlanCalls === 1) {
-          return { ok: false as const, errorCode: "llm_unavailable" as const, error: "use fallback first" };
-        }
-        return {
-          ok: true as const,
-          value: {
-            tracks: [
-              { title: "Quiet Table", artist: "Comfort Artist", rationale: "gentler tone" },
-              { title: "Small Light", artist: "Comfort Artist", rationale: "gentler tone" },
-              { title: "Low Window", artist: "Comfort Artist", rationale: "gentler tone" },
-              { title: "After Rain", artist: "Comfort Artist", rationale: "gentler tone" },
-              { title: "Still Room", artist: "Comfort Artist", rationale: "gentler tone" }
-            ]
-          }
-        };
-      },
+      generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "use fallback first" }),
       generateText: async () => ({ ok: true as const, value: "I hear you. I’ll soften the rest of the queue." })
     };
 
@@ -2979,14 +2981,214 @@ describe("runSessionTurn", () => {
     });
 
     expect(result.intent.type).toBe("feedback_change_vibe");
+    expect(result.response).toContain("Change the current station?");
+    expect(result.response).toContain("> 1.  Reshape remaining queue");
+    expect(result.response).toContain("  2.  Build new station");
+    expect(playbackState.pendingQueueToneChangeSelection).toBeDefined();
+  });
+
+  it("asks for the active station change choice for natural change-to requests", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something bright for Monday",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "change to some soft love chinese song",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Want me to build a station around that, or play it now?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    expect(result.intent.type).toBe("feedback_change_vibe");
+    expect(result.response).toContain("Change the current station?");
+    expect(result.response).toContain("> 1.  Reshape remaining queue");
+    expect(result.response).toContain("  2.  Build new station");
+    expect(result.response).not.toContain("Want me to build a station around that");
+    expect(playbackState.pendingQueueToneChangeSelection).toBeDefined();
+  });
+
+  it("asks for an aligned choice when changing tone with one track left", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something bright for Monday",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    playbackState.currentIndex = 3;
+    playbackState.currentTrackId = playbackState.storedTracks?.[3]?.dbId;
+
+    const result = await runSessionTurn({
+      input: "change to quiet soft tone.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    expect(result.intent.type).toBe("feedback_change_vibe");
+    expect(result.response).toContain("Only one track is left in this station.");
+    expect(result.response).toContain("> 1.  Replace final track");
+    expect(result.response).toContain("  2.  Build new station");
+    expect(result.response).toContain("  3.  Keep current queue");
+    expect(result.response).toContain("↑↓ Select  |  Enter Choose");
+    expect(playbackState.pendingQueueToneChangeSelection).toBeDefined();
+  });
+
+  it("softens the final track from a pending near-end tone choice", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const llm: LlmClient = {
+      generateJson: async () => ({
+        ok: true as const,
+        value: {
+          tracks: [
+            { title: "Quiet Table", artist: "Comfort Artist", rationale: "gentler tone" },
+            { title: "Small Light", artist: "Comfort Artist", rationale: "gentler tone" },
+            { title: "Low Window", artist: "Comfort Artist", rationale: "gentler tone" },
+            { title: "After Rain", artist: "Comfort Artist", rationale: "gentler tone" },
+            { title: "Still Room", artist: "Comfort Artist", rationale: "gentler tone" }
+          ]
+        }
+      }),
+      generateText: async () => ({ ok: true as const, value: "I hear you. I’ll soften the last track." })
+    };
+
+    await runSessionTurn({
+      input: "play something bright for Monday",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+    playbackState.currentIndex = 3;
+    playbackState.currentTrackId = playbackState.storedTracks?.[3]?.dbId;
+
+    await runSessionTurn({
+      input: "change to quiet soft tone.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    const result = await runSessionTurn({
+      input: "1",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality })
+    });
+
     expect(result.response).toContain("I’ll change the tone from here.");
-    expect(result.response).toContain("reshaped the rest of the queue");
-    expect(playbackState.storedTracks?.slice(1).map((entry) => entry.track.title)).toEqual([
-      "Quiet Table Comfort Artist",
-      "Small Light Comfort Artist",
-      "Low Window Comfort Artist",
-      "After Rain Comfort Artist"
-    ]);
+    expect(result.response).toContain("I reshaped the rest of the queue");
+    expect(playbackState.pendingQueueToneChangeSelection).toBeUndefined();
+    expect(playbackState.storedTracks?.map((entry) => entry.track.title)).toHaveLength(5);
+    expect(playbackState.storedTracks?.[4]?.track.title).toBe("Quiet Table Comfort Artist");
+  });
+
+  it("builds a fresh station from a pending near-end tone choice", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const llm: LlmClient = {
+      generateJson: async () => ({
+        ok: true as const,
+        value: {
+          tracks: [
+            { title: "Quiet New Start", artist: "Comfort Artist", rationale: "fresh quiet start" },
+            { title: "Soft New Path", artist: "Comfort Artist", rationale: "fresh quiet start" },
+            { title: "Low New Light", artist: "Comfort Artist", rationale: "fresh quiet start" },
+            { title: "Warm New Room", artist: "Comfort Artist", rationale: "fresh quiet start" },
+            { title: "Still New Morning", artist: "Comfort Artist", rationale: "fresh quiet start" }
+          ]
+        }
+      }),
+      generateText: async () => ({ ok: true as const, value: "Starting a quieter soft-tone station from here." })
+    };
+
+    await runSessionTurn({
+      input: "play something bright for Monday",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+    playbackState.currentIndex = 3;
+    playbackState.currentTrackId = playbackState.storedTracks?.[3]?.dbId;
+
+    await runSessionTurn({
+      input: "change to quiet soft tone.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    const result = await runSessionTurn({
+      input: "2",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm,
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("playback_request");
+    expect(result.response).toContain("Starting a quieter soft-tone station from here.");
+    expect(result.response).toContain("NOW PLAYING");
+    expect(playbackState.pendingQueueToneChangeSelection).toBeUndefined();
+    expect(playbackState.storedTracks?.[0]?.track.title).toBe("Quiet New Start Comfort Artist");
+    expect(started).toHaveLength(1);
   });
 
   it("does not treat station tone changes as standalone DJ voice requests", async () => {
@@ -3022,7 +3224,8 @@ describe("runSessionTurn", () => {
 
     expect(result.intent.type).toBe("feedback_change_vibe");
     expect(result.response).not.toContain("DJ voice belongs to a station");
-    expect(result.response).toContain("I’ll change the tone from here.");
+    expect(result.response).toContain("Change the current station?");
+    expect(result.response).toContain("> 1.  Reshape remaining queue");
   });
 
   it("confirms favorites with human-facing current-track copy", async () => {
@@ -3053,6 +3256,37 @@ describe("runSessionTurn", () => {
 
     expect(result.response).toContain("Saved \"something deep work\" as a favorite.");
     expect(result.response).not.toMatch(/\b(high-confidence|signal|weight|locally)\b/i);
+  });
+
+  it("treats add-it-as-my-favorite wording as current-track favorite feedback", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "Add it as my favorite.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm()
+    });
+
+    expect(result.intent.type).toBe("feedback_favorite");
+    expect(result.response).toContain("Saved \"something deep work\" as a favorite.");
+    expect(result.response).not.toContain("Your favorite songs:");
   });
 
   it("treats combined love and favorite wording as a favorite action", async () => {

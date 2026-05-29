@@ -516,6 +516,26 @@ describe("mood checks", () => {
     expect(state.lastMoodPromptAt).toBeNull();
   });
 
+  it("does not let an unanswered mood prompt block future scheduler ticks", async () => {
+    const config = makeConfig();
+    const now = new Date("2026-05-18T22:00:00+08:00");
+
+    const tick = runServeTick({
+      config,
+      now,
+      completed: new Set(),
+      lastMoodPromptAt: null,
+      moodCheckTimeoutMs: 5,
+      runMoodCheck: async () => new Promise(() => undefined)
+    });
+    const result = await Promise.race([
+      tick.then((state) => state.lastMoodPromptAt?.toISOString() ?? null),
+      new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 30))
+    ]);
+
+    expect(result).toBe(now.toISOString());
+  });
+
   it("stores selected mood and requires confirmation before playback", async () => {
     const config = makeConfig();
     const playedUrls: string[] = [];

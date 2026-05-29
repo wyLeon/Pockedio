@@ -1516,6 +1516,36 @@ Rules:
 - `play something like [song]`, `make a station from [song]`, or mood/use-case language remains station flow.
 - Direct song playback replaces current playback and must not create a five-song queue.
 
+## 3.7.1 Active Station Change Choice
+
+When a station is already playing and the user asks to change, shift, or switch the current station direction, ask for a concrete choice instead of turning it into a recommendation prompt.
+
+If more than one future track remains:
+
+```text
+Change the current station?
+
+> 1.  Reshape remaining queue   replace tracks after the current one
+  2.  Build new station         start a fresh station
+  3.  Keep current queue        leave playback unchanged
+
+↑↓ Select  |  Enter Choose  |  B Back  |  Esc Cancel
+```
+
+If only one future track remains:
+
+```text
+Only one track is left in this station.
+
+> 1.  Replace final track      replace only the next slot
+  2.  Build new station        start a fresh station
+  3.  Keep current queue       leave playback unchanged
+
+↑↓ Select  |  Enter Choose  |  B Back  |  Esc Cancel
+```
+
+The list must use the same aligned choice-list renderer as close matches and song/station ambiguity prompts. `Enter` or `1` takes the lowest-disruption path: reshape the future queue, or replace the final slot when only one future track remains. `2` builds and starts a fresh station from the requested direction. `3`, `B`, `Esc`, `cancel`, or `never mind` keeps the current queue. While this choice is pending, empty Enter belongs to the picker and must not fall through to the idle prompt.
+
 ## 3.8 Explicit Station Playback Request
 
 Examples:

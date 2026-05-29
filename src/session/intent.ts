@@ -185,14 +185,14 @@ export function parseDeterministicIntent(input: string): SessionIntent {
   if (/\b(save this vibe|remember this vibe|keep this as a vibe)\b/.test(text)) {
     return { type: "feedback_save_vibe", confidence: "high" };
   }
-  if (/\b(favorite (this|it)|save (this|it)|add (this|it) to (my )?best list)\b/.test(text)
+  if (/\b(favorite (this|it)|save (this|it)|add (this|it) to (my )?best list|add (this|it) as (my )?favou?rite|mark (this|it) as (a )?favou?rite)\b/.test(text)
     || /^(please\s+)?favorite\s+.+/.test(text)) {
     return { type: "feedback_favorite", confidence: "high" };
   }
   if (isReplacementStationRequestText(text)) {
     return { type: "playback_request", confidence: "high" };
   }
-  if (/\b(change the vibe|different vibe|switch the mood|change mood|change the tone|change tone|change the station tone|station tone)\b/.test(text)) {
+  if (/\b(change the vibe|different vibe|switch the mood|change mood|change the tone|change tone|change to\b.{0,80}\btone|change the station tone|station tone)\b/.test(text)) {
     return { type: "feedback_change_vibe", confidence: "high" };
   }
   if (/\b(what's playing|what is playing|current song|current track|show queue|where are we|what are we listening to|what'?s next|what is next|what comes next|up next)\b/.test(text)) {

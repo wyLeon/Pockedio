@@ -85,6 +85,7 @@ export type MoodCheckInput = {
   provider?: MusicProvider;
   llm?: LlmClient;
   promptMood?: () => Promise<MoodCheckPromptResult>;
+  promptTimeoutMs?: number;
   playUrl?: (url: string) => Promise<PlayerResult>;
   writeOutput?: (text: string) => void;
 };
@@ -98,12 +99,14 @@ export type MoodCheckResult = {
 
 const scheduledDjFishAudioTimeoutMs = 10 * 60_000;
 const moodCheckScheduledGuardMinutes = 30;
+const moodCheckPromptTimeoutMs = 60_000;
 
 export type ServeTickInput = {
   config: PockedioConfig;
   now: Date;
   completed: Set<string>;
   lastMoodPromptAt: Date | null;
+  moodCheckTimeoutMs?: number;
   runScheduledDj?: (kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig) => Promise<void>;
   prepareScheduledDj?: (kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig) => Promise<void>;
   runMoodCheck?: () => Promise<MoodCheckResult>;
@@ -310,7 +313,7 @@ export async function prepareScheduledDjJob(input: ScheduledDjPreparationInput):
 export async function runMoodCheckOnce(input: MoodCheckInput = {}): Promise<MoodCheckResult> {
   const config = input.config ?? loadConfig();
   runMigrations(config);
-  const promptMood = input.promptMood ?? promptMoodCheck;
+  const promptMood = input.promptMood ?? (() => promptMoodCheck(input.promptTimeoutMs ?? moodCheckPromptTimeoutMs));
   const result = await promptMood();
   recordMoodCheck(config, result.mood, result.note);
   const writeOutput = input.writeOutput ?? (() => undefined);
@@ -380,11 +383,40 @@ export async function runServeTick(input: ServeTickInput): Promise<ServeTickResu
     shouldPromptMoodCheck(input.lastMoodPromptAt, input.now)
     && !hasScheduledDjSoon(input.now, input.config, moodCheckScheduledGuardMinutes)
   ) {
-    const runMood = input.runMoodCheck ?? (() => runMoodCheckOnce({ config: input.config, writeOutput: (text) => console.log(text) }));
-    await runMood();
+    const timeoutMs = input.moodCheckTimeoutMs ?? moodCheckPromptTimeoutMs;
+    const runMood = input.runMoodCheck ?? (() => runMoodCheckOnce({
+      config: input.config,
+      promptTimeoutMs: timeoutMs,
+      writeOutput: (text) => console.log(text)
+    }));
+    await runMoodCheckWithTimeout(runMood, timeoutMs);
     return { lastMoodPromptAt: input.now };
   }
   return { lastMoodPromptAt: input.lastMoodPromptAt };
+}
+
+async function runMoodCheckWithTimeout(runMood: () => Promise<MoodCheckResult>, timeoutMs: number): Promise<void> {
+  if (timeoutMs <= 0) {
+    await runMood();
+    return;
+  }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      runMood(),
+      new Promise<"timeout">((resolve) => {
+        timeout = setTimeout(() => resolve("timeout"), timeoutMs);
+      })
+    ]);
+  } catch (error) {
+    if (!isAbortPromptError(error)) {
+      throw error;
+    }
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 async function runJobOnce(kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig): Promise<void> {
@@ -652,8 +684,11 @@ function deletePreparedScheduledDj(config: PockedioConfig, id: string): void {
   }
 }
 
-async function promptMoodCheck(): Promise<MoodCheckPromptResult> {
-  const answers = await inquirer.prompt<{
+async function promptMoodCheck(timeoutMs: number): Promise<MoodCheckPromptResult> {
+  const prompt = timeoutMs > 0
+    ? inquirer.createPromptModule({ signal: AbortSignal.timeout(timeoutMs) })
+    : inquirer.prompt;
+  const answers = await prompt<{
     mood: string;
     note?: string;
     confirmPlayback: boolean;
@@ -708,6 +743,10 @@ async function promptScheduledDjPlayback(message: string): Promise<ScheduledDjPl
 function calendarLooksBusy(context: PockedioContext): boolean {
   return (context.calendar.available && context.calendar.state?.nowStatus === "in_event")
     || /\b(active meeting|meeting is active|in a meeting|busy now|currently in)\b/i.test(context.calendar.summary);
+}
+
+function isAbortPromptError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortPromptError";
 }
 
 function hasScheduledDjSoon(now: Date, config: PockedioConfig, windowMinutes: number): boolean {

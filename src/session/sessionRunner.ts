@@ -127,6 +127,15 @@ type PendingSongOrStationSelection = {
   candidates: PendingSingleTrackCandidate[];
 };
 
+type QueueToneChangeChoice = "reshape" | "new_station" | "keep";
+
+type PendingQueueToneChangeSelection = {
+  action: FeedbackAction;
+  feedbackText: string;
+  replacementRequest: string;
+  remainingCount: number;
+};
+
 export type InteractivePlaybackState = {
   sessionId?: string;
   station?: GeneratedStation;
@@ -137,6 +146,7 @@ export type InteractivePlaybackState = {
   pendingSingleTrackSelection?: PendingSingleTrackSelection;
   recentSingleTrackSelection?: RecentSingleTrackSelection;
   pendingSongOrStationSelection?: PendingSongOrStationSelection;
+  pendingQueueToneChangeSelection?: PendingQueueToneChangeSelection;
   pendingDjProgram?: PendingDjProgramState;
   currentIndex?: number;
   currentTrackId?: string;
@@ -401,7 +411,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         shouldExit: false
       };
     }
-    if (!userText && !input.playbackState?.pendingStationRequest) {
+    if (!userText && !input.playbackState?.pendingStationRequest && !input.playbackState?.pendingQueueToneChangeSelection) {
       const response = formatEmptyInputResponse(input.playbackState);
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
@@ -411,11 +421,15 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     const pendingSingleTrackCandidate = pendingSingleTrackCancel ? undefined : getPendingSingleTrackCandidate(input.playbackState, userText);
     const pendingSongOrStationCancel = isPendingSongOrStationCancel(input.playbackState, userText);
     const pendingSongOrStationChoice = pendingSongOrStationCancel ? undefined : getPendingSongOrStationChoice(input.playbackState, userText);
+    const pendingQueueToneChangeCancel = isPendingQueueToneChangeCancel(input.playbackState, userText);
+    const pendingQueueToneChangeChoice = pendingQueueToneChangeCancel ? undefined : getPendingQueueToneChangeChoice(input.playbackState, userText);
     const singleTrackVersionRequest = !input.playbackState?.pendingSingleTrackSelection
       && !input.playbackState?.pendingSongOrStationSelection
+      && !input.playbackState?.pendingQueueToneChangeSelection
       && isSingleTrackVersionRequest(userText);
     const queuePositionIndex = !input.playbackState?.pendingSingleTrackSelection
       && !input.playbackState?.pendingSongOrStationSelection
+      && !input.playbackState?.pendingQueueToneChangeSelection
       ? getRequestedQueuePositionIndex(input.playbackState, userText)
       : undefined;
     let intent = pendingSingleTrackCandidate
@@ -428,10 +442,16 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         ? { type: "playback_request" as const, confidence: "high" as const }
       : pendingSongOrStationCancel
         ? { type: "conversation" as const, confidence: "high" as const }
+      : pendingQueueToneChangeChoice
+        ? { type: "feedback_change_vibe" as const, confidence: "high" as const }
+      : pendingQueueToneChangeCancel
+        ? { type: "conversation" as const, confidence: "high" as const }
       : singleTrackVersionRequest
         ? { type: "conversation" as const, confidence: "high" as const }
       : queuePositionIndex !== undefined
         ? { type: "queue_position_playback" as const, confidence: "high" as const }
+      : isActiveStationChangeRequest(userText, input.playbackState)
+        ? { type: "feedback_change_vibe" as const, confidence: "high" as const }
       : input.playbackState?.pendingStationRequest && isPendingStationDjProgramRequest(userText)
         ? { type: "pending_station_dj_program" as const, confidence: "high" as const }
       : input.playbackState?.pendingStationRequest && isPendingStationConfirmation(input.input)
@@ -450,6 +470,9 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     if (input.playbackState?.currentTrackId && isPositiveCurrentArtistPreference(userText)) {
       intent = { type: "conversation", confidence: "high" };
     }
+    if (isActiveStationChangeRequest(userText, input.playbackState)) {
+      intent = { type: "feedback_change_vibe", confidence: "high" };
+    }
 
     if (pendingSingleTrackCancel) {
       input.playbackState!.pendingSingleTrackSelection = undefined;
@@ -462,6 +485,14 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
     if (pendingSongOrStationCancel) {
       input.playbackState!.pendingSongOrStationSelection = undefined;
       const response = "Selection cancelled.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
+    }
+
+    if (pendingQueueToneChangeCancel) {
+      input.playbackState!.pendingQueueToneChangeSelection = undefined;
+      const response = "Keeping the current queue.";
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
       return { sessionId, intent, response, shouldExit: false };
@@ -541,6 +572,57 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       store.addMessage(sessionId, "pockedio", playback.response);
       writeOutput(playback.response);
       return { sessionId, intent, response: playback.response, shouldExit: false, station: playback.station };
+    }
+
+    if (pendingQueueToneChangeChoice && input.playbackState?.pendingQueueToneChangeSelection) {
+      const selection = input.playbackState.pendingQueueToneChangeSelection;
+      input.playbackState.pendingQueueToneChangeSelection = undefined;
+      if (pendingQueueToneChangeChoice === "keep") {
+        const response = "Keeping the current queue.";
+        store.addMessage(sessionId, "pockedio", response);
+        writeOutput(response);
+        return { sessionId, intent, response, shouldExit: false };
+      }
+      if (pendingQueueToneChangeChoice === "new_station") {
+        const playback = await handlePlaybackRequest({
+          config,
+          sessionId,
+          store,
+          provider,
+          llm,
+          requestText: selection.replacementRequest,
+          intentType: "playback_request",
+          buildContext: input.buildContext,
+          writeStatus,
+          playUrl,
+          startUrlPlayback: input.playbackState.startUrlPlayback ?? startUrlPlayback,
+          playbackState: input.playbackState,
+          now,
+          signal
+        });
+        store.addMessage(sessionId, "pockedio", playback.response);
+        writeOutput(playback.response);
+        return { sessionId, intent: { type: "playback_request", confidence: "high" }, response: playback.response, shouldExit: false, station: playback.station };
+      }
+
+      const currentTrack = getCurrentPlaybackTrack(input.playbackState);
+      const response = currentTrack
+        ? await withStatus(writeStatus, "Reshaping queue...", () => applyRemainingQueueReshapeForFeedback({
+            config,
+            sessionId,
+            store,
+            provider,
+            llm,
+            action: selection.action,
+            feedbackText: selection.feedbackText,
+            playbackState: input.playbackState!,
+            currentTrack,
+            signal
+          }), signal)
+        : "No station is playing.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent, response, shouldExit: false };
     }
 
     if (intent.type === "single_track_selection" && pendingSingleTrackCandidate) {
@@ -763,6 +845,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
             provider,
             llm,
             action,
+            feedbackText: userText,
             playbackState: input.playbackState!,
             currentTrack,
             signal
@@ -1707,6 +1790,7 @@ async function handleSingleTrackStart(input: {
   if (input.playbackState) {
     input.playbackState.station = undefined;
     input.playbackState.djProgram = undefined;
+    input.playbackState.pendingQueueToneChangeSelection = undefined;
     input.playbackState.storedTracks = [storedTrack];
     cancelDjProgramPreparations(input.playbackState);
     stopActivePlayback(input.playbackState, input.store);
@@ -1975,6 +2059,54 @@ function getPendingSongOrStationChoice(
   return undefined;
 }
 
+function formatQueueToneChangeChoices(selection: PendingQueueToneChangeSelection): string {
+  return formatQueueToneChangeChoiceSurface(selection, 0);
+}
+
+function formatQueueToneChangeChoiceSurface(selection: PendingQueueToneChangeSelection, selectedIndex: number): string {
+  const isFinalTrackOnly = selection.remainingCount === 1;
+  return [
+    isFinalTrackOnly ? "Only one track is left in this station." : "Change the current station?",
+    "",
+    renderTuiChoiceList([
+      isFinalTrackOnly
+        ? { label: "Replace final track", meta: "replace only the next slot" }
+        : { label: "Reshape remaining queue", meta: "replace tracks after the current one" },
+      { label: "Build new station", meta: "start a fresh station" },
+      { label: "Keep current queue", meta: "leave playback unchanged" }
+    ], selectedIndex, {
+      color: Boolean(defaultOutput.isTTY),
+      width: defaultOutput.columns
+    }),
+    "",
+    "↑↓ Select  |  Enter Choose  |  B Back  |  Esc Cancel"
+  ].join("\n");
+}
+
+function isPendingQueueToneChangeCancel(playbackState: InteractivePlaybackState | undefined, text: string): boolean {
+  return Boolean(playbackState?.pendingQueueToneChangeSelection) && /^(b|back|cancel|esc|escape|q)$/i.test(text.trim());
+}
+
+function getPendingQueueToneChangeChoice(
+  playbackState: InteractivePlaybackState | undefined,
+  text: string
+): QueueToneChangeChoice | undefined {
+  if (!playbackState?.pendingQueueToneChangeSelection) {
+    return undefined;
+  }
+  const normalized = text.trim().toLowerCase();
+  if (!normalized || normalized === "1" || normalized === "reshape" || normalized === "remaining" || normalized === "final" || normalized === "replace final" || normalized === "soften" || normalized === "soften it" || normalized === "soften final" || normalized === "last one" || normalized === "just the last one") {
+    return "reshape";
+  }
+  if (normalized === "2" || normalized === "new" || normalized === "new station" || normalized === "build new station" || normalized === "start over") {
+    return "new_station";
+  }
+  if (normalized === "3" || normalized === "keep" || normalized === "keep current" || normalized === "keep current queue" || normalized === "never mind" || normalized === "no") {
+    return "keep";
+  }
+  return undefined;
+}
+
 function isPendingSingleTrackCancel(playbackState: InteractivePlaybackState | undefined, text: string): boolean {
   return Boolean(playbackState?.pendingSingleTrackSelection) && /^(b|back|cancel|esc|escape|q)$/i.test(text.trim());
 }
@@ -2108,6 +2240,7 @@ async function handlePlaybackRequest(input: {
   if (input.playbackState) {
     cancelDjProgramPreparations(input.playbackState);
     input.playbackState.recentSingleTrackSelection = undefined;
+    input.playbackState.pendingQueueToneChangeSelection = undefined;
     input.playbackState.station = station;
     input.playbackState.storedTracks = storedTracks;
     input.playbackState.djProgram = input.djProgramIntro && input.synthesize
@@ -2253,6 +2386,7 @@ async function startPreparedDjProgram(input: {
   input.playbackState.pendingStationRequest = undefined;
   input.playbackState.pendingStationOriginalRequest = undefined;
   input.playbackState.pendingStationNeedsChoice = false;
+  input.playbackState.pendingQueueToneChangeSelection = undefined;
   input.playbackState.station = pending.station;
   input.playbackState.storedTracks = pending.storedTracks;
   input.playbackState.djProgram = createDjProgramPlaybackState(pending);
@@ -2315,6 +2449,7 @@ async function generateStationIntroResponse(input: {
   const prompt = [
     `You are ${displayName}, Pockedio's personal DJ.`,
     `${displayName} is the DJ/assistant name, not the user's name. Do not address the user as ${displayName}. If the user's preferred name is unknown, do not use a personal name.`,
+    `Pockedio is the app name, not your DJ name. If you name yourself, say you are ${displayName}, never Pockedio.`,
     "Write a warm, concise station introduction for a CLI music session.",
     "Speak directly to the listener as 'you'. Do not refer to them as 'the user' or describe their taste in third person.",
     "Acknowledge the user's mood or request in human language before mentioning the station.",
@@ -2947,7 +3082,19 @@ function sanitizeDjNameAsUserAddress(response: string, config?: PockedioConfig):
 }
 
 function sanitizeGeneratedDjCopy(response: string, config?: PockedioConfig): string {
-  return rewriteListenerReferences(sanitizeDjNameAsUserAddress(response, config));
+  return rewriteListenerReferences(rewriteDjSelfIdentification(sanitizeDjNameAsUserAddress(response, config), config));
+}
+
+function rewriteDjSelfIdentification(text: string, config?: PockedioConfig): string {
+  const displayName = config ? formatRuntimeDjDisplayName(config) : "";
+  if (!displayName || displayName.toLowerCase() === "pockedio") {
+    return text;
+  }
+
+  return text
+    .replace(/\b(I['’]m|I am)\s+Pockedio\b/gi, (_match, prefix: string) => `${prefix} ${displayName}`)
+    .replace(/\b(This is)\s+Pockedio\b/gi, (_match, prefix: string) => `${prefix} ${displayName}`)
+    .replace(/\bPockedio\s+here\b/gi, `${displayName} here`);
 }
 
 function rewriteListenerReferences(text: string): string {
@@ -3213,6 +3360,23 @@ function isAmbiguousMusicAdjustment(userText: string): boolean {
     && !hasExplicitPlaybackCommand(text);
 }
 
+function isActiveStationChangeRequest(userText: string, playbackState: InteractivePlaybackState | undefined): boolean {
+  if (!playbackState?.currentTrackId || !playbackState.station) {
+    return false;
+  }
+  const text = userText.trim().toLowerCase();
+  if (isExplicitDjProgramPlaybackRequest(text) || /\b(dj mode|dj program|dj version|radio show|radio version|spoken version)\b/.test(text) || isReplacementStationRequestLikeText(text)) {
+    return false;
+  }
+  return /^(change|shift|switch)\s+(?:to|into|toward|towards)\s+.+/.test(text)
+    || /\b(change|shift|switch)\b.+\b(vibe|mood|tone|style|genre|queue|station|song|songs|music)\b/.test(text);
+}
+
+function isReplacementStationRequestLikeText(text: string): boolean {
+  return /\b(build|make|create|start|play)\b.*\b(another|new|different)\b.*\b(station|set|queue)\b/.test(text)
+    || /\b(another|new|different)\b.*\b(station|set|queue)\b.*\b(change|switch|shift)\b.*\b(vibe|mood|tone)\b/.test(text);
+}
+
 function isPersonalMoodStatement(userText: string): boolean {
   const text = userText.toLowerCase();
   return /\b(i'?m|i am|feel|feeling)\b.*\b(tired|exhausted|drained|stressed|grumpy|sad|anxious|overwhelmed|low)\b/.test(text);
@@ -3255,21 +3419,25 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
         playbackState.isAwaitingInput = true;
         const pendingSingleTrackSelection = playbackState.pendingSingleTrackSelection;
         const pendingSongOrStationSelection = playbackState.pendingSongOrStationSelection;
+        const pendingQueueToneChangeSelection = playbackState.pendingQueueToneChangeSelection;
         const usesSingleTrackInlinePicker = Boolean(pendingSingleTrackSelection && defaultInput.isTTY && defaultOutput.isTTY);
         const usesSongOrStationInlinePicker = Boolean(!usesSingleTrackInlinePicker && pendingSongOrStationSelection && defaultInput.isTTY && defaultOutput.isTTY);
+        const usesQueueToneChangeInlinePicker = Boolean(!usesSingleTrackInlinePicker && !usesSongOrStationInlinePicker && pendingQueueToneChangeSelection && defaultInput.isTTY && defaultOutput.isTTY);
         line = usesSingleTrackInlinePicker
           ? await promptPendingSingleTrackSelection(pendingSingleTrackSelection!)
           : usesSongOrStationInlinePicker
             ? await promptPendingSongOrStationSelection(pendingSongOrStationSelection!)
-          : await questionWithInteractiveFrame(rl, defaultInput, defaultOutput, livePromptView, handleInterrupt, {
-              color: Boolean(defaultOutput.isTTY),
-              width: defaultOutput.columns
-            });
+            : usesQueueToneChangeInlinePicker
+              ? await promptPendingQueueToneChangeSelection(pendingQueueToneChangeSelection!)
+              : await questionWithInteractiveFrame(rl, defaultInput, defaultOutput, livePromptView, handleInterrupt, {
+                  color: Boolean(defaultOutput.isTTY),
+                  width: defaultOutput.columns
+                });
         const submittedTurn = formatInteractiveSubmittedUserTurn(line, {
           color: Boolean(defaultOutput.isTTY),
           width: defaultOutput.columns
         });
-        if (!usesSingleTrackInlinePicker && !usesSongOrStationInlinePicker) {
+        if (!usesSingleTrackInlinePicker && !usesSongOrStationInlinePicker && !usesQueueToneChangeInlinePicker) {
           clearInteractiveSubmittedInputEcho(defaultOutput);
         }
         if (submittedTurn) {
@@ -3456,6 +3624,61 @@ function promptPendingSongOrStationSelection(selection: PendingSongOrStationSele
   });
 }
 
+function promptPendingQueueToneChangeSelection(selection: PendingQueueToneChangeSelection): Promise<string> {
+  return new Promise((resolve) => {
+    let selectedIndex = 0;
+    const input = defaultInput;
+    const output = defaultOutput;
+    const previousRawMode = input.isRaw;
+
+    const render = () => {
+      output.write("\x1B[?25l");
+      output.write("\x1B[H\x1B[2J");
+      output.write(formatQueueToneChangeChoiceSurface(selection, selectedIndex));
+    };
+    const cleanup = (value: string) => {
+      input.off("keypress", onKeypress);
+      restoreInputAfterInlinePrompt(input, previousRawMode);
+      output.write("\x1B[?25h\n");
+      resolve(value);
+    };
+    const onKeypress = (_value: string, key: Key) => {
+      if (key.name === "up") {
+        selectedIndex = (selectedIndex - 1 + 3) % 3;
+        render();
+        return;
+      }
+      if (key.name === "down") {
+        selectedIndex = (selectedIndex + 1) % 3;
+        render();
+        return;
+      }
+      if (key.name === "return") {
+        cleanup(String(selectedIndex + 1));
+        return;
+      }
+      if (key.name === "escape") {
+        cleanup("cancel");
+        return;
+      }
+      const numericIndex = Number(key.name) - 1;
+      if (Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < 3) {
+        cleanup(String(numericIndex + 1));
+        return;
+      }
+      if (key.name === "b" || key.name === "q" || (key.ctrl && key.name === "c")) {
+        cleanup("cancel");
+      }
+    };
+
+    emitKeypressEvents(input);
+    input.resume();
+    input.setRawMode(true);
+    input.on("keypress", onKeypress);
+    render();
+  });
+}
+
 type InlinePromptInput = Pick<typeof defaultInput, "isTTY" | "isRaw" | "setRawMode" | "resume">;
 
 export function restoreInputAfterInlinePrompt(input: InlinePromptInput, previousRawMode: boolean | undefined): void {
@@ -3601,6 +3824,7 @@ async function reshapeRemainingQueueForFeedback(input: {
   provider: MusicProvider;
   llm: LlmClient;
   action: FeedbackAction;
+  feedbackText: string;
   playbackState: InteractivePlaybackState;
   currentTrack: StationTrack;
   signal?: AbortSignal;
@@ -3615,7 +3839,44 @@ async function reshapeRemainingQueueForFeedback(input: {
     });
   }
 
-  const request = buildFeedbackReshapeRequest(station.request, input.currentTrack, input.action);
+  const remainingCount = storedTracks.length - currentIndex - 1;
+  if (input.action === "change_vibe") {
+    const selection: PendingQueueToneChangeSelection = {
+      action: input.action,
+      feedbackText: input.feedbackText,
+      replacementRequest: buildFeedbackReplacementStationRequest(station.request, input.currentTrack, input.action, input.feedbackText),
+      remainingCount
+    };
+    input.playbackState.pendingQueueToneChangeSelection = selection;
+    return formatQueueToneChangeChoices(selection);
+  }
+
+  return applyRemainingQueueReshapeForFeedback(input);
+}
+
+async function applyRemainingQueueReshapeForFeedback(input: {
+  config: PockedioConfig;
+  sessionId: string;
+  store: MemoryStore;
+  provider: MusicProvider;
+  llm: LlmClient;
+  action: FeedbackAction;
+  feedbackText: string;
+  playbackState: InteractivePlaybackState;
+  currentTrack: StationTrack;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const currentIndex = input.playbackState.currentIndex;
+  const storedTracks = input.playbackState.storedTracks ?? [];
+  const station = input.playbackState.station;
+  if (currentIndex === undefined || !station || storedTracks.length <= currentIndex + 1) {
+    return formatFeedbackConfirmation(input.action, {
+      track: input.currentTrack,
+      stationRequest: station?.request
+    });
+  }
+
+  const request = buildFeedbackReshapeRequest(station.request, input.currentTrack, input.action, input.feedbackText);
   const context: Partial<PockedioContext> = {
     personality: input.config.personality,
     tasteSignals: input.store.getTasteSignals(30)
@@ -3690,13 +3951,19 @@ function isQueueReshapeFeedback(action: FeedbackAction): boolean {
   return action === "more_like_this" || action === "less_like_this" || action === "change_vibe";
 }
 
-function buildFeedbackReshapeRequest(baseRequest: string, currentTrack: StationTrack, action: FeedbackAction): string {
+function buildFeedbackReshapeRequest(baseRequest: string, currentTrack: StationTrack, action: FeedbackAction, feedbackText = ""): string {
   const direction = action === "more_like_this"
     ? `more like the current track ${currentTrack.title} - ${currentTrack.artist}`
     : action === "change_vibe"
     ? `a different, gentler tone than the current track ${currentTrack.title} - ${currentTrack.artist}`
     : `less like the current track ${currentTrack.title} - ${currentTrack.artist}, without banning it`;
-  return `${baseRequest}. Feedback for remaining queue: ${direction}.`;
+  const explicitFeedback = feedbackText.trim() ? ` Listener wording: ${feedbackText.trim()}.` : "";
+  return `${baseRequest}. Feedback for remaining queue: ${direction}.${explicitFeedback}`;
+}
+
+function buildFeedbackReplacementStationRequest(baseRequest: string, currentTrack: StationTrack, action: FeedbackAction, feedbackText: string): string {
+  const reshapeRequest = buildFeedbackReshapeRequest(baseRequest, currentTrack, action, feedbackText);
+  return `${reshapeRequest} Build a fresh five-track station instead of only replacing the final slot.`;
 }
 
 function normalizeTrackQueueKey(track: Pick<StationTrack, "title" | "artist">): string {
@@ -3724,6 +3991,7 @@ async function generateStationDjProgramIntro(input: {
 }): Promise<GeneratedDjProgramIntro> {
   const textResult = await input.llm.generateText([
     `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's spoken DJ.`,
+    `Pockedio is the app name, not your DJ name. If you name yourself, say you are ${formatRuntimeDjDisplayName(input.config)}, never Pockedio.`,
     "Write a warm, concise opening for a five-track DJ program.",
     "Sound human and specific, but keep it under 70 words.",
     "Speak directly to the listener as 'you'. Do not refer to them as 'the user'.",
@@ -4479,6 +4747,7 @@ async function generateTrackDjProgramIntro(input: {
 }): Promise<GeneratedDjProgramIntro | undefined> {
   const textResult = await input.llm.generateText([
     `You are ${formatRuntimeDjDisplayName(input.config)}, Pockedio's spoken DJ.`,
+    `Pockedio is the app name, not your DJ name. If you name yourself, say you are ${formatRuntimeDjDisplayName(input.config)}, never Pockedio.`,
     `Write a warm transition intro for Track ${input.track.position}: ${input.track.title} - ${input.track.artist}.`,
     "Keep it under 45 words.",
     "Speak directly to the listener as 'you'. Do not refer to them as 'the user'.",
