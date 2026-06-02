@@ -1,6 +1,6 @@
 {
   "name": "pockedio",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "CLI-first personal AI DJ for context-aware listening.",
   "license": "MIT",

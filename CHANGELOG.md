@@ -2,6 +2,17 @@
 
 All notable public release changes are documented here.
 
+## 0.4.0 - 2026-06-02
+
+Context heartbeat, DJ handoff, and continuation release.
+
+- Add six-hour Calendar and diary context heartbeat refreshes during long-running `pockedio serve` sessions.
+- Add confirmed mid-playback DJ handoff so users can prepare a spoken DJ version of the current station before stopping playback.
+- Persist the last station vibe so `continue this vibe` can recover after the immediate pending station is gone.
+- Improve station change, favorite picker, and queue redraw handling during interactive playback.
+- Guard recommendation replies and DJ intros against false current-time claims.
+- Add a Chinese beginner install and usage guide for Mac source installs.
+
 ## 0.3.0 - 2026-05-28
 
 Source update, DJ-mode, and direct-song version release.
