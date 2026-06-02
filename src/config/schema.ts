@@ -57,6 +57,7 @@ export const pockedioConfigSchema = z.object({
   }).default({}),
   memory: z.object({
     dailyHeartbeat: z.boolean().default(true),
+    heartbeatIntervalHours: z.number().min(0.1).max(24).default(6),
     heartbeatHistoryLimit: z.number().int().min(0).max(500).default(20)
   }).default({}),
   llm: z.object({

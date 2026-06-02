@@ -48,12 +48,13 @@ afterEach(() => {
 });
 
 describe("daily context heartbeat", () => {
-  it("runs once per local day and records a completed background refresh", async () => {
+  it("runs once per configured interval and records completed background refreshes", async () => {
     const config = makeConfig();
     let refreshes = 0;
 
     const first = await runDailyContextHeartbeat(config, {
       now: new Date("2026-05-22T09:00:00+08:00"),
+      finishedAt: new Date("2026-05-22T09:00:00+08:00"),
       refresh: async () => {
         refreshes += 1;
         return refreshResult();
@@ -61,13 +62,14 @@ describe("daily context heartbeat", () => {
     });
     const second = await runDailyContextHeartbeat(config, {
       now: new Date("2026-05-22T18:00:00+08:00"),
+      finishedAt: new Date("2026-05-22T18:00:00+08:00"),
       refresh: async () => {
         refreshes += 1;
         return refreshResult();
       }
     });
 
-    expect(refreshes).toBe(1);
+    expect(refreshes).toBe(2);
     expect(first).toMatchObject({
       status: "completed",
       trigger: "startup_heartbeat",
@@ -78,8 +80,69 @@ describe("daily context heartbeat", () => {
       diarySummariesReused: 2,
       diaryMemoriesUpdated: 4
     });
-    expect(second).toBeNull();
+    expect(second).toMatchObject({
+      status: "completed",
+      trigger: "startup_heartbeat",
+      localDay: "2026-05-22"
+    });
     expect(getLatestContextRefreshRun(config)).toMatchObject({ status: "completed" });
+  });
+
+  it("skips when the last completed heartbeat is still fresh", async () => {
+    const config = makeConfig();
+    let refreshes = 0;
+
+    await runDailyContextHeartbeat(config, {
+      now: new Date("2026-05-22T09:00:00+08:00"),
+      finishedAt: new Date("2026-05-22T09:00:00+08:00"),
+      refresh: async () => {
+        refreshes += 1;
+        return refreshResult();
+      }
+    });
+    const second = await runDailyContextHeartbeat(config, {
+      now: new Date("2026-05-22T14:59:00+08:00"),
+      refresh: async () => {
+        refreshes += 1;
+        return refreshResult();
+      }
+    });
+
+    expect(refreshes).toBe(1);
+    expect(second).toBeNull();
+  });
+
+  it("retries failed heartbeats after a short cooldown", async () => {
+    const config = makeConfig();
+    let refreshes = 0;
+
+    await runDailyContextHeartbeat(config, {
+      now: new Date("2026-05-22T09:00:00+08:00"),
+      finishedAt: new Date("2026-05-22T09:00:00+08:00"),
+      refresh: async () => {
+        refreshes += 1;
+        throw new Error("calendar permission denied");
+      }
+    });
+    const blocked = await runDailyContextHeartbeat(config, {
+      now: new Date("2026-05-22T09:20:00+08:00"),
+      refresh: async () => {
+        refreshes += 1;
+        return refreshResult();
+      }
+    });
+    const retried = await runDailyContextHeartbeat(config, {
+      now: new Date("2026-05-22T09:31:00+08:00"),
+      finishedAt: new Date("2026-05-22T09:31:00+08:00"),
+      refresh: async () => {
+        refreshes += 1;
+        return refreshResult();
+      }
+    });
+
+    expect(refreshes).toBe(2);
+    expect(blocked).toBeNull();
+    expect(retried).toMatchObject({ status: "completed" });
   });
 
   it("records failures without throwing or blocking startup", async () => {
@@ -87,6 +150,7 @@ describe("daily context heartbeat", () => {
 
     const run = await runDailyContextHeartbeat(config, {
       now: new Date("2026-05-22T09:00:00+08:00"),
+      finishedAt: new Date("2026-05-22T09:00:00+08:00"),
       refresh: async () => {
         throw new Error("calendar permission denied");
       }
@@ -102,7 +166,7 @@ describe("daily context heartbeat", () => {
   it("skips when heartbeat or all context sources are disabled", async () => {
     const disabled = {
       ...makeConfig(),
-      memory: { dailyHeartbeat: false, heartbeatHistoryLimit: 20 }
+      memory: { dailyHeartbeat: false, heartbeatIntervalHours: 6, heartbeatHistoryLimit: 20 }
     };
     const noSources = {
       ...makeConfig(),
@@ -119,6 +183,7 @@ describe("daily context heartbeat", () => {
 
     await runDailyContextHeartbeat(config, {
       now: new Date("2026-05-22T09:00:00+08:00"),
+      finishedAt: new Date("2026-05-22T09:00:00+08:00"),
       refresh: async () => refreshResult()
     });
 

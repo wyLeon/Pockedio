@@ -494,6 +494,25 @@ describe("scheduled DJ jobs", () => {
 });
 
 describe("mood checks", () => {
+  it("runs the context heartbeat during scheduler ticks", async () => {
+    const config = makeConfig();
+    const now = new Date("2026-05-18T16:00:00+08:00");
+    const heartbeatCalls: string[] = [];
+
+    await runServeTick({
+      config,
+      now,
+      completed: new Set(),
+      lastMoodPromptAt: now,
+      runContextHeartbeat: async (_config, options) => {
+        heartbeatCalls.push(options.now?.toISOString() ?? "");
+        return null;
+      }
+    });
+
+    expect(heartbeatCalls).toEqual([now.toISOString()]);
+  });
+
   it("does not block an upcoming scheduled DJ preparation with a mood prompt", async () => {
     const config = makeConfig();
     config.dj.schedule.evening.enabled = true;

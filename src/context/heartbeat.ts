@@ -10,6 +10,8 @@ import { refreshContextWithDiaryHistory, type RefreshContextResult } from "./ref
 export type ContextRefreshRunStatus = "running" | "completed" | "failed" | "skipped";
 export type ContextRefreshRunTrigger = "startup_heartbeat" | "manual";
 
+const failedHeartbeatRetryMs = 30 * 60_000;
+
 export type ContextRefreshRunRecord = {
   id: string;
   startedAt: string;
@@ -30,6 +32,7 @@ export type ContextRefreshRunRecord = {
 
 export type DailyContextHeartbeatOptions = {
   now?: Date;
+  finishedAt?: Date;
   refresh?: (config: PockedioConfig) => Promise<RefreshContextResult>;
 };
 
@@ -55,7 +58,8 @@ export async function runDailyContextHeartbeat(
   const now = options.now ?? new Date();
   const localDay = formatLocalDay(now);
   const startedAt = now.toISOString();
-  const claimed = withDatabase(config, (db) => claimHeartbeatRun(db, localDay, startedAt));
+  const heartbeatIntervalMs = config.memory.heartbeatIntervalHours * 60 * 60_000;
+  const claimed = withDatabase(config, (db) => claimHeartbeatRun(db, localDay, startedAt, now, heartbeatIntervalMs));
   if (!claimed) {
     return null;
   }
@@ -65,9 +69,9 @@ export async function runDailyContextHeartbeat(
       diaryHistoryLimit: targetConfig.memory.heartbeatHistoryLimit
     }));
     const result = await refresh(config);
-    return withDatabase(config, (db) => completeHeartbeatRun(db, claimed.id, result, new Date().toISOString()));
+    return withDatabase(config, (db) => completeHeartbeatRun(db, claimed.id, result, (options.finishedAt ?? new Date()).toISOString()));
   } catch (error) {
-    return withDatabase(config, (db) => failHeartbeatRun(db, claimed.id, error, new Date().toISOString()));
+    return withDatabase(config, (db) => failHeartbeatRun(db, claimed.id, error, (options.finishedAt ?? new Date()).toISOString()));
   }
 }
 
@@ -102,7 +106,13 @@ export function getLatestContextRefreshRun(config: PockedioConfig): ContextRefre
   }
 }
 
-function claimHeartbeatRun(db: Database.Database, localDay: string, startedAt: string): ContextRefreshRunRecord | null {
+function claimHeartbeatRun(
+  db: Database.Database,
+  localDay: string,
+  startedAt: string,
+  now: Date,
+  heartbeatIntervalMs: number
+): ContextRefreshRunRecord | null {
   const existing = db.prepare(`
     SELECT id, started_at as startedAt, finished_at as finishedAt, status, trigger, local_day as localDay,
       calendar_events_read as calendarEventsRead,
@@ -115,11 +125,11 @@ function claimHeartbeatRun(db: Database.Database, localDay: string, startedAt: s
       diary_memories_updated as diaryMemoriesUpdated,
       error
     FROM context_refresh_runs
-    WHERE trigger = 'startup_heartbeat' AND local_day = ? AND status IN ('running', 'completed', 'failed')
+    WHERE trigger = 'startup_heartbeat' AND status IN ('running', 'completed', 'failed')
     ORDER BY started_at DESC, rowid DESC
     LIMIT 1
-  `).get(localDay) as DbContextRefreshRun | undefined;
-  if (existing) {
+  `).get() as DbContextRefreshRun | undefined;
+  if (existing && shouldSkipHeartbeat(mapContextRefreshRun(existing), now, heartbeatIntervalMs)) {
     return null;
   }
 
@@ -145,6 +155,24 @@ function claimHeartbeatRun(db: Database.Database, localDay: string, startedAt: s
     diaryMemoriesUpdated: 0,
     error: null
   };
+}
+
+function shouldSkipHeartbeat(existing: ContextRefreshRunRecord, now: Date, heartbeatIntervalMs: number): boolean {
+  const freshnessTimestamp = existing.status === "completed"
+    ? existing.finishedAt ?? existing.startedAt
+    : existing.startedAt;
+  const freshnessMs = Date.parse(freshnessTimestamp);
+  if (!Number.isFinite(freshnessMs)) {
+    return false;
+  }
+  const ageMs = now.getTime() - freshnessMs;
+  if (ageMs < 0) {
+    return true;
+  }
+  if (existing.status === "completed") {
+    return ageMs < heartbeatIntervalMs;
+  }
+  return ageMs < failedHeartbeatRetryMs;
 }
 
 function completeHeartbeatRun(

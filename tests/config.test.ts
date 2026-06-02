@@ -79,7 +79,7 @@ describe("config load and save", () => {
     expect(config.calendar.enabled).toBe(false);
     expect(config.diary.enabled).toBe(false);
     expect(config.diary.path).toBeUndefined();
-    expect(config.memory).toEqual({ dailyHeartbeat: true, heartbeatHistoryLimit: 20 });
+    expect(config.memory).toEqual({ dailyHeartbeat: true, heartbeatIntervalHours: 6, heartbeatHistoryLimit: 20 });
     expect(config.personality.mbti).toBeUndefined();
     expect(config.llm.model).toBe("gpt-4.1-mini");
     expect(config.llm.baseUrl).toBeUndefined();

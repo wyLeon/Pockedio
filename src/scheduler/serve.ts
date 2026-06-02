@@ -5,6 +5,8 @@ import type { PockedioConfig } from "../config/schema.js";
 import { loadConfig } from "../config/load.js";
 import { formatCalendarStateForPrompt } from "../context/calendar.js";
 import { buildContext, type PockedioContext } from "../context/contextBuilder.js";
+import { runDailyContextHeartbeat, type ContextRefreshRunRecord } from "../context/heartbeat.js";
+import type { DailyContextHeartbeatOptions } from "../context/heartbeat.js";
 import { runMigrations } from "../db/migrations.js";
 import { shouldUseSpokenDjAudio } from "../dj/voiceRules.js";
 import { createLlmClient } from "../llm/openaiClient.js";
@@ -110,6 +112,10 @@ export type ServeTickInput = {
   runScheduledDj?: (kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig) => Promise<void>;
   prepareScheduledDj?: (kind: ScheduledDjKind, now: Date, completed: Set<string>, config: PockedioConfig) => Promise<void>;
   runMoodCheck?: () => Promise<MoodCheckResult>;
+  runContextHeartbeat?: (
+    config: PockedioConfig,
+    options: DailyContextHeartbeatOptions
+  ) => Promise<ContextRefreshRunRecord | null>;
 };
 
 export type ServeTickResult = {
@@ -365,6 +371,8 @@ export async function runServe(options: { runOnce?: string; config?: PockedioCon
 }
 
 export async function runServeTick(input: ServeTickInput): Promise<ServeTickResult> {
+  const runContextHeartbeat = input.runContextHeartbeat ?? runDailyContextHeartbeat;
+  void runContextHeartbeat(input.config, { now: input.now }).catch(() => undefined);
   const runScheduled = input.runScheduledDj ?? runJobOnce;
   const prepareScheduled = input.prepareScheduledDj ?? prepareJobOnce;
   if (isMorningDjPrepareTime(input.now, input.config)) {
