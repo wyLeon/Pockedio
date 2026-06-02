@@ -44,6 +44,8 @@ Optional:
 
 ## Install From Source
 
+For a step-by-step Mac guide written for non-technical users, see [docs/beginner-install-use-guide.zh-CN.md](docs/beginner-install-use-guide.zh-CN.md).
+
 ```bash
 git clone https://github.com/wyLeon/Pockedio.git
 cd Pockedio
