@@ -160,6 +160,7 @@ export type InteractivePlaybackState = {
   pendingSongOrStationSelection?: PendingSongOrStationSelection;
   pendingQueueToneChangeSelection?: PendingQueueToneChangeSelection;
   pendingFavoriteListSelection?: PendingFavoriteListSelection;
+  pendingDjVersionRequest?: string;
   pendingDjProgram?: PendingDjProgramState;
   currentIndex?: number;
   currentTrackId?: string;
@@ -411,6 +412,48 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         response,
         shouldExit: false
       };
+    }
+    if (input.playbackState?.pendingDjVersionRequest && isPendingStationConfirmation(input.input)) {
+      const pendingRequest = input.playbackState.pendingDjVersionRequest;
+      input.playbackState.pendingDjVersionRequest = undefined;
+      input.playbackState.pendingStationRequest = undefined;
+      input.playbackState.pendingStationOriginalRequest = undefined;
+      input.playbackState.pendingStationNeedsChoice = false;
+      cancelDjProgramPreparations(input.playbackState);
+      stopActivePlayback(input.playbackState, store);
+      const prepared = await prepareDjProgramRequest({
+        config,
+        sessionId,
+        store,
+        provider,
+        llm,
+        requestText: pendingRequest,
+        buildContext: input.buildContext,
+        writeStatus,
+        playbackState: input.playbackState,
+        synthesize,
+        playFile,
+        signal
+      });
+      store.addMessage(sessionId, "pockedio", prepared.response);
+      writeOutput(prepared.response);
+      return {
+        sessionId,
+        intent: { type: "pending_station_dj_program", confidence: "high" },
+        response: prepared.response,
+        shouldExit: false,
+        station: prepared.station
+      };
+    }
+    if (input.playbackState?.pendingDjVersionRequest && isPendingStationDecline(userText)) {
+      input.playbackState.pendingDjVersionRequest = undefined;
+      const response = "Keeping the current station.";
+      store.addMessage(sessionId, "pockedio", response);
+      writeOutput(response);
+      return { sessionId, intent: { type: "pending_station_decline", confidence: "high" }, response, shouldExit: false };
+    }
+    if (input.playbackState?.pendingDjVersionRequest) {
+      input.playbackState.pendingDjVersionRequest = undefined;
     }
     if (input.playbackState?.pendingStationNeedsChoice && input.playbackState.pendingStationRequest && isPendingStationConfirmation(input.input)) {
       input.playbackState.pendingStationNeedsChoice = false;
@@ -935,9 +978,8 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       return { sessionId, intent, response, shouldExit: false };
     }
 
-    const midPlaybackDjProgramRequest = extractInlineDjModeReplacementRequest(userText, input.playbackState)
-      ?? extractCurrentStationDjVersionRequest(userText, input.playbackState);
-    if (midPlaybackDjProgramRequest && input.playbackState) {
+    const midPlaybackReplacementDjProgramRequest = extractInlineDjModeReplacementRequest(userText, input.playbackState);
+    if (midPlaybackReplacementDjProgramRequest && input.playbackState) {
       input.playbackState.pendingStationRequest = undefined;
       input.playbackState.pendingStationOriginalRequest = undefined;
       input.playbackState.pendingStationNeedsChoice = false;
@@ -949,7 +991,7 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
         store,
         provider,
         llm,
-        requestText: midPlaybackDjProgramRequest,
+        requestText: midPlaybackReplacementDjProgramRequest,
         buildContext: input.buildContext,
         writeStatus,
         playbackState: input.playbackState,
@@ -968,11 +1010,14 @@ export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTu
       };
     }
 
-    if (isMidStationDjModeRequest(userText, input.playbackState)) {
+    const currentStationDjVersionRequest = extractCurrentStationDjVersionRequest(userText, input.playbackState)
+      ?? (isMidStationDjModeRequest(userText, input.playbackState) ? input.playbackState?.station?.request ?? null : null);
+    if (currentStationDjVersionRequest && input.playbackState) {
+      input.playbackState.pendingDjVersionRequest = currentStationDjVersionRequest;
       const response = formatMidStationDjModeResponse(config);
       store.addMessage(sessionId, "pockedio", response);
       writeOutput(response);
-      return { sessionId, intent: { type: "conversation", confidence: "high" }, response, shouldExit: false };
+      return { sessionId, intent: { type: "pending_station_dj_program", confidence: "high" }, response, shouldExit: false };
     }
 
     if (intent.type === "playback_status") {
@@ -2863,7 +2908,16 @@ async function generateMusicRecommendationResponse(input: {
   ].join("\n");
   const result = await input.llm.generateText(prompt, { signal: input.signal });
   if (isUsableGeneratedText(input.config, result)) {
-    return appendPendingStationChoicePrompt(formatDjNoteSurface(sanitizeGeneratedDjCopy(result.value.trim(), input.config), input.config));
+    const text = sanitizeGeneratedDjCopyForLocalTime({
+      text: result.value,
+      userText: input.userText,
+      context: input.context,
+      config: input.config
+    });
+    if (text) {
+      return appendPendingStationChoicePrompt(formatDjNoteSurface(text, input.config));
+    }
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(formatTimeSafeRecommendationFallback(input.config), input.config));
   }
 
   return appendPendingStationChoicePrompt(formatDjNoteSurface([
@@ -2912,7 +2966,7 @@ function isMidStationDjModeRequest(text: string, playbackState: InteractivePlayb
   return Boolean(playbackState?.currentTrackId)
     && !playbackState?.pendingStationRequest
     && !hasExplicitPlaybackCommand(text)
-    && (normalized === "dj" || normalized === "dj mode" || /\b(dj program|dj version|radio version|spoken version)\b/.test(normalized));
+    && (normalized === "dj" || normalized === "dj mode" || /\b(dj mode|dj program|dj version|radio version|spoken version)\b/.test(normalized));
 }
 
 function extractInlineDjModeReplacementRequest(text: string, playbackState: InteractivePlaybackState | undefined): string | null {
@@ -2958,9 +3012,11 @@ function extractInlineDjModeStationRequest(text: string): string | null {
 
 function formatMidStationDjModeResponse(config: PockedioConfig): string {
   return [
-    "DJ mode is a before-playback choice.",
-    `Let this station finish, or stop and ask ${formatRuntimeDjDisplayName(config)} for a new DJ version.`
-  ].join(" ");
+    `I can prepare a spoken DJ version of this same station with ${formatRuntimeDjDisplayName(config)}.`,
+    "",
+    "Enter / yes  prepare DJ version",
+    "no           keep this station"
+  ].join("\n");
 }
 
 function isCurrentTrackQuestion(text: string): boolean {
@@ -3375,6 +3431,45 @@ function formatLocalDaypartPhrase(daypart: PockedioContext["timeOfDay"]): string
     return "tonight";
   }
   return `this ${daypart}`;
+}
+
+function sanitizeGeneratedDjCopyForLocalTime(input: {
+  text: string;
+  userText: string;
+  context: Partial<PockedioContext> | undefined;
+  config?: PockedioConfig;
+}): string | null {
+  const sanitized = sanitizeGeneratedDjCopy(input.text.trim(), input.config);
+  return hasCurrentTimeClaimConflict(sanitized, input.userText, input.context)
+    ? null
+    : alignGeneratedTextToLocalDaypart(sanitized, input.userText, input.context);
+}
+
+function hasCurrentTimeClaimConflict(
+  text: string,
+  userText: string,
+  context: Partial<PockedioContext> | undefined
+): boolean {
+  const localDaypart = context?.timeOfDay;
+  if (!localDaypart) {
+    return false;
+  }
+  const requestedDaypart = extractRequestedDaypart(userText);
+  if (requestedDaypart) {
+    return false;
+  }
+  const normalized = text.toLowerCase();
+  return localDaypart !== "morning" && morningCurrentTimeClaimPattern.test(normalized);
+}
+
+const morningCurrentTimeClaimPattern = /\b(good morning|start(?:ing)?\s+(?:your|the|my)?\s*morning|start(?:ing)?\s+(?:your|the|my)?\s*day|day\s+(?:begins|starts)|sunrise|fresh start)\b/i;
+
+function formatTimeSafeRecommendationFallback(config: PockedioConfig): string {
+  return [
+    `I’d keep this one time-neutral and shape a five-track set around ${formatRuntimeDjDisplayName(config)}’s current read of your taste and mood.`,
+    "",
+    "Want me to build that station?"
+  ].join("\n");
 }
 
 function matchCapitalization(replacement: string, original: string): string {
@@ -4434,13 +4529,16 @@ async function generateStationDjProgramIntro(input: {
     "Station tracks:",
     ...input.station.tracks.map((track) => `${track.position}. ${track.title} - ${track.artist}: ${track.rationale}`)
   ].join("\n"), { signal: input.signal });
-  const text = isUsableGeneratedText(input.config, textResult)
-    ? alignGeneratedTextToLocalDaypart(
-      sanitizeGeneratedDjCopy(textResult.value.trim(), input.config),
-      input.requestText,
-      input.context
-    )
-    : `${formatRuntimeDjDisplayName(input.config)} here. I’ll open this as a short DJ program and ease you into the first track with the station already shaped around your request.`;
+  const generatedText = isUsableGeneratedText(input.config, textResult)
+    ? sanitizeGeneratedDjCopyForLocalTime({
+      text: textResult.value,
+      userText: input.requestText,
+      context: input.context,
+      config: input.config
+    })
+    : null;
+  const text = generatedText
+    ?? `${formatRuntimeDjDisplayName(input.config)} here. I’ll open this as a short DJ program and ease you into the first track with the station already shaped around your request.`;
   const djAudio = shouldUseSpokenDjAudio({
     triggerType: "conversation",
     userExplicitlyRequestedDjAudio: true

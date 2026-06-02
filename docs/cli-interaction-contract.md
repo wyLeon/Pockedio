@@ -1266,7 +1266,7 @@ Rules:
 - A new explicit playback request replaces the pending station and routes to 3.7 or 3.8.
 - `dj` is only a shortcut when a station is pending. It means spoken opening plus normal station playback.
 - Confirmation does not itself print queue details; queue appears only after 3.6 starts playback.
-- DJ mode should be a before-playback fork, not a mid-station toggle. If the user asks for DJ mode while a station is already playing, explain that they can choose DJ mode before the next station.
+- DJ mode should be a before-playback fork, not a live toggle. If the user asks for DJ mode while a station is already playing, offer to prepare a spoken DJ version of the current station request and ask for confirmation before stopping playback.
 
 ## 3.6 Station Building And Playback Start
 
@@ -1442,7 +1442,16 @@ Then, when the final track ends:
 That station’s done. Press Enter to choose how to continue this vibe, or tell me where to take it next.
 ```
 
-DJ mode is not a mid-station toggle. Once normal playback starts, `dj` / `dj mode` should not retrofit spoken mode into that station. The user can stop and ask for a new DJ version, or choose DJ mode before the next station starts.
+DJ mode is not a live mid-station toggle. Once normal playback starts, `dj` / `dj mode` should not retrofit spoken mode into that station. If a current station request exists, Pockedio should offer a clean handoff:
+
+```text
+I can prepare a spoken DJ version of this same station with Mina.
+
+Enter / yes  prepare DJ version
+no           keep this station
+```
+
+On confirmation, stop the current station and prepare the DJ program from the current station request through the existing before-playback DJ program flow.
 
 Scheduled DJ program distinction:
 
@@ -1609,7 +1618,7 @@ Tell me about this artist          3.9 During-Playback Talk      built
 Tell me about [artist]             3.9 During-Playback Talk      built
 Why did you pick this?             3.9 During-Playback Talk      built
 This reminds me of college         3.9 During-Playback Talk      built
-dj / dj mode                       3.6 DJ Program Boundary       built rejection
+dj / dj mode                       3.6 DJ Program Boundary       built handoff prompt
 play something else                3.8 Replacement Station       built
 play [specific song]               3.7 Specific Song Playback    built
 ```
@@ -1622,7 +1631,7 @@ Rules:
 - During playback, `previous` means stop current track and return to the previous playable track.
 - During playback, `stop` stops playback and keeps the interactive session open.
 - During playback, `pause` and `resume` are real controls when mpv is available; with ffplay/afplay fallback, pause stops audio and resume is unavailable.
-- During playback, `dj` is not a toggle. DJ mode is chosen before playback starts.
+- During playback, `dj` is not a live toggle. If a current station exists, offer to prepare a fresh spoken DJ version from that station request.
 - Replacement requests such as `play something else` may stop current playback and start a new station.
 
 ## 3.9 During-Playback Conversation

@@ -5586,6 +5586,36 @@ describe("runSessionTurn", () => {
     expect(prompts[0]).toContain("Weather summary: Guangzhou, 95% humidity");
   });
 
+  it("does not surface false morning claims in recommendation replies when local time is evening", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+
+    const result = await runSessionTurn({
+      input: "random music",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: {
+        generateJson: async () => ({ ok: true, value: { type: "music_recommendation", confidence: "high" } }),
+        generateText: async () => ({
+          ok: true,
+          value: "Got it, switching the vibe to soft morning jazz for a fresh start. Shall I play this version?"
+        })
+      },
+      buildContext: async () => ({
+        now: "2026-06-01T13:25:00.000Z",
+        timeOfDay: "evening",
+        personality: config.personality
+      })
+    });
+
+    expect(result.intent.type).toBe("music_recommendation");
+    expect(playbackState.pendingStationRequest).toBe("random music");
+    expect(result.response).not.toMatch(/\bmorning\b/i);
+    expect(result.response).not.toMatch(/\bfresh start\b/i);
+    expect(result.response).toContain("Want me to build");
+  });
+
   it("replies first for open-ended want-something station requests so DJ mode is available before playback", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -5616,7 +5646,7 @@ describe("runSessionTurn", () => {
     expect(result.response).toContain('type "dj"');
   });
 
-  it("does not enable DJ mode in the middle of a playing station", async () => {
+  it("offers a DJ handoff for the current station during playback", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
     const started: string[] = [];
@@ -5639,7 +5669,7 @@ describe("runSessionTurn", () => {
     });
 
     const result = await runSessionTurn({
-      input: "dj mode",
+      input: "change it to dj mode",
       config,
       playbackState,
       provider: new FakeProvider(),
@@ -5654,10 +5684,12 @@ describe("runSessionTurn", () => {
       }
     });
 
-    expect(result.intent.type).toBe("conversation");
-    expect(result.response).toContain("DJ mode is a before-playback choice");
+    expect(result.intent.type).toBe("pending_station_dj_program");
+    expect(result.response).toContain("I can prepare a spoken DJ version of this same station");
+    expect(result.response).toContain("Enter / yes  prepare DJ version");
     expect(started).toHaveLength(1);
     expect(playbackState.currentIndex).toBe(0);
+    expect(playbackState.pendingDjVersionRequest).toBe("play something for deep work");
   });
 
   it("plays the pending station after confirmation", async () => {
@@ -6150,6 +6182,43 @@ describe("runSessionTurn", () => {
     expect(prompts.some((prompt) => prompt.includes("Local time context: device-local daypart=morning"))).toBe(true);
   });
 
+  it("does not synthesize false morning claims in DJ intros when local time is evening", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {
+      pendingStationRequest: "random music",
+      pendingStationOriginalRequest: "random music",
+      pendingStationNeedsChoice: false
+    };
+    const synthesized: string[] = [];
+
+    await runSessionTurn({
+      input: "dj",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: {
+        generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "unused" }),
+        generateText: async () => ({
+          ok: true,
+          value: "I’ll start your morning with soft jazz and ease into the first track."
+        })
+      },
+      buildContext: async () => ({
+        now: "2026-06-01T13:25:00.000Z",
+        timeOfDay: "evening",
+        personality: config.personality
+      }),
+      synthesizeFishAudio: async (_config, text) => {
+        synthesized.push(text);
+        return { ok: true, audioPath: "/tmp/pockedio-dj-intro.wav", latencyMs: 15 };
+      }
+    });
+
+    expect(playbackState.pendingDjProgram?.intro.rawText).not.toMatch(/\bmorning\b/i);
+    expect(playbackState.pendingDjProgram?.intro.rawText).not.toMatch(/\bstart your\b/i);
+    expect(synthesized.join("\n")).not.toMatch(/\bmorning\b/i);
+  });
+
   it("preserves explicit requested night language in prepared DJ program intros", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -6175,7 +6244,7 @@ describe("runSessionTurn", () => {
     expect(playbackState.pendingDjProgram?.intro.rawText).toBe("Tonight, soft jazz can ease into the first track.");
   });
 
-  it("prepares a new DJ version of the current station when requested mid-playback", async () => {
+  it("prepares a new DJ version of the current station after mid-playback confirmation", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
     const started: string[] = [];
@@ -6200,8 +6269,23 @@ describe("runSessionTurn", () => {
       }
     });
 
-    const result = await runSessionTurn({
+    const prompt = await runSessionTurn({
       input: "a new dj version",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    expect(prompt.intent.type).toBe("pending_station_dj_program");
+    expect(prompt.response).toContain("I can prepare a spoken DJ version of this same station");
+    expect(started).toHaveLength(1);
+    expect(stopCalls).toBe(0);
+    expect(playbackState.pendingDjVersionRequest).toBe("play some morning soft jazz");
+
+    const result = await runSessionTurn({
+      input: "yes",
       config,
       playbackState,
       provider: new FakeProvider(),
@@ -6220,6 +6304,7 @@ describe("runSessionTurn", () => {
     expect(started).toHaveLength(1);
     expect(stopCalls).toBe(1);
     expect(playbackState.pendingDjProgram?.requestText).toBe("play some morning soft jazz");
+    expect(playbackState.pendingDjVersionRequest).toBeUndefined();
   });
 
   it("starts a prepared pending DJ program with ducked music under the spoken intro", async () => {
