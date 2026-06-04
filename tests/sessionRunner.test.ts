@@ -2273,6 +2273,58 @@ describe("runSessionTurn", () => {
     ]);
   });
 
+  it("refreshes NetEase playback URLs before starting queued tracks", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const urlCalls = new Map<string, number>();
+    let finishFirst: ((value: { ok: boolean; target: string; exitCode: number; signal: null }) => void) | undefined;
+
+    class ExpiringUrlProvider extends FakeProvider {
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        const count = (urlCalls.get(trackId) ?? 0) + 1;
+        urlCalls.set(trackId, count);
+        return {
+          available: true,
+          provider: "netease",
+          providerTrackId: trackId,
+          playableUrl: `https://${count === 1 ? "stale" : "fresh"}.example.com/${encodeURIComponent(trackId)}.mp3`,
+          urlType: "mp3"
+        };
+      }
+    }
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new ExpiringUrlProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            if (!finishFirst) {
+              finishFirst = resolve;
+            }
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(started).toHaveLength(1);
+    expect(started[0]).toContain("https://fresh.example.com/");
+
+    finishFirst?.({ ok: true, target: started[0], exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(started).toHaveLength(2);
+    expect(started[1]).toContain("https://fresh.example.com/");
+  });
+
   it("does not auto-advance when session exit stops active playback", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -4757,6 +4809,41 @@ describe("runSessionTurn", () => {
     expect(prompts[0]).toContain("Test Artist");
   });
 
+  it("answers compound now-playing song questions through grounded conversation", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const prompts: string[] = [];
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => ({
+        target: url,
+        done: new Promise(() => undefined),
+        stop: () => undefined
+      })
+    });
+
+    const result = await runSessionTurn({
+      input: "What is playing? Tell me more about this song.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("This is Test Track by Test Artist, a focused pick that keeps the room steady while the queue stays quiet around it.", prompts)
+    });
+
+    expect(result.intent.type).toBe("conversation");
+    expect(result.response).toContain("Test Track");
+    expect(result.response).toContain("Test Artist");
+    expect(result.response).not.toContain("NOW PLAYING");
+    expect(prompts[0]).toContain("For current-track questions");
+    expect(prompts[0]).toContain("Current track:");
+  });
+
   it("keeps current-track lyric requests conversational instead of starting a station", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -6154,6 +6241,7 @@ describe("runSessionTurn", () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
     const synthesized: string[] = [];
+    let observedTimeoutMs = 0;
     const prompts: string[] = [];
 
     await runSessionTurn({
@@ -6167,8 +6255,9 @@ describe("runSessionTurn", () => {
         timeOfDay: "morning",
         personality: config.personality
       }),
-      synthesizeFishAudio: async (_config, text) => {
+      synthesizeFishAudio: async (_config, text, options) => {
         synthesized.push(text);
+        observedTimeoutMs = options?.timeoutMs ?? 0;
         return {
           ok: true,
           audioPath: "/tmp/pockedio-dj-intro.wav",
@@ -6179,6 +6268,7 @@ describe("runSessionTurn", () => {
 
     expect(playbackState.pendingDjProgram?.intro.rawText).toBe("This morning, soft jazz can ease into the first track.");
     expect(synthesized).toEqual(["This morning, soft jazz can ease into the first track."]);
+    expect(observedTimeoutMs).toBe(240_000);
     expect(prompts.some((prompt) => prompt.includes("Local time context: device-local daypart=morning"))).toBe(true);
   });
 
@@ -6244,9 +6334,24 @@ describe("runSessionTurn", () => {
     expect(playbackState.pendingDjProgram?.intro.rawText).toBe("Tonight, soft jazz can ease into the first track.");
   });
 
-  it("prepares a new DJ version of the current station after mid-playback confirmation", async () => {
+  it("prepares a DJ version of the same current station after mid-playback confirmation", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
+    class CountingProvider extends FakeProvider {
+      searchCount = 0;
+      playableCount = 0;
+
+      async search(query: MusicSearchQuery, limit: number): Promise<MusicTrackCandidate[]> {
+        this.searchCount += 1;
+        return super.search(query, limit);
+      }
+
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        this.playableCount += 1;
+        return super.getPlayableUrl(trackId);
+      }
+    }
+    const provider = new CountingProvider();
     const started: string[] = [];
     let stopCalls = 0;
 
@@ -6254,7 +6359,7 @@ describe("runSessionTurn", () => {
       input: "play some morning soft jazz",
       config,
       playbackState,
-      provider: new FakeProvider(),
+      provider,
       llm: fakeLlm(),
       buildContext: async () => ({ personality: config.personality }),
       startUrlPlayback: async (url) => {
@@ -6268,12 +6373,16 @@ describe("runSessionTurn", () => {
         };
       }
     });
+    const originalStation = playbackState.station;
+    const originalStoredTracks = playbackState.storedTracks;
+    const searchCountBeforeDjConfirmation = provider.searchCount;
+    const playableCountBeforeDjConfirmation = provider.playableCount;
 
     const prompt = await runSessionTurn({
-      input: "a new dj version",
+      input: "want dj mode, Mina",
       config,
       playbackState,
-      provider: new FakeProvider(),
+      provider,
       llm: fakeLlm(),
       buildContext: async () => ({ personality: config.personality })
     });
@@ -6288,7 +6397,7 @@ describe("runSessionTurn", () => {
       input: "yes",
       config,
       playbackState,
-      provider: new FakeProvider(),
+      provider,
       llm: conversationalLlm("Pockedio here. I’ll reopen this soft jazz morning as a DJ program."),
       buildContext: async () => ({ personality: config.personality }),
       synthesizeFishAudio: async (_config, text) => ({
@@ -6303,7 +6412,11 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("DJ mode is a before-playback choice");
     expect(started).toHaveLength(1);
     expect(stopCalls).toBe(1);
+    expect(provider.searchCount).toBe(searchCountBeforeDjConfirmation);
+    expect(provider.playableCount).toBe(playableCountBeforeDjConfirmation);
     expect(playbackState.pendingDjProgram?.requestText).toBe("play some morning soft jazz");
+    expect(playbackState.pendingDjProgram?.station).toBe(originalStation);
+    expect(playbackState.pendingDjProgram?.storedTracks).toBe(originalStoredTracks);
     expect(playbackState.pendingDjVersionRequest).toBeUndefined();
   });
 
@@ -6395,6 +6508,68 @@ describe("runSessionTurn", () => {
 
     const rows = withDatabase(config, (db) => db.prepare("SELECT status, audio_path as audioPath FROM dj_audio ORDER BY created_at DESC LIMIT 1").all());
     expect(rows).toEqual([{ status: "played", audioPath: "/tmp/pockedio-dj-intro.wav" }]);
+  });
+
+  it("shows the fallback reason when prepared DJ audio times out", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const duckedStarts: Array<{ url: string; introFilePath: string }> = [];
+    const directStarts: string[] = [];
+
+    await runSessionTurn({
+      input: "I'm exhausted now, want some relaxation.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("I would keep this soft. Want me to play that station?"),
+      buildContext: async () => ({ personality: config.personality })
+    });
+
+    await runSessionTurn({
+      input: "dj",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Mina opens this softly."),
+      buildContext: async () => ({ personality: config.personality }),
+      synthesizeFishAudio: async () => ({
+        ok: false,
+        audioPath: "/tmp/pockedio-missing-dj-intro.wav",
+        latencyMs: 240_000,
+        error: "FishAudio timed out after 240000ms."
+      })
+    });
+
+    const started = await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        directStarts.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      },
+      startDuckedIntroPlayback: async (url, introFilePath) => {
+        duckedStarts.push({ url, introFilePath });
+        return {
+          target: url,
+          introResult: { ok: true, target: introFilePath, exitCode: 0, signal: null },
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(started.response).toContain("Mina opens this softly.");
+    expect(started.response).toContain("DJ audio unavailable: FishAudio timed out after 240000ms.");
+    expect(started.response).toContain("Now playing:");
+    expect(duckedStarts).toEqual([]);
+    expect(directStarts).toHaveLength(1);
   });
 
   it("stops current playback before preparing a pending DJ program", async () => {
@@ -6597,6 +6772,7 @@ describe("runSessionTurn", () => {
     const directStarts: string[] = [];
     const finishers: Array<(result: { ok: boolean; target: string; exitCode: number | null; signal: NodeJS.Signals | null }) => void> = [];
     const directFinishers: Array<(result: { ok: boolean; target: string; exitCode: number | null; signal: NodeJS.Signals | null }) => void> = [];
+    const observedTimeouts: number[] = [];
 
     await runSessionTurn({
       input: "I'm exhausted now, want some relaxation.",
@@ -6623,11 +6799,14 @@ describe("runSessionTurn", () => {
       },
       buildContext: async () => ({ personality: config.personality }),
       writeOutput: (text) => output.push(text),
-      synthesizeFishAudio: async (_config, text) => ({
-        ok: true,
-        audioPath: text.includes("your love for warm jazz") ? "/tmp/track-3-intro.wav" : "/tmp/opening-intro.wav",
-        latencyMs: 15
-      }),
+      synthesizeFishAudio: async (_config, text, options) => {
+        observedTimeouts.push(options?.timeoutMs ?? 0);
+        return {
+          ok: true,
+          audioPath: text.includes("your love for warm jazz") ? "/tmp/track-3-intro.wav" : "/tmp/opening-intro.wav",
+          latencyMs: 15
+        };
+      },
       startUrlPlayback: async (url) => {
         directStarts.push(url);
         return {
@@ -6695,6 +6874,7 @@ describe("runSessionTurn", () => {
       introFilePath: "/tmp/track-3-intro.wav"
     });
     expect(directStarts).toHaveLength(1);
+    expect(observedTimeouts).toEqual([240_000, 240_000]);
     expect(output.join("\n")).toContain("Mina's note:");
     expect(output.join("\n")).toContain("aligns with your love for warm jazz");
     expect(output.join("\n")).not.toContain("the user's love");
