@@ -187,6 +187,41 @@ describe("terminal playback renderer", () => {
     expect(new Set(stateColumns).size).toBe(1);
   });
 
+  it("uses stored playback status instead of position for past queue rows", () => {
+    const unavailable = entry(1, "Better Together", "Jack Johnson");
+    unavailable.track.playable = {
+      available: false,
+      provider: "netease",
+      providerTrackId: "1",
+      reason: "NetEase request failed: This operation was aborted"
+    };
+    const failed = { ...entry(2, "Banana Pancakes", "Jack Johnson"), playbackStatus: "failed" as const };
+    const played = { ...entry(3, "The Girl From Ipanema", "Stan Getz"), playbackStatus: "playing" as const };
+
+    const rendered = renderPlaybackSurface({
+      queue: [
+        { ...unavailable, playbackStatus: "unavailable" as const },
+        failed,
+        played,
+        entry(4, "Here, There And Everywhere", "The Beatles")
+      ],
+      currentIndex: 2,
+      currentStartedAt: new Date("2026-06-08T01:00:00Z"),
+      now: new Date("2026-06-08T01:00:00Z"),
+      djDisplayName: "Mina",
+      color: true,
+      width: 104
+    });
+    const queueLines = stripAnsi(rendered).split("\n").filter((line) => /\d+\./.test(line));
+
+    expect(queueLines.find((line) => line.includes("Better Together"))).toContain("(unavailable)");
+    expect(queueLines.find((line) => line.includes("Better Together"))).not.toContain("played");
+    expect(queueLines.find((line) => line.includes("Banana Pancakes"))).toContain("failed");
+    expect(queueLines.find((line) => line.includes("Banana Pancakes"))).not.toContain("played");
+    expect(queueLines.find((line) => line.includes("The Girl From Ipanema"))).toContain("now");
+    expect(queueLines.find((line) => line.includes("Here, There And Everywhere"))).toContain("next");
+  });
+
   it("aligns selectable choice rows with CJK labels and metadata", () => {
     const rendered = renderTuiChoiceList([
       { label: "献给永远的 - 大粉乐队", meta: "song" },

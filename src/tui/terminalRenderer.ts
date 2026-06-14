@@ -21,6 +21,8 @@ export type TuiRowInput = {
 export type TuiPlaybackQueueEntry = {
   dbId: string;
   track: StationTrack;
+  playbackStatus?: "planned" | "playing" | "played" | "skipped" | "unavailable" | "failed";
+  failureReason?: string | null;
 };
 
 export type TuiChoiceListItem = {
@@ -207,7 +209,7 @@ function formatQueueSnapshot(queue: TuiPlaybackQueueEntry[], currentIndex: numbe
   const rows = queue.map((entry, index) => {
     const suffix = entry.track.playable.available ? "" : " (unavailable)";
     const marker = index === currentIndex ? ">" : " ";
-    const state = index < currentIndex ? "played" : index === currentIndex ? "now" : index === currentIndex + 1 ? "next" : "";
+    const state = formatQueueRowState(entry, index, currentIndex);
     return {
       marker,
       position: `${entry.track.position}.`,
@@ -229,6 +231,22 @@ function formatQueueSnapshot(queue: TuiPlaybackQueueEntry[], currentIndex: numbe
     color ? "" : "Queue:",
     ...rows.map((row) => renderQueueRow(row, positionWidth, stateColumn, { color, width }))
   ].join("\n");
+}
+
+function formatQueueRowState(entry: TuiPlaybackQueueEntry, index: number, currentIndex: number): string {
+  if (index === currentIndex) {
+    return "now";
+  }
+  if (entry.playbackStatus === "failed" || entry.playbackStatus === "skipped" || entry.playbackStatus === "played") {
+    return entry.playbackStatus;
+  }
+  if (entry.playbackStatus === "unavailable") {
+    return "";
+  }
+  if (index < currentIndex) {
+    return "played";
+  }
+  return index === currentIndex + 1 && entry.track.playable.available ? "next" : "";
 }
 
 type QueueRow = {

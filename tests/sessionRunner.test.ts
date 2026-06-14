@@ -182,6 +182,10 @@ function conversationalLlm(response: string, prompts: string[] = []): LlmClient 
   };
 }
 
+async function waitForPlaybackUrlRefreshRetries(attemptedTracks = 1): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 350 * attemptedTracks));
+}
+
 function misclassifyingPlaybackLlm(response: string, prompts: string[] = []): LlmClient {
   return {
     generateJson: async () => ({ ok: true, value: { type: "playback_request", confidence: "high" } }),
@@ -509,6 +513,54 @@ describe("runSessionTurn", () => {
     await expect(question).resolves.toBe("");
   });
 
+  it("redraws the live prompt frame when the terminal is resized", async () => {
+    const writes: string[] = [];
+    const input = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      isRaw: boolean;
+      setRawMode: (value: boolean) => void;
+      resume: () => typeof input;
+      pause: () => typeof input;
+    };
+    input.isTTY = true;
+    input.isRaw = false;
+    input.setRawMode = (value: boolean) => {
+      input.isRaw = value;
+    };
+    input.resume = () => input;
+    input.pause = () => input;
+    const output = new EventEmitter() as EventEmitter & {
+      isTTY: boolean;
+      columns: number;
+      write: (chunk: string | Uint8Array) => boolean;
+    };
+    output.isTTY = true;
+    output.columns = 32;
+    output.write = (chunk: string | Uint8Array) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    const promptView = { line: "", cursor: 0 };
+    const question = questionWithInteractiveFrame(
+      {} as never,
+      input as never,
+      output as never,
+      promptView,
+      () => undefined,
+      { color: true, width: output.columns }
+    );
+
+    output.columns = 48;
+    output.emit("resize");
+
+    const plain = stripAnsi(writes.join(""));
+    expect(plain).toContain("─".repeat(48));
+
+    input.emit("keypress", "\r", { name: "return" });
+    await expect(question).resolves.toBe("");
+    expect(output.listenerCount("resize")).toBe(0);
+  });
+
   it("clears the live prompt frame when Ctrl+C exits from idle input", async () => {
     const writes: string[] = [];
     const input = new EventEmitter() as EventEmitter & {
@@ -620,6 +672,43 @@ describe("runSessionTurn", () => {
     expect(result.response).not.toContain("Queue:");
     expect(playbackState.station).toBeUndefined();
     expect(playbackState.storedTracks).toHaveLength(1);
+  });
+
+  it("retries transient provider failures while resolving a direct song", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    let urlCalls = 0;
+
+    class TransientDirectSongProvider extends AmbiguousSongProvider {
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        urlCalls += 1;
+        if (urlCalls === 1) {
+          throw new Error("NetEase request failed with HTTP 502.");
+        }
+        return super.getPlayableUrl(trackId);
+      }
+    }
+
+    const result = await runSessionTurn({
+      input: "play To Be Alone With You by Sufjan Stevens",
+      config,
+      playbackState,
+      provider: new TransientDirectSongProvider(),
+      llm: fakeLlm(),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(result.intent.type).toBe("single_track_playback");
+    expect(started).toEqual(["https://example.com/To%20Be%20Alone%20With%20You%20Sufjan%20Stevens.mp3"]);
+    expect(urlCalls).toBe(3);
   });
 
   it("labels playback notes with the selected built-in voice, not the legacy DJ name", async () => {
@@ -1802,6 +1891,80 @@ describe("runSessionTurn", () => {
     expect(playbackState.currentTrackId).toBeUndefined();
   });
 
+  it("skips a transient manual next URL refresh failure and starts the following track", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const started: string[] = [];
+    const urlCalls = new Map<string, number>();
+    let failingTrackId: string | undefined;
+
+    class TransientNextRefreshFailureProvider extends FakeProvider {
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        const count = (urlCalls.get(trackId) ?? 0) + 1;
+        urlCalls.set(trackId, count);
+        if (trackId === failingTrackId && count > 1) {
+          throw new Error("NetEase request failed: This operation was aborted");
+        }
+        return {
+          available: true,
+          provider: "netease",
+          providerTrackId: trackId,
+          playableUrl: `https://fresh.example.com/${encodeURIComponent(trackId)}.mp3`,
+          urlType: "mp3"
+        };
+      }
+    }
+
+    const provider = new TransientNextRefreshFailureProvider();
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider,
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    failingTrackId = playbackState.storedTracks?.[1]?.track.providerTrackId;
+    const failingTrack = playbackState.storedTracks?.[1]?.track;
+
+    const result = await runSessionTurn({
+      input: "next",
+      config,
+      playbackState,
+      provider,
+      llm: fakeLlm()
+    });
+
+    expect(result.response).toContain(`I could not start ${failingTrack?.title} - ${failingTrack?.artist}.`);
+    expect(result.response).toContain("Playback detail: NetEase request failed: This operation was aborted");
+    expect(result.response).toContain("Trying the next track.");
+    expect(result.response).toContain("Now playing: 3/5");
+    expect(result.response).not.toContain("Type next to try the following track");
+    expect(playbackState.currentIndex).toBe(2);
+    expect(started).toHaveLength(2);
+
+    const rows = withDatabase(config, (db) => db.prepare(`
+      SELECT position, playback_status as playbackStatus, failure_reason as failureReason
+      FROM station_tracks
+      ORDER BY position
+      LIMIT 3
+    `).all());
+    expect(rows).toEqual([
+      { position: 1, playbackStatus: "skipped", failureReason: null },
+      { position: 2, playbackStatus: "failed", failureReason: "NetEase request failed: This operation was aborted" },
+      { position: 3, playbackStatus: "playing", failureReason: null }
+    ]);
+  });
+
   it("pause stops current playback with clear fallback copy when controls are unavailable", async () => {
     const config = makeConfig();
     let stopCalls = 0;
@@ -2325,6 +2488,297 @@ describe("runSessionTurn", () => {
     expect(started[1]).toContain("https://fresh.example.com/");
   });
 
+  it("retries a transient final-track URL refresh failure before ending the station", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    const started: string[] = [];
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null }) => void> = [];
+    const urlCalls = new Map<string, number>();
+    let finalTrackId: string | undefined;
+
+    class FinalTrackTransientRefreshProvider extends FakeProvider {
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        const count = (urlCalls.get(trackId) ?? 0) + 1;
+        urlCalls.set(trackId, count);
+        if (trackId === finalTrackId && count === 2) {
+          throw new Error("NetEase request failed with HTTP 502.");
+        }
+        return {
+          available: true,
+          provider: "netease",
+          providerTrackId: trackId,
+          playableUrl: `https://fresh.example.com/${encodeURIComponent(trackId)}-${count}.mp3`,
+          urlType: "mp3"
+        };
+      }
+    }
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new FinalTrackTransientRefreshProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            finishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    finalTrackId = playbackState.storedTracks?.[4]?.track.providerTrackId;
+
+    for (let index = 0; index < 4; index += 1) {
+      finishers[index]?.({ ok: true, target: started[index], exitCode: 0, signal: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await waitForPlaybackUrlRefreshRetries();
+
+    expect(started).toHaveLength(5);
+    expect(started[4]).toContain("https://fresh.example.com/");
+    expect(playbackState.currentIndex).toBe(4);
+    expect(output.at(-1)).toContain("Now playing: 5/5");
+    expect(output.at(-1)).not.toContain("I could not start");
+    expect(output.at(-1)).not.toContain("That station’s done.");
+
+    const rows = withDatabase(config, (db) => db.prepare(`
+      SELECT position, playback_status as playbackStatus, failure_reason as failureReason
+      FROM station_tracks
+      ORDER BY position
+      LIMIT 5
+    `).all());
+    expect(rows).toEqual([
+      { position: 1, playbackStatus: "played", failureReason: null },
+      { position: 2, playbackStatus: "played", failureReason: null },
+      { position: 3, playbackStatus: "played", failureReason: null },
+      { position: 4, playbackStatus: "played", failureReason: null },
+      { position: 5, playbackStatus: "playing", failureReason: null }
+    ]);
+  });
+
+  it("skips a transient auto-advance URL refresh failure and starts the following track", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    const started: string[] = [];
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null }) => void> = [];
+    const urlCalls = new Map<string, number>();
+    let failingTrackId: string | undefined;
+
+    class TransientRefreshFailureProvider extends FakeProvider {
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        const count = (urlCalls.get(trackId) ?? 0) + 1;
+        urlCalls.set(trackId, count);
+        if (trackId === failingTrackId && count > 1) {
+          throw new Error("NetEase request failed: This operation was aborted");
+        }
+        return {
+          available: true,
+          provider: "netease",
+          providerTrackId: trackId,
+          playableUrl: `https://fresh.example.com/${encodeURIComponent(trackId)}.mp3`,
+          urlType: "mp3"
+        };
+      }
+    }
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new TransientRefreshFailureProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            finishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    failingTrackId = playbackState.storedTracks?.[2]?.track.providerTrackId;
+    const failingTrack = playbackState.storedTracks?.[2]?.track;
+
+    finishers[0]?.({ ok: true, target: started[0], exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finishers[1]?.({ ok: true, target: started[1], exitCode: 0, signal: null });
+    await waitForPlaybackUrlRefreshRetries();
+
+    expect(playbackState.currentIndex).toBe(3);
+    expect(started).toHaveLength(3);
+    expect(output.at(-1)).toContain(`I could not start ${failingTrack?.title} - ${failingTrack?.artist}.`);
+    expect(output.at(-1)).toContain("Playback detail: NetEase request failed: This operation was aborted");
+    expect(output.at(-1)).toContain("Now playing: 4/5");
+    expect(output.at(-1)).not.toContain("Type next to try the following track");
+
+    const rows = withDatabase(config, (db) => db.prepare(`
+      SELECT position, playback_status as playbackStatus, failure_reason as failureReason
+      FROM station_tracks
+      ORDER BY position
+      LIMIT 4
+    `).all());
+    expect(rows).toEqual([
+      { position: 1, playbackStatus: "played", failureReason: null },
+      { position: 2, playbackStatus: "played", failureReason: null },
+      { position: 3, playbackStatus: "failed", failureReason: "NetEase request failed: This operation was aborted" },
+      { position: 4, playbackStatus: "playing", failureReason: null }
+    ]);
+  });
+
+  it("keeps refreshed unavailable tracks out of the played queue state", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    const started: string[] = [];
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null }) => void> = [];
+    const urlCalls = new Map<string, number>();
+    let unavailableTrackId: string | undefined;
+
+    class RefreshUnavailableProvider extends FakeProvider {
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        const count = (urlCalls.get(trackId) ?? 0) + 1;
+        urlCalls.set(trackId, count);
+        if (trackId === unavailableTrackId && count > 1) {
+          return {
+            available: false,
+            provider: "netease",
+            providerTrackId: trackId,
+            reason: "No playable URL."
+          };
+        }
+        return {
+          available: true,
+          provider: "netease",
+          providerTrackId: trackId,
+          playableUrl: `https://fresh.example.com/${encodeURIComponent(trackId)}.mp3`,
+          urlType: "mp3"
+        };
+      }
+    }
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new RefreshUnavailableProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            finishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    unavailableTrackId = playbackState.storedTracks?.[1]?.track.providerTrackId;
+
+    finishers[0]?.({ ok: true, target: started[0], exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const unavailableLine = output.at(-1)?.split("\n").find((line) => line.includes("2.  something deep work instrumental - Test Artist"));
+    expect(playbackState.currentIndex).toBe(2);
+    expect(unavailableLine).toContain("(unavailable)");
+    expect(unavailableLine).not.toContain("played");
+  });
+
+  it("completes the station when auto-advance URL refresh failures exhaust the queue", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {};
+    const output: string[] = [];
+    const started: string[] = [];
+    const finishers: Array<(value: { ok: boolean; target: string; exitCode: number; signal: null }) => void> = [];
+    const urlCalls = new Map<string, number>();
+    const failingTrackIds = new Set<string>();
+
+    class ExhaustingRefreshFailureProvider extends FakeProvider {
+      async getPlayableUrl(trackId: string): Promise<PlayableTrack> {
+        const count = (urlCalls.get(trackId) ?? 0) + 1;
+        urlCalls.set(trackId, count);
+        if (failingTrackIds.has(trackId) && count > 1) {
+          throw new Error("NetEase request failed: This operation was aborted");
+        }
+        return {
+          available: true,
+          provider: "netease",
+          providerTrackId: trackId,
+          playableUrl: `https://fresh.example.com/${encodeURIComponent(trackId)}.mp3`,
+          urlType: "mp3"
+        };
+      }
+    }
+
+    await runSessionTurn({
+      input: "play something for deep work",
+      config,
+      playbackState,
+      provider: new ExhaustingRefreshFailureProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      writeOutput: (text) => output.push(text),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise((resolve) => {
+            finishers.push(resolve);
+          }),
+          stop: () => undefined
+        };
+      }
+    });
+
+    for (const entry of playbackState.storedTracks?.slice(2) ?? []) {
+      if (entry.track.providerTrackId) {
+        failingTrackIds.add(entry.track.providerTrackId);
+      }
+    }
+
+    finishers[0]?.({ ok: true, target: started[0], exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finishers[1]?.({ ok: true, target: started[1], exitCode: 0, signal: null });
+    await waitForPlaybackUrlRefreshRetries(3);
+
+    expect(playbackState.currentIndex).toBeUndefined();
+    expect(playbackState.currentTrackId).toBeUndefined();
+    expect(playbackState.pendingStationRequest).toBe("play something for deep work");
+    expect(output.at(-1)).toContain("I could not start");
+    expect(output.at(-1)).toContain("That station’s done.");
+
+    const rows = withDatabase(config, (db) => db.prepare(`
+      SELECT position, playback_status as playbackStatus
+      FROM station_tracks
+      ORDER BY position
+      LIMIT 5
+    `).all());
+    expect(rows).toEqual([
+      { position: 1, playbackStatus: "played" },
+      { position: 2, playbackStatus: "played" },
+      { position: 3, playbackStatus: "failed" },
+      { position: 4, playbackStatus: "failed" },
+      { position: 5, playbackStatus: "failed" }
+    ]);
+  });
+
   it("does not auto-advance when session exit stops active playback", async () => {
     const config = makeConfig();
     const playbackState: InteractivePlaybackState = {};
@@ -2583,6 +3037,8 @@ describe("runSessionTurn", () => {
     expect(output.at(-1)).toContain("Playback stopped unexpectedly");
     expect(output.at(-1)).toContain("Audio output failed.");
     expect(output.at(-1)).toContain("Now playing: 2/5");
+    expect(output.at(-1)).toContain("1.  something deep work - Test Artist");
+    expect(output.at(-1)).toContain("Test Artist               failed");
 
     const rows = withDatabase(config, (db) => db.prepare(`
       SELECT position, playback_status as playbackStatus, failure_reason as failureReason
@@ -2830,6 +3286,51 @@ describe("runSessionTurn", () => {
     expect(playback.intent.type).toBe("pending_station_confirmation");
     expect(playback.response).toContain("Now playing: 1/5");
     expect(started).toHaveLength(6);
+  });
+
+  it("refines a completed station direction before replaying the pending vibe", async () => {
+    const config = makeConfig();
+    const playbackState: InteractivePlaybackState = {
+      pendingStationRequest: "play something for deep work",
+      pendingStationOriginalRequest: "play something for deep work",
+      pendingStationNeedsChoice: false
+    };
+    const started: string[] = [];
+
+    const refinement = await runSessionTurn({
+      input: "change the vibe to start my Monday morning.",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: conversationalLlm("Got it, shifting this toward a Monday morning start. Want me to play this version?")
+    });
+
+    expect(refinement.intent.type).toBe("pending_station_refinement");
+    expect(refinement.response).toContain("Monday morning");
+    expect(refinement.response).not.toBe("I’ll change the tone from here.");
+    expect(playbackState.pendingStationRequest).toContain("play something for deep work");
+    expect(playbackState.pendingStationRequest).toContain("change the vibe to start my Monday morning.");
+
+    const playback = await runSessionTurn({
+      input: "",
+      config,
+      playbackState,
+      provider: new FakeProvider(),
+      llm: fakeLlm(),
+      buildContext: async () => ({ personality: config.personality }),
+      startUrlPlayback: async (url) => {
+        started.push(url);
+        return {
+          target: url,
+          done: new Promise(() => undefined),
+          stop: () => undefined
+        };
+      }
+    });
+
+    expect(playback.intent.type).toBe("pending_station_confirmation");
+    expect(playback.station?.request).toContain("change the vibe to start my Monday morning.");
+    expect(started).toHaveLength(1);
   });
 
   it("continues a completed station when the user asks for this vibe", async () => {

@@ -590,6 +590,75 @@ describe("generateStation", () => {
     expect(station.tracks.every((track) => track.playable.available === false)).toBe(true);
   });
 
+  it("retries transient provider search failures before marking tracks unavailable", async () => {
+    const provider = new FakeProvider();
+    const attemptsByKeyword = new Map<string, number>();
+    provider.search = async (query: MusicSearchQuery, limit: number): Promise<MusicTrackCandidate[]> => {
+      provider.searches.push(query);
+      const attempts = (attemptsByKeyword.get(query.keyword) ?? 0) + 1;
+      attemptsByKeyword.set(query.keyword, attempts);
+      if (attempts === 1) {
+        throw new Error("NetEase request failed with HTTP 502.");
+      }
+      return [{
+        provider: "netease",
+        providerTrackId: `id-${provider.searches.length}`,
+        title: query.keyword,
+        artists: ["Test Artist"],
+        album: `limit-${limit}`
+      }];
+    };
+    const llm: StationLlmClient = {
+      generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "missing key" }),
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "missing key" })
+    };
+
+    const station = await generateStation({
+      request: "play ambient reset",
+      config: makeConfig(),
+      provider,
+      llm
+    });
+
+    expect(station.tracks).toHaveLength(5);
+    expect(station.tracks.every((track) => track.playable.available)).toBe(true);
+    expect([...attemptsByKeyword.values()].every((attempts) => attempts === 2)).toBe(true);
+  });
+
+  it("retries transient playable URL failures before marking tracks unavailable", async () => {
+    const provider = new FakeProvider();
+    const attemptsByTrack = new Map<string, number>();
+    provider.getPlayableUrl = async (trackId: string): Promise<PlayableTrack> => {
+      const attempts = (attemptsByTrack.get(trackId) ?? 0) + 1;
+      attemptsByTrack.set(trackId, attempts);
+      if (attempts === 1) {
+        throw new Error("NetEase request failed: This operation was aborted");
+      }
+      return {
+        available: true,
+        provider: "netease",
+        providerTrackId: trackId,
+        playableUrl: `https://example.com/${trackId}.mp3`,
+        urlType: "mp3"
+      };
+    };
+    const llm: StationLlmClient = {
+      generateJson: async () => ({ ok: false, errorCode: "llm_unavailable", error: "missing key" }),
+      generateText: async () => ({ ok: false, errorCode: "llm_unavailable", error: "missing key" })
+    };
+
+    const station = await generateStation({
+      request: "play ambient reset",
+      config: makeConfig(),
+      provider,
+      llm
+    });
+
+    expect(station.tracks).toHaveLength(5);
+    expect(station.tracks.every((track) => track.playable.available)).toBe(true);
+    expect([...attemptsByTrack.values()].every((attempts) => attempts === 2)).toBe(true);
+  });
+
   it("builds artist-only requests from matching unique provider results", async () => {
     const provider = new FakeProvider();
     provider.search = async (query: MusicSearchQuery, limit: number): Promise<MusicTrackCandidate[]> => {

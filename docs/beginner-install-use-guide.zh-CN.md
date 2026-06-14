@@ -229,6 +229,12 @@ cd Pockedio
 
 你现在已经在 Pockedio 项目文件夹里了。
 
+后面如果教程里写 `cd ~/Pockedio`，意思是「进入你刚才下载的 Pockedio 文件夹」。如果你把项目放在别的位置，比如 `~/repos/Pockedio`，就把命令里的路径改成：
+
+```bash
+cd ~/repos/Pockedio
+```
+
 ## 第 6 步：安装 Pockedio 需要的依赖
 
 复制：
@@ -246,6 +252,8 @@ npm install
 ```text
 yourname@MacBook Pockedio %
 ```
+
+但如果你看到 `npm error`、`EACCES`、`permission denied` 这类报错，请先停在这里，不要继续执行后面的 `npm run build` 或 `npm link`。先跳到「第 25 步：如果出问题，先看这里」里的 `npm error EACCES` 处理方法。
 
 ## 第 7 步：构建 Pockedio
 
@@ -305,6 +313,12 @@ Command + T
 
 ```bash
 cd ~/Pockedio
+```
+
+如果 Terminal 提示 `no such file or directory`，说明你的 Pockedio 文件夹不在这里。比如你把项目放在 `repos` 文件夹里，就运行：
+
+```bash
+cd ~/repos/Pockedio
 ```
 
 然后启动网易云音乐 API adapter：
@@ -939,6 +953,56 @@ npm link
 
 ## 第 25 步：如果出问题，先看这里
 
+### 问题：`npm error EACCES` 或 `permission denied`
+
+如果 `npm install` 时看到类似：
+
+```text
+npm error code EACCES
+npm error syscall mkdir
+npm error path /Users/yourname/.npm/_cacache/...
+npm error EACCES: permission denied
+```
+
+说明 npm 的本地缓存目录权限不对。通常是以前不小心用 `sudo npm ...` 运行过 npm。
+
+请运行：
+
+```bash
+cd ~/Pockedio
+sudo chown -R "$USER":staff ~/.npm
+npm cache verify
+npm install
+```
+
+如果 `cd ~/Pockedio` 提示找不到文件夹，请改成你实际的 Pockedio 路径，例如：
+
+```bash
+cd ~/repos/Pockedio
+```
+
+运行 `sudo chown...` 时，Terminal 可能会要求输入 Mac 登录密码。输入密码时屏幕上不会显示字符，这是正常的。输入完成后按 `Return`。
+
+如果 `npm install` 这次成功，再继续运行：
+
+```bash
+npm run build
+npm link
+pockedio status
+```
+
+如果 `npm install` 仍然报错，请先不要继续运行后面的命令，把新的 Terminal 截图发给协助你安装的人。
+
+### 问题：`sh: tsc: command not found`
+
+这通常是因为前面的 `npm install` 没有成功，所以 TypeScript 没有安装好。
+
+请不要直接运行 `npm -g typescript`。先回到上面的 `npm error EACCES` 部分，确认 `npm install` 已经成功，再运行：
+
+```bash
+npm run build
+```
+
 ### 问题：`pockedio: command not found`
 
 意思是 Mac 还不认识 `pockedio` 这个命令。
@@ -954,6 +1018,24 @@ npm link
 
 ```bash
 pockedio status
+```
+
+### 问题：`cd: no such file or directory: /Users/yourname/Pockedio`
+
+说明 Pockedio 文件夹不在 `~/Pockedio` 这个位置。
+
+如果你的 Terminal 提示符里已经能看到 `Pockedio`，说明你已经在正确的项目文件夹里，可以不用再运行 `cd ~/Pockedio`。
+
+如果你把项目放在 `repos` 文件夹里，请运行：
+
+```bash
+cd ~/repos/Pockedio
+```
+
+确认进入成功后，再运行后面的命令，例如：
+
+```bash
+spikes/scripts/run_netease_api.sh
 ```
 
 ### 问题：`npm: command not found`

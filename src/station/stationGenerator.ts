@@ -44,6 +44,7 @@ type TrackPlan = {
 
 const stationSchema = "{ tracks: [{ title: string, artist: string, rationale: string }] }";
 const providerSearchArtist = "__provider_search__";
+const providerRetryAttempts = 3;
 
 export async function generateStation(input: GenerateStationInput): Promise<GeneratedStation> {
   const provider = input.provider ?? new NetEaseProvider(input.config);
@@ -82,7 +83,7 @@ export async function generateStation(input: GenerateStationInput): Promise<Gene
 async function resolveArtistStation(artist: string, provider: MusicProvider, signal?: AbortSignal): Promise<StationTrack[]> {
   try {
     throwIfAborted(signal);
-    const candidates = await provider.search({ keyword: artist }, 25);
+    const candidates = await withProviderRetries(() => provider.search({ keyword: artist }, 25), signal);
     throwIfAborted(signal);
     const tracks: StationTrack[] = [];
     const seen = new Set<string>();
@@ -98,7 +99,7 @@ async function resolveArtistStation(artist: string, provider: MusicProvider, sig
       }
       seen.add(key);
 
-      const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+      const playable = await withProviderRetries(() => provider.getPlayableUrl(candidate.providerTrackId), signal);
       throwIfAborted(signal);
       if (!playable.available) {
         continue;
@@ -446,7 +447,10 @@ async function resolveTrack(
   const keyword = track.artist === providerSearchArtist ? track.title : `${track.title} ${track.artist}`.trim();
   try {
     throwIfAborted(signal);
-    const candidates = await provider.search({ keyword }, shouldUseStrictQuietScoring(request) || avoidKeys.size > 0 || usedKeys.size > 0 ? 10 : 1);
+    const candidates = await withProviderRetries(
+      () => provider.search({ keyword }, shouldUseStrictQuietScoring(request) || avoidKeys.size > 0 || usedKeys.size > 0 ? 10 : 1),
+      signal
+    );
     throwIfAborted(signal);
     if (candidates.length === 0) {
       return unavailableStationTrack(track, position, "No provider search result.");
@@ -456,7 +460,7 @@ async function resolveTrack(
       return resolved;
     }
     const firstCandidate = candidates[0];
-    const playable = await provider.getPlayableUrl(firstCandidate.providerTrackId);
+    const playable = await withProviderRetries(() => provider.getPlayableUrl(firstCandidate.providerTrackId), signal);
     throwIfAborted(signal);
     return stationTrackFromCandidate(track, position, firstCandidate, playable);
   } catch (error) {
@@ -478,7 +482,7 @@ async function resolveBestPlayableCandidate(
     let repeatedFallback: { candidate: MusicTrackCandidate; playable: PlayableTrack } | null = null;
     for (const candidate of candidates) {
       throwIfAborted(signal);
-      const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+      const playable = await withProviderRetries(() => provider.getPlayableUrl(candidate.providerTrackId), signal);
       throwIfAborted(signal);
       const key = normalizeSongKey(candidate.title, candidate.artists.join(", "));
       if (!playable.available) {
@@ -497,7 +501,7 @@ async function resolveBestPlayableCandidate(
   let repeatedFallback: { candidate: MusicTrackCandidate; playable: PlayableTrack; score: number } | null = null;
   for (const candidate of candidates) {
     throwIfAborted(signal);
-    const playable = await provider.getPlayableUrl(candidate.providerTrackId);
+    const playable = await withProviderRetries(() => provider.getPlayableUrl(candidate.providerTrackId), signal);
     throwIfAborted(signal);
     if (!playable.available) {
       continue;
@@ -573,6 +577,41 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
     error.name = "AbortError";
     throw error;
   }
+}
+
+async function withProviderRetries<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= providerRetryAttempts; attempt += 1) {
+    throwIfAborted(signal);
+    try {
+      return await operation();
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+      lastError = error;
+      if (attempt === providerRetryAttempts || !isTransientProviderError(error)) {
+        throw error;
+      }
+      await sleep(100 * attempt, signal);
+    }
+  }
+  throw lastError;
+}
+
+function isTransientProviderError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /HTTP 5\d\d|aborted|network|timeout|timed out|fetch failed/i.test(message);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  await new Promise((resolve) => setTimeout(resolve, ms));
+  throwIfAborted(signal);
 }
 
 function unavailableStationTrack(planned: PlannedStationTrack, position: number, reason: string): StationTrack {
