@@ -181,7 +181,8 @@ describe("MOLE-inspired welcome hub", () => {
     expect(voice).toContain("Provider        Built-in macOS voice");
     expect(voice).toContain("Voice           Vale");
     expect(voice).toContain("> 1. Choose DJ voice");
-    expect(voice).toContain("Configure Fish TTS");
+    expect(voice).toContain("Configure Fish API");
+    expect(voice).toContain("Configure local Fish TTS");
   });
 
   it("moves the visible cursor inside setup actions and routes setup shortcuts", () => {
@@ -374,17 +375,20 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(voice).toContain("    1. Choose DJ voice");
     expect(voice).toContain("▌ > 2. Configure Kokoro TTS");
-    expect(voice).toContain("    3. Configure Fish TTS");
-    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit");
+    expect(voice).toContain("    3. Configure Fish API");
+    expect(voice).toContain("    4. Configure local Fish TTS");
+    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-5 Open  |  B Back  |  Q Quit");
     expect(resolveVoiceSetupAction("1")).toBe("choose_voice");
     expect(resolveVoiceSetupAction("2")).toBe("kokoro_tts");
-    expect(resolveVoiceSetupAction("3")).toBe("fish_tts");
-    expect(resolveVoiceSetupAction("4")).toBe("text_only");
-    expect(resolveVoiceSetupAction("5")).toBeUndefined();
+    expect(resolveVoiceSetupAction("3")).toBe("fish_api_tts");
+    expect(resolveVoiceSetupAction("4")).toBe("fish_tts");
+    expect(resolveVoiceSetupAction("5")).toBe("text_only");
+    expect(resolveVoiceSetupAction("6")).toBeUndefined();
+    expect(resolveVoiceSetupAction("fish api")).toBe("fish_api_tts");
     expect(applyVoiceSetupKey("choose_voice", { name: "down" })).toEqual({ selectedAction: "kokoro_tts" });
-    expect(applyVoiceSetupKey("fish_tts", { name: "return" })).toEqual({
-      selectedAction: "fish_tts",
-      submittedAction: "fish_tts"
+    expect(applyVoiceSetupKey("fish_api_tts", { name: "return" })).toEqual({
+      selectedAction: "fish_api_tts",
+      submittedAction: "fish_api_tts"
     });
   });
 

@@ -34,6 +34,7 @@ import {
   voicePreviewText
 } from "./tts/voiceSetup.js";
 import { synthesizeFishAudio } from "./tts/fishAudio.js";
+import { synthesizeFishApiAudio } from "./tts/fishApiAudio.js";
 import { synthesizeKokoroAudio } from "./tts/kokoroAudio.js";
 import {
   buildFishSetupInstallCommands,
@@ -49,6 +50,7 @@ import {
 } from "./tts/kokoroSetup.js";
 import {
   buildWelcomeReadiness,
+  isFishApiReady,
   isFishTtsReady,
   isKokoroTtsReady,
   promptDjVoiceChooser,
@@ -534,6 +536,9 @@ async function runVoiceSetupAction(
   if (action === "kokoro_tts") {
     return await configureKokoroTts() === "quit" ? "quit" : "continue";
   }
+  if (action === "fish_api_tts") {
+    return await configureFishApiTts() === "quit" ? "quit" : "continue";
+  }
   if (action === "fish_tts") {
     return await configureFishTts() === "quit" ? "quit" : "continue";
   }
@@ -603,6 +608,19 @@ async function previewDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
     await previewKokoroVoice(parsed.voice);
     return;
   }
+  const config = loadConfig();
+  const fishApiConfig = {
+    ...config,
+    tts: {
+      ...config.tts,
+      provider: "fish_api" as const,
+      fishVoice: parsed.voice
+    }
+  };
+  if (config.tts.provider === "fish_api" && isFishApiReady(fishApiConfig)) {
+    await testFishApiTtsSetup(parsed.voice);
+    return;
+  }
   if (!isFishTtsReady(loadConfig())) {
     await pauseWithMessage(formatFishTtsMissingMessage());
     return;
@@ -642,11 +660,25 @@ async function saveDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
     await pauseWithMessage(`Saved fast local voice: ${formatKokoroVoiceName(parsed.voice)}`);
     return;
   }
+  const config = loadConfig();
+  const fishApiConfig = {
+    ...config,
+    tts: {
+      ...config.tts,
+      provider: "fish_api" as const,
+      fishVoice: parsed.voice
+    }
+  };
+  if (config.tts.provider === "fish_api" && isFishApiReady(fishApiConfig)) {
+    saveTtsConfig({ provider: "fish_api", fishVoice: parsed.voice });
+    await pauseWithMessage(`Saved Fish API voice: ${formatFishVoiceLabel(parsed.voice)}`);
+    return;
+  }
   if (!isFishTtsReady(loadConfig())) {
     await pauseWithMessage([
-      "Configure Fish TTS before saving Mina or Nova.",
+      "Configure Fish API or local Fish TTS before saving Mina or Nova.",
       "",
-      formatFishTtsMissingMessage()
+      "Use Configure Fish API for cloud voices, or Configure local Fish TTS for local model synthesis."
     ].join("\n"));
     return;
   }
@@ -848,6 +880,129 @@ async function configureFishTts(): Promise<"back" | "quit"> {
       return "back";
     }
   }
+}
+
+async function configureFishApiTts(): Promise<"back" | "quit"> {
+  while (true) {
+    const config = loadConfig();
+    const answer = await promptFishNumberedSurface(7, (selected, options) => renderFishApiTtsSetupSurface(config, selected, options));
+    if (answer === "back" || answer === "quit") {
+      return answer;
+    }
+    if (answer === 1) {
+      await configureFishApiVoice("mina");
+      continue;
+    }
+    if (answer === 2) {
+      await configureFishApiVoice("nova");
+      continue;
+    }
+    if (answer === 3) {
+      const apiKeyEnv = await askLineWithBack("Fish API key environment variable", config.fishApi.apiKeyEnv);
+      if (apiKeyEnv !== "back") {
+        saveFishApiConfig({ apiKeyEnv: apiKeyEnv || config.fishApi.apiKeyEnv });
+      }
+      continue;
+    }
+    if (answer === 4) {
+      const referenceId = await askLineWithBack("Mina Fish API reference id", config.fishApi.referenceIds.mina ?? "");
+      if (referenceId !== "back") {
+        saveFishApiConfig({ minaReferenceId: referenceId });
+      }
+      continue;
+    }
+    if (answer === 5) {
+      const referenceId = await askLineWithBack("Nova Fish API reference id", config.fishApi.referenceIds.nova ?? "");
+      if (referenceId !== "back") {
+        saveFishApiConfig({ novaReferenceId: referenceId });
+      }
+      continue;
+    }
+    if (answer === 6) {
+      await editFishApiAdvancedSettings();
+      continue;
+    }
+    if (answer === 7) {
+      await testFishApiTtsSetup(loadConfig().tts.fishVoice);
+      continue;
+    }
+  }
+}
+
+async function configureFishApiVoice(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): Promise<void> {
+  const config = loadConfig();
+  const currentReferenceId = config.fishApi.referenceIds[voice] ?? "";
+  if (!currentReferenceId.trim()) {
+    const referenceId = await askLineWithBack(`${formatFishVoiceLabel(voice)} Fish API reference id`);
+    if (referenceId === "back" || !referenceId.trim()) {
+      await pauseWithMessage(`${formatFishVoiceLabel(voice)} was not saved. Fish API needs a reference id for this voice.`);
+      return;
+    }
+    saveFishApiConfig(voice === "mina" ? { minaReferenceId: referenceId } : { novaReferenceId: referenceId });
+  }
+
+  const result = await testFishApiTtsSetup(voice);
+  if (result !== "ready") {
+    return;
+  }
+  saveTtsConfig({ provider: "fish_api", fishVoice: voice });
+  await pauseWithMessage(`Saved Fish API voice: ${formatFishVoiceLabel(voice)}.`);
+}
+
+async function editFishApiAdvancedSettings(): Promise<void> {
+  while (true) {
+    const config = loadConfig();
+    const answer = await promptFishNumberedSurface(4, (selected, options) => renderFishApiAdvancedSurface(config, selected, options));
+    if (answer === "back" || answer === "quit") {
+      return;
+    }
+    if (answer === 1) {
+      const baseUrl = await askLineWithBack("Fish API base URL", config.fishApi.baseUrl);
+      if (baseUrl !== "back") {
+        saveFishApiConfig({ baseUrl: baseUrl || config.fishApi.baseUrl });
+      }
+      continue;
+    }
+    if (answer === 2) {
+      const model = await askLineWithBack("Fish API model", config.fishApi.model);
+      if (model !== "back") {
+        saveFishApiConfig({ model: model || config.fishApi.model });
+      }
+      continue;
+    }
+    if (answer === 3) {
+      const proxyEnv = await askLineWithBack("Fish API proxy environment variable", config.fishApi.proxyEnv);
+      if (proxyEnv !== "back") {
+        saveFishApiConfig({ proxyEnv: proxyEnv || config.fishApi.proxyEnv });
+      }
+      continue;
+    }
+    if (answer === 4) {
+      return;
+    }
+  }
+}
+
+async function testFishApiTtsSetup(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): Promise<"ready" | "return"> {
+  const config = {
+    ...loadConfig(),
+    tts: {
+      ...loadConfig().tts,
+      provider: "fish_api" as const,
+      fishVoice: voice
+    }
+  };
+  if (!isFishApiReady(config)) {
+    await pauseWithMessage(formatFishApiMissingMessage(config));
+    return "return";
+  }
+  const result = await withCliProgress(`Testing Fish API ${formatFishVoiceLabel(voice)}...`, () => synthesizeFishApiAudio(config, voicePreviewText, { timeoutMs: 120_000 }));
+  if (!result.ok) {
+    await pauseWithMessage(`Fish API test failed:\n${result.error}`);
+    return "return";
+  }
+  await previewGeneratedFishAudio(result.audioPath);
+  return "ready";
 }
 
 async function installFishTtsLocally(): Promise<void> {
@@ -1157,6 +1312,66 @@ function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, select
   ].join("\n");
 }
 
+function renderFishApiTtsSetupSurface(config: ReturnType<typeof loadConfig>, selected = 1, options: TuiRenderOptions = {}): string {
+  const activeVoice = formatFishVoiceLabel(config.tts.fishVoice);
+  const actions = [
+    { label: "Use Mina with Fish API", description: fishApiVoiceStatus(config, "mina") },
+    { label: "Use Nova with Fish API", description: fishApiVoiceStatus(config, "nova") },
+    { label: "Set API key env", description: config.fishApi.apiKeyEnv },
+    { label: "Set Mina reference id", description: config.fishApi.referenceIds.mina ? "configured" : "missing" },
+    { label: "Set Nova reference id", description: config.fishApi.referenceIds.nova ? "configured" : "missing" },
+    { label: "Advanced Fish API settings", description: `${config.fishApi.model} at ${config.fishApi.baseUrl}` },
+    { label: "Test current Fish API voice", description: activeVoice }
+  ];
+  return [
+    renderTuiPageTitle("FISH API SETUP", options),
+    "",
+    renderTuiBulletLine("Fish API enables cloud Mina and Nova voice without installing local models.", options),
+    "",
+    renderTuiSectionLabel("STATUS", { ...options, accent: "playback" }),
+    renderTuiKeyValue("API key", process.env[config.fishApi.apiKeyEnv]?.trim() ? `Present: ${config.fishApi.apiKeyEnv}` : `Missing: ${config.fishApi.apiKeyEnv}`, 15, options),
+    renderTuiKeyValue("Mina", config.fishApi.referenceIds.mina ? "reference id saved" : "reference id missing", 15, options),
+    renderTuiKeyValue("Nova", config.fishApi.referenceIds.nova ? "reference id saved" : "reference id missing", 15, options),
+    renderTuiKeyValue("Proxy", process.env[config.fishApi.proxyEnv]?.trim() ? `Using ${config.fishApi.proxyEnv}` : "Not set", 15, options),
+    "",
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-7 Open  |  B Back  |  Q Quit", options)
+  ].join("\n");
+}
+
+function renderFishApiAdvancedSurface(config: ReturnType<typeof loadConfig>, selected = 1, options: TuiRenderOptions = {}): string {
+  const actions = [
+    { label: "Base URL", description: config.fishApi.baseUrl },
+    { label: "Model", description: config.fishApi.model },
+    { label: "Proxy env", description: config.fishApi.proxyEnv },
+    { label: "Return to Fish API setup", description: "review cloud voice settings" }
+  ];
+  return [
+    renderTuiPageTitle("FISH API ADVANCED", options),
+    "",
+    renderTuiBulletLine("Most users only need API key env and voice reference ids.", options),
+    "",
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+  ].join("\n");
+}
+
+function fishApiVoiceStatus(config: ReturnType<typeof loadConfig>, voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): string {
+  const referenceReady = Boolean(config.fishApi.referenceIds[voice]?.trim());
+  const keyReady = Boolean(process.env[config.fishApi.apiKeyEnv]?.trim());
+  if (referenceReady && keyReady) {
+    return config.tts.provider === "fish_api" && config.tts.fishVoice === voice ? "ready, current" : "ready";
+  }
+  if (!referenceReady && !keyReady) {
+    return "needs API key env and reference id";
+  }
+  return referenceReady ? "needs API key env" : "needs reference id";
+}
+
 function renderUseExistingFishTtsSurface(detection: ReturnType<typeof detectFishTtsInstall>, selected = 1, options: TuiRenderOptions = {}): string {
   const actions = [
     { label: "Use detected setup", description: "save the found runtime paths" },
@@ -1242,6 +1457,22 @@ function formatFishTtsMissingMessage(): string {
     ...missing.map((item) => `- ${item}`),
     "",
     "Open Configure Fish TTS. Install or detect the runtime, then choose Edit paths to generate missing Mina/Nova references."
+  ].join("\n");
+}
+
+function formatFishApiMissingMessage(config = loadConfig()): string {
+  const missing: string[] = [];
+  if (!process.env[config.fishApi.apiKeyEnv]?.trim()) {
+    missing.push(`API key env is missing: ${config.fishApi.apiKeyEnv}`);
+  }
+  if (!config.fishApi.referenceIds[config.tts.fishVoice]?.trim()) {
+    missing.push(`Reference id is missing for ${formatFishVoiceLabel(config.tts.fishVoice)}.`);
+  }
+  return [
+    "Fish API is not ready.",
+    ...missing.map((item) => `- ${item}`),
+    "",
+    "Open Configure Fish API. Set the API key environment variable, add the Fish reference id for Mina or Nova, then test the voice."
   ].join("\n");
 }
 
@@ -1403,6 +1634,35 @@ function saveFishAudioConfig(input: {
   });
 }
 
+function saveFishApiConfig(input: {
+  apiKeyEnv?: string;
+  proxyEnv?: string;
+  baseUrl?: string;
+  model?: string;
+  minaReferenceId?: string;
+  novaReferenceId?: string;
+}): void {
+  const config = loadConfig();
+  saveConfig({
+    ...config,
+    fishApi: {
+      ...config.fishApi,
+      apiKeyEnv: input.apiKeyEnv?.trim() || config.fishApi.apiKeyEnv,
+      proxyEnv: input.proxyEnv?.trim() || config.fishApi.proxyEnv,
+      baseUrl: input.baseUrl?.trim() || config.fishApi.baseUrl,
+      model: input.model?.trim() || config.fishApi.model,
+      referenceIds: {
+        mina: input.minaReferenceId !== undefined
+          ? input.minaReferenceId.trim() || undefined
+          : config.fishApi.referenceIds.mina,
+        nova: input.novaReferenceId !== undefined
+          ? input.novaReferenceId.trim() || undefined
+          : config.fishApi.referenceIds.nova
+      }
+    }
+  });
+}
+
 function saveKokoroAudioConfig(input: {
   pythonPath?: string;
   modelPath?: string;
@@ -1418,6 +1678,10 @@ function saveKokoroAudioConfig(input: {
       voicesPath: input.voicesPath?.trim() || config.kokoroAudio.voicesPath
     }
   });
+}
+
+function formatFishVoiceLabel(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): string {
+  return fishVoiceOptions.find((candidate) => candidate.id === voice)?.label ?? voice;
 }
 
 function saveTtsConfig(input: {

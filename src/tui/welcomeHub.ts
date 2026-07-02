@@ -43,7 +43,7 @@ export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" 
 export type LlmProviderId = "openai" | "deepseek" | "openrouter" | "local_vllm" | "custom";
 export type LlmSetupAction = LlmProviderId | "test_connection" | "back" | "quit";
 export type LlmProviderAction = "paste_key" | "use_shell_env" | "change_model" | "change_base_url" | "change_api_key_env" | "check_server" | "discover_models" | "test_connection" | "back" | "quit";
-export type VoiceSetupAction = "choose_voice" | "kokoro_tts" | "fish_tts" | "text_only" | "back" | "quit";
+export type VoiceSetupAction = "choose_voice" | "kokoro_tts" | "fish_api_tts" | "fish_tts" | "text_only" | "back" | "quit";
 export type ContextSetupAction = "calendar" | "weather" | "diary" | "back" | "quit";
 export type DjVoiceChoiceId =
   | `macos:${PockedioConfig["tts"]["macosVoice"]}`
@@ -134,7 +134,8 @@ const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string
 const voiceSetupEntries: Array<{ action: VoiceSetupAction; label: string; description: string }> = [
   { action: "choose_voice", label: "Choose DJ voice", description: "preview built-in, fast local, or studio voices" },
   { action: "kokoro_tts", label: "Configure Kokoro TTS", description: "enable fast local voices" },
-  { action: "fish_tts", label: "Configure Fish TTS", description: "enable generated Mina or Nova audio" },
+  { action: "fish_api_tts", label: "Configure Fish API", description: "enable cloud Mina or Nova audio" },
+  { action: "fish_tts", label: "Configure local Fish TTS", description: "enable local generated Mina or Nova audio" },
   { action: "text_only", label: "Use text-only DJ copy", description: "keep DJ notes without spoken audio" }
 ];
 
@@ -1166,7 +1167,10 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction | undef
   if (normalized === "kokoro" || normalized === "fast") {
     return "kokoro_tts";
   }
-  if (normalized === "fish") {
+  if (normalized === "fish api" || normalized === "fish_api" || normalized === "cloud" || normalized === "api") {
+    return "fish_api_tts";
+  }
+  if (normalized === "fish" || normalized === "local fish") {
     return "fish_tts";
   }
   if (normalized === "text") {
