@@ -275,7 +275,7 @@ export function formatInteractiveStartupGuide(displayName = "Pockedio", setupNot
 }
 
 export function formatInteractiveStartupDisplayName(config: PockedioConfig, platform: NodeJS.Platform = process.platform): string {
-  if (config.tts.provider === "fish") {
+  if (config.tts.provider === "fish" || config.tts.provider === "fish_api") {
     return formatFishVoiceName(config.tts.fishVoice);
   }
   if (config.tts.provider === "kokoro") {
@@ -291,7 +291,7 @@ export function formatInteractiveStartupDisplayName(config: PockedioConfig, plat
 }
 
 export function formatRuntimeDjDisplayName(config: PockedioConfig, platform: NodeJS.Platform = process.platform): string {
-  if (config.tts.provider === "fish") {
+  if (config.tts.provider === "fish" || config.tts.provider === "fish_api") {
     return formatFishVoiceName(config.tts.fishVoice);
   }
   if (config.tts.provider === "kokoro") {

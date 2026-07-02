@@ -9,7 +9,7 @@ export const mbtiTypes = [
 
 export const djProgramLengths = ["short", "standard", "extended"] as const;
 export const djStyles = ["direct", "warm", "exploratory", "low-talk"] as const;
-export const ttsProviders = ["auto", "macos", "kokoro", "fish", "text"] as const;
+export const ttsProviders = ["auto", "macos", "kokoro", "fish", "fish_api", "text"] as const;
 export const macosVoices = ["lumen", "sable", "arden", "vale", "sol"] as const;
 export const kokoroVoices = ["af_kore", "af_nicole", "bf_isabella", "am_michael", "am_onyx", "bm_daniel", "bm_george", "bm_lewis"] as const;
 export const fishVoices = ["mina", "nova"] as const;
@@ -89,6 +89,19 @@ export const pockedioConfigSchema = z.object({
     modelDir: z.string().min(1).default(fishAudioModelDir),
     referenceAudioPath: z.string().min(1).optional(),
     referenceText: z.string().min(1).optional()
+  }).default({}),
+  fishApi: z.object({
+    baseUrl: z.string().url().default("https://api.fish.audio"),
+    apiKeyEnv: z.string().min(1).default("FISH_API_KEY"),
+    proxyEnv: z.string().min(1).default("POCKEDIO_FISH_PROXY"),
+    model: z.string().min(1).default("s2-pro"),
+    format: z.enum(["mp3", "wav", "pcm", "opus"]).default("mp3"),
+    latency: z.enum(["low", "balanced", "normal"]).default("balanced"),
+    chunkLength: z.number().int().min(100).max(300).default(150),
+    referenceIds: z.object({
+      mina: z.string().min(1).optional(),
+      nova: z.string().min(1).optional()
+    }).default({})
   }).default({}),
   kokoroAudio: z.object({
     pythonPath: z.string().min(1).default(kokoroAudioPythonPath),

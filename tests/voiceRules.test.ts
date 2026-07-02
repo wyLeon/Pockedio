@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
 import { shouldUseSpokenDjAudio } from "../src/dj/voiceRules.js";
 import { synthesizeFishAudio, type FishAudioProcessRunner } from "../src/tts/fishAudio.js";
+import { synthesizeFishApiAudio, type FishApiFetch } from "../src/tts/fishApiAudio.js";
 import { synthesizeDjAudio, type DjAudioProcessRunner } from "../src/tts/djAudio.js";
 import { synthesizeKokoroAudio, type KokoroAudioProcessRunner } from "../src/tts/kokoroAudio.js";
 
@@ -144,6 +145,81 @@ describe("KokoroAudio adapter", () => {
   });
 });
 
+describe("Fish API adapter", () => {
+  it("writes generated MP3 bytes when Fish API succeeds", async () => {
+    const config = makeConfig();
+    config.tts.fishVoice = "mina";
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let observedUrl = "";
+    let observedHeaders: HeadersInit | undefined;
+    let observedBody: Record<string, unknown> | undefined;
+    const fetchImpl: FishApiFetch = async (url, init) => {
+      observedUrl = String(url);
+      observedHeaders = init?.headers;
+      observedBody = JSON.parse(String(init?.body));
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedUrl).toBe("https://api.fish.audio/v1/tts");
+    expect(observedHeaders).toMatchObject({
+      Authorization: "Bearer fish-test-key",
+      "Content-Type": "application/json",
+      model: "s2-pro"
+    });
+    expect(observedBody).toMatchObject({
+      text: "Welcome back.",
+      reference_id: "mina-reference",
+      format: "mp3",
+      latency: "balanced",
+      chunk_length: 150
+    });
+    if (result.ok) {
+      expect(result.audioPath).toMatch(/\.mp3$/);
+      expect(fs.readFileSync(result.audioPath, "utf8")).toBe("mp3");
+    }
+  });
+
+  it("fails before the network call when the Fish API key is missing", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let called = false;
+    const fetchImpl: FishApiFetch = async () => {
+      called = true;
+      return new Response("should not happen", { status: 500 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: {}
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("FISH_API_KEY");
+    expect(called).toBe(false);
+  });
+
+  it("returns safe HTTP failure details from Fish API", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    const fetchImpl: FishApiFetch = async () => new Response("payment required", { status: 402 });
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("HTTP 402");
+    expect(result.error).toContain("payment required");
+  });
+});
+
 describe("DJ audio provider resolution", () => {
   it("uses text fallback when TTS provider is text", async () => {
     const config = makeConfig();
@@ -200,6 +276,32 @@ describe("DJ audio provider resolution", () => {
     expect(observedText).toBe("Here's \"Sway It Hula Girl\" by 小野リサ.");
     if (result.ok) {
       expect(result.audioPath).toMatch(/\.wav$/);
+    }
+  });
+
+  it("uses Fish API when cloud Fish TTS is selected", async () => {
+    const config = makeConfig();
+    config.tts.provider = "fish_api";
+    config.tts.fishVoice = "nova";
+    config.fishApi.referenceIds.nova = "nova-reference";
+    let observedBody: Record<string, unknown> | undefined;
+    const fetchImpl: FishApiFetch = async (_url, init) => {
+      observedBody = JSON.parse(String(init?.body));
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeDjAudio(config, "Here's \"Sway It Hula Girl\" by 小野リサ.", {
+      fishApiFetch: fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedBody).toMatchObject({
+      text: "Here's \"Sway It Hula Girl\" by 小野リサ.",
+      reference_id: "nova-reference"
+    });
+    if (result.ok) {
+      expect(result.audioPath).toMatch(/\.mp3$/);
     }
   });
 

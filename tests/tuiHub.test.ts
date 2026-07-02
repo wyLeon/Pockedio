@@ -440,10 +440,21 @@ describe("MOLE-inspired welcome hub", () => {
         fishVoice: "mina" as const
       }
     };
+    const fishApiConfig = {
+      ...config,
+      tts: {
+        provider: "fish_api" as const,
+        macosVoice: "vale" as const,
+        kokoroVoice: "af_nicole" as const,
+        fishVoice: "mina" as const
+      }
+    };
 
     expect(renderVoiceSetupSurface({ config: macosConfig, platform: "darwin" })).toContain("Voice           Sable");
     expect(renderVoiceSetupSurface({ config: kokoroConfig, platform: "darwin" })).toContain("Voice           George");
     expect(renderVoiceSetupSurface({ config: textConfig, platform: "darwin" })).toContain("Provider        Text-only DJ copy");
+    expect(renderVoiceSetupSurface({ config: fishApiConfig, platform: "darwin" })).toContain("Provider        Fish API");
+    expect(renderVoiceSetupSurface({ config: fishApiConfig, platform: "darwin" })).toContain("Voice           Mina");
   });
 
   it("renders Taste & Memory summary and post-import result surfaces", () => {

@@ -367,6 +367,7 @@ export function renderVoiceSetupSurface(
 ): string {
   const platform = options.platform ?? process.platform;
   const fishConfigured = isFishTtsReady(options.config);
+  const fishApiConfigured = isFishApiReady(options.config);
   const kokoroConfigured = isKokoroTtsReady(options.config);
   const provider = formatVoiceProvider(options.config, platform, fishConfigured, kokoroConfigured);
   const voice = formatConfiguredVoice(options.config, platform);
@@ -379,7 +380,7 @@ export function renderVoiceSetupSurface(
     renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
     formatSetupLine("Provider", provider, renderOptions),
     formatSetupLine("Voice", voice, renderOptions),
-    formatSetupLine("Advanced", formatVoiceSetupAdvancedStatus(fishConfigured, kokoroConfigured), renderOptions),
+    formatSetupLine("Advanced", formatVoiceSetupAdvancedStatus(fishConfigured, fishApiConfigured, kokoroConfigured), renderOptions),
     "",
     renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
     ...voiceSetupEntries.map((entry, index) => formatSetupConnectionAction(
@@ -1269,8 +1270,11 @@ function buildVoiceReadiness(config: PockedioConfig, platform: NodeJS.Platform):
   if (config.tts.provider === "text") {
     return { label: "Voice", value: "Text-only DJ copy", ok: true };
   }
+  if (config.tts.provider === "fish_api") {
+    return { label: "Voice", value: `${formatFishVoiceName(config.tts.fishVoice)}, Fish API`, ok: isFishApiReady(config) };
+  }
   if (config.tts.provider === "fish") {
-    return { label: "Voice", value: `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS`, ok: true };
+    return { label: "Voice", value: `${formatFishVoiceName(config.tts.fishVoice)}, local Fish TTS`, ok: true };
   }
   if (config.fishAudio.referenceAudioPath && fs.existsSync(config.fishAudio.referenceAudioPath)) {
     return { label: "Voice", value: "Fish TTS configured", ok: true };
@@ -1363,8 +1367,13 @@ function formatVoiceSetupSummaryLine(
   if (config.tts.provider === "text") {
     return renderTuiBulletLine("Spoken DJ audio is off. Pockedio can still write DJ notes.", options);
   }
+  if (config.tts.provider === "fish_api") {
+    return renderTuiBulletLine(isFishApiReady(config)
+      ? "Fish API is ready for cloud Mina or Nova voice."
+      : "Fish API needs an API key and voice reference id before cloud DJ audio works.", options);
+  }
   if (fishConfigured || config.tts.provider === "fish") {
-    return renderTuiBulletLine("Fish TTS is ready for generated Mina or Nova voice.", options);
+    return renderTuiBulletLine("Local Fish TTS is ready for generated Mina or Nova voice.", options);
   }
   if (kokoroConfigured || config.tts.provider === "kokoro") {
     return renderTuiBulletLine("Kokoro TTS is ready for fast local voices.", options);
@@ -1452,8 +1461,11 @@ function formatVoiceProvider(config: PockedioConfig, platform: NodeJS.Platform, 
   if (config.tts.provider === "text") {
     return "Text-only DJ copy";
   }
+  if (config.tts.provider === "fish_api") {
+    return "Fish API";
+  }
   if (config.tts.provider === "fish") {
-    return "Fish TTS";
+    return "Local Fish TTS";
   }
   if (config.tts.provider === "kokoro") {
     return "Kokoro TTS";
@@ -1462,7 +1474,7 @@ function formatVoiceProvider(config: PockedioConfig, platform: NodeJS.Platform, 
     return platform === "darwin" ? "Built-in macOS voice" : "macOS voice unavailable here";
   }
   if (fishConfigured) {
-    return "Fish TTS";
+    return "Local Fish TTS";
   }
   if (kokoroConfigured) {
     return "Kokoro TTS";
@@ -1474,7 +1486,7 @@ function formatConfiguredVoice(config: PockedioConfig, platform: NodeJS.Platform
   if (config.tts.provider === "text") {
     return "None";
   }
-  if (config.tts.provider === "fish") {
+  if (config.tts.provider === "fish" || config.tts.provider === "fish_api") {
     return formatFishVoiceName(config.tts.fishVoice);
   }
   if (config.tts.provider === "kokoro") {
@@ -1486,17 +1498,16 @@ function formatConfiguredVoice(config: PockedioConfig, platform: NodeJS.Platform
   return "None";
 }
 
-function formatVoiceSetupAdvancedStatus(fishConfigured: boolean, kokoroConfigured: boolean): string {
-  if (fishConfigured && kokoroConfigured) {
-    return "Fish TTS and Kokoro TTS configured";
+function formatVoiceSetupAdvancedStatus(fishConfigured: boolean, fishApiConfigured: boolean, kokoroConfigured: boolean): string {
+  const configured = [
+    fishApiConfigured ? "Fish API" : undefined,
+    fishConfigured ? "local Fish TTS" : undefined,
+    kokoroConfigured ? "Kokoro TTS" : undefined
+  ].filter((item): item is string => Boolean(item));
+  if (configured.length > 0) {
+    return `${configured.join(", ")} configured`;
   }
-  if (fishConfigured) {
-    return "Fish TTS configured";
-  }
-  if (kokoroConfigured) {
-    return "Kokoro TTS configured";
-  }
-  return "Local generated voices not configured";
+  return "Generated voices not configured";
 }
 
 export function isFishTtsReady(config: PockedioConfig): boolean {
@@ -1554,6 +1565,9 @@ function getCurrentVoiceChoice(
   if (config.tts.provider === "fish" && fishReady) {
     return `fish:${config.tts.fishVoice}`;
   }
+  if (config.tts.provider === "fish_api" && isFishApiReady(config)) {
+    return `fish:${config.tts.fishVoice}`;
+  }
   if (config.tts.provider === "kokoro" && kokoroReady) {
     return `kokoro:${config.tts.kokoroVoice}`;
   }
@@ -1570,12 +1584,22 @@ function currentVoiceLabel(
 ): string {
   const isCurrent = (id.startsWith("macos:")
     && config.tts.provider !== "fish"
+    && config.tts.provider !== "fish_api"
     && config.tts.provider !== "kokoro"
     && config.tts.provider !== "text"
     && id === `macos:${config.tts.macosVoice}`)
     || (id.startsWith("kokoro:") && config.tts.provider === "kokoro" && id === `kokoro:${config.tts.kokoroVoice}`)
-    || (id.startsWith("fish:") && config.tts.provider === "fish" && id === `fish:${config.tts.fishVoice}`);
+    || (id.startsWith("fish:")
+      && (config.tts.provider === "fish" || config.tts.provider === "fish_api")
+      && id === `fish:${config.tts.fishVoice}`);
   return isCurrent ? `${status}, current` : status;
+}
+
+export function isFishApiReady(config: PockedioConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(
+    env[config.fishApi.apiKeyEnv]?.trim()
+    && config.fishApi.referenceIds[config.tts.fishVoice]?.trim()
+  );
 }
 
 function formatTasteLine(label: string, value: string, width: number, options: TuiRenderOptions = {}): string {

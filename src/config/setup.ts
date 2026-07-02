@@ -69,6 +69,12 @@ type SetupAnswers = {
   fishAudioPythonPath: string;
   fishAudioScriptPath: string;
   fishAudioModelDir: string;
+  fishApiKeyEnv?: string;
+  fishApiProxyEnv?: string;
+  fishApiBaseUrl?: string;
+  fishApiModel?: string;
+  fishApiMinaReferenceId?: string;
+  fishApiNovaReferenceId?: string;
   djLanguage: string;
   djDisplayName: string;
   djProgramLength: DjProgramLength;
@@ -1119,8 +1125,44 @@ export async function promptForAdvancedSetup(current: PockedioConfig): Promise<S
     {
       type: "input",
       name: "fishAudioModelDir",
-      message: "Voice - FishAudio model directory",
+      message: "Voice - local FishAudio model directory",
       default: current.fishAudio.modelDir
+    },
+    {
+      type: "input",
+      name: "fishApiKeyEnv",
+      message: "Voice - Fish API key environment variable",
+      default: current.fishApi.apiKeyEnv
+    },
+    {
+      type: "input",
+      name: "fishApiProxyEnv",
+      message: "Voice - Fish API proxy environment variable",
+      default: current.fishApi.proxyEnv
+    },
+    {
+      type: "input",
+      name: "fishApiBaseUrl",
+      message: "Voice - Fish API base URL",
+      default: current.fishApi.baseUrl
+    },
+    {
+      type: "input",
+      name: "fishApiModel",
+      message: "Voice - Fish API model",
+      default: current.fishApi.model
+    },
+    {
+      type: "input",
+      name: "fishApiMinaReferenceId",
+      message: "Voice - Fish API Mina reference id (blank to leave unset)",
+      default: current.fishApi.referenceIds.mina ?? ""
+    },
+    {
+      type: "input",
+      name: "fishApiNovaReferenceId",
+      message: "Voice - Fish API Nova reference id (blank to leave unset)",
+      default: current.fishApi.referenceIds.nova ?? ""
     },
     {
       type: "input",
@@ -1345,6 +1387,17 @@ export function buildConfigFromAnswers(current: PockedioConfig, answers: SetupAn
       pythonPath: answers.fishAudioPythonPath,
       scriptPath: answers.fishAudioScriptPath,
       modelDir: answers.fishAudioModelDir
+    },
+    fishApi: {
+      ...current.fishApi,
+      apiKeyEnv: answers.fishApiKeyEnv ?? current.fishApi.apiKeyEnv,
+      proxyEnv: answers.fishApiProxyEnv ?? current.fishApi.proxyEnv,
+      baseUrl: answers.fishApiBaseUrl ?? current.fishApi.baseUrl,
+      model: answers.fishApiModel ?? current.fishApi.model,
+      referenceIds: {
+        mina: answers.fishApiMinaReferenceId?.trim() || undefined,
+        nova: answers.fishApiNovaReferenceId?.trim() || undefined
+      }
     },
     dj: {
       language: answers.djLanguage,
