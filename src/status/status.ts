@@ -233,7 +233,7 @@ export function getFishApiStatus(config: PockedioConfig, env: PockedioEnv = proc
   const referenceIdPresent = Boolean(getFishApiReferenceId(config));
   const missing = [
     apiKeyPresent ? undefined : `api key env: ${config.fishApi.apiKeyEnv}`,
-    referenceIdPresent ? undefined : `reference id: fishApi.referenceIds.${config.tts.fishVoice}`
+    referenceIdPresent ? undefined : `built-in voice id: ${config.tts.fishVoice}`
   ].filter((item): item is string => Boolean(item));
 
   return {

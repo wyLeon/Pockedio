@@ -103,8 +103,13 @@ describe("config load and save", () => {
       format: "mp3",
       latency: "balanced",
       chunkLength: 150,
-      referenceIds: {}
+      referenceIds: {
+        mina: expect.any(String),
+        nova: expect.any(String)
+      }
     });
+    expect(config.fishApi.referenceIds.mina).toHaveLength(32);
+    expect(config.fishApi.referenceIds.nova).toHaveLength(32);
     expect(config.dj.language).toBe("English");
     expect(config.dj.displayName).toBe("Pockedio");
     expect(config.dj.programLength).toBe("standard");

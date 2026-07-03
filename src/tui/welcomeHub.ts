@@ -393,6 +393,42 @@ export function renderVoiceSetupSurface(
   ].join("\n");
 }
 
+export function renderFishApiCloudSetupSurface(
+  config: PockedioConfig,
+  selected = 1,
+  options: TuiRenderOptions = {},
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const actions = [
+    { label: "Set API key", description: config.fishApi.apiKeyEnv },
+    { label: "Use Mina", description: fishApiCloudVoiceStatus(config, "mina", env) },
+    { label: "Use Nova", description: fishApiCloudVoiceStatus(config, "nova", env) },
+    { label: "Test current voice", description: formatFishVoiceName(config.tts.fishVoice) }
+  ];
+  return [
+    renderTuiPageTitle("FISH AUDIO CLOUD", options),
+    "",
+    renderTuiBulletLine("Fish Audio Cloud uses Pockedio's built-in Mina and Nova voices. You only need an API key.", options),
+    "",
+    renderTuiSectionLabel("STATUS", { ...options, accent: "playback" }),
+    renderTuiKeyValue("API key", env[config.fishApi.apiKeyEnv]?.trim() ? `Present: ${config.fishApi.apiKeyEnv}` : `Missing: ${config.fishApi.apiKeyEnv}`, 15, options),
+    renderTuiKeyValue("Voice models", "Built in", 15, options),
+    renderTuiKeyValue("Network", env[config.fishApi.proxyEnv]?.trim() ? `Proxy: ${config.fishApi.proxyEnv}` : "Default", 15, options),
+    "",
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatSetupConnectionAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+  ].join("\n");
+}
+
+function fishApiCloudVoiceStatus(config: PockedioConfig, voice: PockedioConfig["tts"]["fishVoice"], env: NodeJS.ProcessEnv): string {
+  if (!env[config.fishApi.apiKeyEnv]?.trim()) {
+    return "needs API key";
+  }
+  return config.tts.provider === "fish_api" && config.tts.fishVoice === voice ? "ready, current" : "ready";
+}
+
 export function renderDjVoiceChooserSurface(
   options: Pick<WelcomeReadinessOptions, "config" | "platform">,
   renderOptions: TuiRenderOptions & { selectedVoice?: DjVoiceChoiceId } = {}
@@ -1371,7 +1407,7 @@ function formatVoiceSetupSummaryLine(
   if (config.tts.provider === "fish_api") {
     return renderTuiBulletLine(isFishApiReady(config)
       ? "Fish API is ready for cloud Mina or Nova voice."
-      : "Fish API needs an API key and voice reference id before cloud DJ audio works.", options);
+      : "Fish Audio Cloud needs an API key before cloud DJ audio works.", options);
   }
   if (fishConfigured || config.tts.provider === "fish") {
     return renderTuiBulletLine("Local Fish TTS is ready for generated Mina or Nova voice.", options);

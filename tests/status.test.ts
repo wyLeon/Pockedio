@@ -276,7 +276,7 @@ describe("status report", () => {
     expect(formatStatusReport(report)).toContain("Voice     Mina, Fish API ready");
   });
 
-  it("reports missing Fish API configuration for the selected cloud voice", async () => {
+  it("reports missing Fish API key for the selected cloud voice", async () => {
     const home = makeHome();
     const env = { POCKEDIO_HOME: home };
     const config = loadConfig(env);
@@ -297,7 +297,7 @@ describe("status report", () => {
     expect(report.voice.summary).toBe("Nova, Fish API needs setup");
     expect(text).toContain("Fish API missing:");
     expect(text).toContain("- api key env: FISH_API_KEY");
-    expect(text).toContain("- reference id: fishApi.referenceIds.nova");
+    expect(text).not.toContain("reference id");
   });
 });
 

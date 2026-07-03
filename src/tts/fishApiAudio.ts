@@ -33,7 +33,7 @@ export async function synthesizeFishApiAudio(
 
   const referenceId = getFishApiReferenceId(config);
   if (!referenceId) {
-    return failed(startedAt, `Fish API reference id is missing for ${config.tts.fishVoice}.`);
+    return failed(startedAt, `Fish Audio Cloud voice is not configured for ${config.tts.fishVoice}.`);
   }
 
   const audioPath = path.join(config.paths.djAudioDir, `${Date.now()}-${randomUUID()}.${config.fishApi.format}`);

@@ -24,6 +24,10 @@ const scheduledDjProgramSchema = z.object({
 });
 
 export const fishAudioModelDir = ".cache/fishaudio-s2-pro-8bit-mlx";
+export const fishApiDefaultReferenceIds = {
+  mina: "20f9a738ef5a4b0396b320fc2a5693c2",
+  nova: "20f9a738ef5a4b0396b320fc2a5693c2"
+} as const;
 export const kokoroAudioDir = ".cache/kokoro-spike";
 export const kokoroAudioPythonPath = `${kokoroAudioDir}/.venv/bin/python`;
 export const kokoroAudioModelPath = `${kokoroAudioDir}/kokoro-v1.0.onnx`;
@@ -99,8 +103,8 @@ export const pockedioConfigSchema = z.object({
     latency: z.enum(["low", "balanced", "normal"]).default("balanced"),
     chunkLength: z.number().int().min(100).max(300).default(150),
     referenceIds: z.object({
-      mina: z.string().min(1).optional(),
-      nova: z.string().min(1).optional()
+      mina: z.string().min(1).default(fishApiDefaultReferenceIds.mina),
+      nova: z.string().min(1).default(fishApiDefaultReferenceIds.nova)
     }).default({})
   }).default({}),
   kokoroAudio: z.object({

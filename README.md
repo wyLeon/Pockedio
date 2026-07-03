@@ -134,7 +134,7 @@ The lowest-friction path is the built-in macOS voice option. It needs no model d
 
 Kokoro TTS is optional. Use it if you want fast local spoken DJ audio and are comfortable installing a small local Python runtime plus the Kokoro ONNX model and voices file. Pockedio can help detect an existing Kokoro install or guide a local install.
 
-Fish API is optional. Use it if you want cloud-generated Mina/Nova DJ audio without waiting for local model synthesis. Configure `FISH_API_KEY` and the Fish voice `reference_id` values in Pockedio config; set `POCKEDIO_FISH_PROXY` only if your network needs a Fish-specific HTTP proxy.
+Fish API is optional. Use it if you want cloud-generated Mina/Nova DJ audio without waiting for local model synthesis. Configure `FISH_API_KEY`; Pockedio includes the Fish voice settings for Mina and Nova. Set `POCKEDIO_FISH_PROXY` only if your network needs a Fish-specific HTTP proxy.
 
 Local Fish TTS remains optional. Use it if you want the local Mina/Nova voice path and are comfortable installing the local runtime and model. Pockedio can help detect an existing Fish install or guide a local install.
 
