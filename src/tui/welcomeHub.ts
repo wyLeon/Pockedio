@@ -132,11 +132,8 @@ const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string
 ];
 
 const voiceSetupEntries: Array<{ action: VoiceSetupAction; label: string; description: string }> = [
-  { action: "choose_voice", label: "Choose DJ voice", description: "preview built-in, fast local, or studio voices" },
-  { action: "kokoro_tts", label: "Configure Kokoro TTS", description: "enable fast local voices" },
-  { action: "fish_api_tts", label: "Configure Fish API", description: "enable cloud Mina or Nova audio" },
-  { action: "fish_tts", label: "Configure local Fish TTS", description: "enable local generated Mina or Nova audio" },
-  { action: "text_only", label: "Use text-only DJ copy", description: "keep DJ notes without spoken audio" }
+  { action: "fish_api_tts", label: "Fish Audio Cloud", description: "fast cloud Mina or Nova voice" },
+  { action: "fish_tts", label: "Fish Local Model", description: "offline Mina or Nova voice from local model" }
 ];
 
 const contextSetupEntries: Array<{ action: ContextSetupAction; label: string; description: string }> = [
@@ -1162,15 +1159,15 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction | undef
     return undefined;
   }
   if (normalized === "" || normalized === "enter" || normalized === "choose" || normalized === "voice") {
-    return "choose_voice";
+    return "fish_api_tts";
   }
   if (normalized === "kokoro" || normalized === "fast") {
-    return "kokoro_tts";
+    return undefined;
   }
   if (normalized === "fish api" || normalized === "fish_api" || normalized === "cloud" || normalized === "api") {
     return "fish_api_tts";
   }
-  if (normalized === "fish" || normalized === "local fish") {
+  if (normalized === "fish" || normalized === "local" || normalized === "local fish") {
     return "fish_tts";
   }
   if (normalized === "text") {
@@ -1182,7 +1179,7 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction | undef
   if (normalized === "q" || normalized === "quit") {
     return "quit";
   }
-  return "choose_voice";
+  return undefined;
 }
 
 export function resolveTasteMemoryAction(input: string): TasteMemoryAction | undefined {
