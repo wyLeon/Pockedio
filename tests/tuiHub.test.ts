@@ -192,7 +192,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(setup).toContain("▌ > 3. Configure Voice");
     expect(setup).toContain("\x1B[7m▌ > 3. Configure Voice");
     expect(setup).toContain("    6. Configure Scheduled DJ");
-    expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
+    expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveSetupConnectionsAction("1")).toBe("full_setup");
     expect(resolveSetupConnectionsAction("2")).toBe("llm_setup");
     expect(resolveSetupConnectionsAction("3")).toBe("voice_setup");
@@ -201,6 +201,10 @@ describe("MOLE-inspired welcome hub", () => {
     expect(resolveSetupConnectionsAction("6")).toBe("scheduler_setup");
     expect(resolveSetupConnectionsAction("schedule")).toBe("scheduler_setup");
     expect(resolveSetupConnectionsAction("b")).toBe("back");
+    expect(applyContextSetupKey("weather", { name: "escape" })).toEqual({
+      selectedAction: "back",
+      submittedAction: "back"
+    });
   });
 
   it("renders real Context setup actions for calendar, weather, and diary", () => {
@@ -220,7 +224,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(context).toContain("    1. Configure Calendar");
     expect(context).toContain("▌ > 2. Configure Weather");
     expect(context).toContain("3. Configure Diary");
-    expect(context).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit");
+    expect(context).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveContextSetupAction("1")).toBe("calendar");
     expect(resolveContextSetupAction("2")).toBe("weather");
     expect(resolveContextSetupAction("3")).toBe("diary");
@@ -241,7 +245,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(llm).toContain("▌ > 4. Use local vLLM");
     expect(llm).toContain("CURRENT");
     expect(llm).toContain("OpenAI-compatible");
-    expect(llm).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
+    expect(llm).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveLlmSetupAction("1")).toBe("openai");
     expect(resolveLlmSetupAction("2")).toBe("deepseek");
     expect(resolveLlmSetupAction("3")).toBe("openrouter");
@@ -266,7 +270,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(openai).toContain("3. Change model");
     expect(openai).toContain("4. Test connection");
     expect(openai).not.toContain("5. Back");
-    expect(openai).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit");
+    expect(openai).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveLlmProviderAction("1", "openai")).toBe("paste_key");
     expect(resolveLlmProviderAction("2", "openai")).toBe("use_shell_env");
     expect(resolveLlmProviderAction("3", "openai")).toBe("change_model");
@@ -377,7 +381,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(voice).not.toContain("Choose DJ voice");
     expect(voice).not.toContain("Configure Kokoro TTS");
     expect(voice).not.toContain("Use text-only DJ copy");
-    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B Back  |  Q Quit");
+    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveVoiceSetupAction("1")).toBe("fish_api_tts");
     expect(resolveVoiceSetupAction("2")).toBe("fish_tts");
     expect(resolveVoiceSetupAction("3")).toBeUndefined();
@@ -388,6 +392,10 @@ describe("MOLE-inspired welcome hub", () => {
     expect(applyVoiceSetupKey("fish_api_tts", { name: "return" })).toEqual({
       selectedAction: "fish_api_tts",
       submittedAction: "fish_api_tts"
+    });
+    expect(applyVoiceSetupKey("fish_api_tts", { name: "escape" })).toEqual({
+      selectedAction: "back",
+      submittedAction: "back"
     });
   });
 
@@ -438,7 +446,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(chooser).toContain("STUDIO VOICES");
     expect(chooser).toContain("▌ > 14. Mina");
     expect(chooser).toContain("needs Fish TTS setup");
-    expect(chooser).toContain("Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B Back");
+    expect(chooser).toContain("Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B/Esc Back");
     expect(applyDjVoiceChooserKey("macos:vale", { name: "down" })).toEqual({ selectedVoice: "macos:sol" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "space" })).toEqual({ selectedVoice: "macos:vale", submit: "preview" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "return" })).toEqual({ selectedVoice: "macos:vale", submit: "save" });
@@ -446,6 +454,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(applyDjVoiceChooserNumberInput("14")).toBe("fish:mina");
     expect(applyDjVoiceChooserKey("macos:vale", { name: "k" })).toEqual({ selectedVoice: "macos:vale", submit: "kokoro_setup" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "f" })).toEqual({ selectedVoice: "macos:vale", submit: "fish_setup" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "escape" })).toEqual({ selectedVoice: "macos:vale", submit: "back" });
   });
 
   it("renders selected voice provider and voice from TTS config", () => {
@@ -511,7 +520,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(imported).not.toContain("Taste profile needs refresh");
     expect(imported).not.toContain("Rebuild taste profile");
     expect(imported).not.toContain("Start station");
-    expect(imported).toContain("Press Enter to return to Taste & Memory.");
+    expect(imported).toContain("Enter Continue");
 
     const summary = renderTasteSummarySurface({ config });
     expect(summary).toContain("TASTE SUMMARY");
@@ -539,7 +548,7 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(taste).toContain("    1. Import playlist");
     expect(taste).toContain("▌ > 2. Show taste summary");
-    expect(taste).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B Back  |  Q Quit");
+    expect(taste).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveTasteMemoryAction("1")).toBe("import");
     expect(resolveTasteMemoryAction("2")).toBe("show_summary");
     expect(resolveTasteMemoryAction("3")).toBeUndefined();

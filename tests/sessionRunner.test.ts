@@ -1169,8 +1169,7 @@ describe("runSessionTurn", () => {
       llm: fakeLlm()
     });
 
-    expect(picker.response).toContain("B Back");
-    expect(picker.response).toContain("Esc Cancel");
+    expect(picker.response).toContain("B/Esc Back");
     expect(playbackState.pendingSingleTrackSelection).toBeDefined();
 
     const result = await runSessionTurn({
@@ -4284,6 +4283,7 @@ describe("runSessionTurn", () => {
     expect(rendered).toContain("... 12 more above");
     expect(rendered).toContain("> 19.  Favorite 19 - Test Artist");
     expect(rendered).toContain("20.  Favorite 20 - Test Artist");
+    expect(rendered).toContain("B/Esc Close");
     expect(rendered).not.toContain("1.  Favorite 1 - Test Artist");
     expect(rendered).not.toContain("Favorite 10 - Test Artist");
   });

@@ -222,6 +222,14 @@ function formatWelcomeFooter(hasUpdate: boolean): string {
   return entries.join("  |  ");
 }
 
+function formatMenuFooter(actionCount: number, actionVerb = "Open"): string {
+  return `↑↓ Select  |  Enter ${actionVerb}  |  1-${actionCount} ${actionVerb}  |  B/Esc Back  |  Q Quit`;
+}
+
+function formatDjVoiceChooserFooter(): string {
+  return "↑↓ Select  |  Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B/Esc Back";
+}
+
 export function renderSetupConnectionsSurface(
   options: WelcomeReadinessOptions,
   renderOptions: HubRenderOptions<SetupConnectionsAction> = {}
@@ -250,7 +258,7 @@ export function renderSetupConnectionsSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${setupConnectionsEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(setupConnectionsEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -278,7 +286,7 @@ export function renderContextSetupSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${contextSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(contextSetupEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -313,7 +321,7 @@ export function renderLlmSetupSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${llmSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(llmSetupEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -355,7 +363,7 @@ export function renderLlmProviderSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${entries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(entries.length), renderOptions)
   ].join("\n");
 }
 
@@ -389,7 +397,7 @@ export function renderVoiceSetupSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${voiceSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(voiceSetupEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -417,7 +425,7 @@ export function renderFishApiCloudSetupSurface(
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatSetupConnectionAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-2 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(2), options)
   ].join("\n");
 }
 
@@ -438,7 +446,7 @@ export function renderFishVoiceChoiceSurface(
       return formatVoiceChoiceLine(selected === index + 1, index + 1, voice.label, status, voice.description, options);
     }),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Save  |  1-2 Save  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(2, "Save"), options)
   ].join("\n");
 }
 
@@ -479,7 +487,7 @@ export function renderDjVoiceChooserSurface(
       return formatVoiceChoiceLine(id === selectedVoice, index + 1 + macosVoiceOptions.length + kokoroVoiceOptions.length, voice.label, status, voice.description, renderOptions);
     }),
     "",
-    renderTuiFooter("↑↓ Select  |  Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B Back", renderOptions)
+    renderTuiFooter(formatDjVoiceChooserFooter(), renderOptions)
   ].join("\n");
 }
 
@@ -511,7 +519,7 @@ export function renderTasteMemorySurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${tasteMemoryEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(tasteMemoryEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -531,7 +539,7 @@ export function renderTasteImportResultSurface(result: TasteImportResult, option
     "  Imported taste signals",
     "  Taste memory",
     "",
-    renderTuiFooter("Press Enter to return to Taste & Memory.", options)
+    renderTuiFooter("Enter Continue", options)
   ].join("\n");
 }
 
@@ -549,7 +557,7 @@ export function renderTasteSummarySurface(
       "",
       "Import a NetEase playlist first, then Pockedio can summarize your listening signals.",
       "",
-      renderTuiFooter("Press Enter to return to Taste & Memory.", renderOptions)
+      renderTuiFooter("Enter Continue", renderOptions)
     ].join("\n");
   }
 
@@ -573,7 +581,7 @@ export function renderTasteSummarySurface(
     renderTuiSectionLabel("SAMPLE TRACKS", { ...renderOptions, accent: "playback" }),
     ...formatPlainList(details.sampleTracks, "No imported tracks yet.", 6),
     "",
-    renderTuiFooter("Press Enter to return to Taste & Memory.", renderOptions)
+    renderTuiFooter("Enter Continue", renderOptions)
   ].join("\n");
 }
 
@@ -897,7 +905,7 @@ export function applyDjVoiceChooserKey(
   if (key.name === "k") {
     return { selectedVoice, submit: "kokoro_setup" };
   }
-  if (key.name === "b") {
+  if (key.name === "b" || key.name === "escape") {
     return { selectedVoice, submit: "back" };
   }
   if (key.name === "q" || (key.ctrl && key.name === "c")) {
@@ -1014,7 +1022,7 @@ function applySelectableKey<TAction extends string>(input: {
     const action = input.entries[numericIndex]!.action;
     return { selectedAction: action, submittedAction: action };
   }
-  if (input.key.name === "b" && input.backAction) {
+  if ((input.key.name === "b" || input.key.name === "escape") && input.backAction) {
     return { selectedAction: input.backAction, submittedAction: input.backAction };
   }
   if ((input.key.name === "q" || (input.key.ctrl && input.key.name === "c")) && input.quitAction) {

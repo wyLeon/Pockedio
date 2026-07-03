@@ -2114,8 +2114,8 @@ export function formatFavoriteListChoiceSurface(selection: PendingFavoriteListSe
     ...(window.hiddenBelow > 0 ? [`... ${window.hiddenBelow} more below`] : []),
     "",
     selection.mode === "remove"
-      ? "↑↓ Select  |  Enter Delete  |  B Back  |  Esc Cancel"
-      : "↑↓ Select  |  Enter Play  |  D Delete  |  Esc Close"
+      ? "↑↓ Select  |  Enter Delete  |  B/Esc Back"
+      : "↑↓ Select  |  Enter Play  |  D Delete  |  B/Esc Close"
   ];
   return lines.join("\n");
 }
@@ -2397,8 +2397,8 @@ function formatSingleTrackChoiceSurface(selection: PendingSingleTrackSelection, 
     }),
     "",
     isVersionSelection
-      ? "↑↓ Select  |  Enter Switch  |  B Back  |  Esc Cancel"
-      : "↑↓ Select  |  Enter Play  |  B Back  |  Esc Cancel"
+      ? "↑↓ Select  |  Enter Switch  |  B/Esc Back"
+      : "↑↓ Select  |  Enter Play  |  B/Esc Back"
   ].join("\n");
 }
 
@@ -2417,7 +2417,7 @@ function formatSongOrStationChoiceSurface(selection: PendingSongOrStationSelecti
       width: defaultOutput.columns
     }),
     "",
-    "↑↓ Select  |  Enter Choose  |  B Back  |  Esc Cancel"
+    "↑↓ Select  |  Enter Choose  |  B/Esc Back"
   ].join("\n");
 }
 
@@ -2462,7 +2462,7 @@ function formatQueueToneChangeChoiceSurface(selection: PendingQueueToneChangeSel
       width: defaultOutput.columns
     }),
     "",
-    "↑↓ Select  |  Enter Choose  |  B Back  |  Esc Cancel"
+    "↑↓ Select  |  Enter Choose  |  B/Esc Back"
   ].join("\n");
 }
 

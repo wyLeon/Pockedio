@@ -1181,7 +1181,7 @@ function renderKokoroTtsSetupSurface(config: ReturnType<typeof loadConfig>, sele
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(4), options)
   ].join("\n");
 }
 
@@ -1202,7 +1202,7 @@ function renderUseExistingKokoroSurface(detection: ReturnType<typeof detectKokor
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(3), options)
   ].join("\n");
 }
 
@@ -1221,7 +1221,7 @@ function renderKokoroManualPathSurface(config: ReturnType<typeof loadConfig>, se
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(4), options)
   ].join("\n");
 }
 
@@ -1239,7 +1239,7 @@ function renderKokoroTtsSuccessSurface(selected = 1, options: TuiRenderOptions =
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open", options)
+    renderTuiFooter(formatMenuFooter(3), options)
   ].join("\n");
 }
 
@@ -1264,7 +1264,7 @@ function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, select
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(4), options)
   ].join("\n");
 }
 
@@ -1285,7 +1285,7 @@ function renderUseExistingFishTtsSurface(detection: ReturnType<typeof detectFish
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(3), options)
   ].join("\n");
 }
 
@@ -1307,7 +1307,7 @@ function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>, s
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(6), options)
   ].join("\n");
 }
 
@@ -1325,8 +1325,12 @@ function renderFishTtsSuccessSurface(selected = 1, options: TuiRenderOptions = {
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open", options)
+    renderTuiFooter(formatMenuFooter(3), options)
   ].join("\n");
+}
+
+function formatMenuFooter(actionCount: number, actionVerb = "Open"): string {
+  return `↑↓ Select  |  Enter ${actionVerb}  |  1-${actionCount} ${actionVerb}  |  B/Esc Back  |  Q Quit`;
 }
 
 function formatFishTtsMissingMessage(): string {
@@ -2038,7 +2042,7 @@ async function askLineWithBack(message: string, defaultValue?: string): Promise<
 
 function isBackInput(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
-  return normalized === "b" || normalized === "back";
+  return normalized === "b" || normalized === "back" || normalized === "esc" || normalized === "escape";
 }
 
 async function withCliProgress<T>(message: string, action: () => Promise<T>): Promise<T> {
@@ -2100,7 +2104,7 @@ function promptFishNumberedSurface(max: number, renderSurface: (selected: number
         cleanup(selected);
         return;
       }
-      if (key.name === "b") {
+      if (key.name === "b" || key.name === "escape") {
         cleanup("back");
         return;
       }
@@ -2202,5 +2206,5 @@ async function askHiddenLine(message: string): Promise<string> {
 async function pauseWithMessage(message: string): Promise<void> {
   console.log(message);
   console.log("");
-  await askLine("Press Enter to return.");
+  await askLine("Enter Continue");
 }

@@ -906,7 +906,7 @@ function promptSetupMenu<TValue extends string>(options: {
         "",
         ...options.entries.map((entry, index) => formatSetupMenuEntry(selected === index, index + 1, entry.name, renderOptions)),
         "",
-        renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${options.entries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+        renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${options.entries.length} Open  |  B/Esc Back  |  Q Quit`, renderOptions)
       ].join("\n"));
     };
     const cleanup = (choice: TValue | "back" | "quit") => {
@@ -933,7 +933,7 @@ function promptSetupMenu<TValue extends string>(options: {
         cleanup(options.entries[selected]!.value);
         return;
       }
-      if (key.name === "b") {
+      if (key.name === "b" || key.name === "escape") {
         cleanup("back");
         return;
       }
@@ -1863,7 +1863,7 @@ function validateTimeOfDay(value: string): true | string {
 
 function isBackInput(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
-  return normalized === "b" || normalized === "back";
+  return normalized === "b" || normalized === "back" || normalized === "esc" || normalized === "escape";
 }
 
 async function playDjPreview(choice: DjChoice | undefined): Promise<void> {
