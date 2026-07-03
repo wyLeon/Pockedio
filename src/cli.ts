@@ -539,10 +539,18 @@ async function runVoiceSetupAction(
     return await configureKokoroTts() === "quit" ? "quit" : "continue";
   }
   if (action === "fish_api_tts") {
-    return await configureFishApiTts() === "quit" ? "quit" : "continue";
+    const outcome = await configureFishApiTts();
+    if (outcome === "quit") {
+      return "quit";
+    }
+    return outcome === "configured" && options.returnOnConfigured ? "done" : "continue";
   }
   if (action === "fish_tts") {
-    return await configureFishTts() === "quit" ? "quit" : "continue";
+    const outcome = await configureFishTts();
+    if (outcome === "quit") {
+      return "quit";
+    }
+    return outcome === "configured" && options.returnOnConfigured ? "done" : "continue";
   }
   if (action === "text_only") {
     saveTtsConfig({ provider: "text" });
@@ -855,7 +863,7 @@ async function testKokoroTtsSetup(): Promise<"choose" | "return" | "keep"> {
   return "return";
 }
 
-async function configureFishTts(): Promise<"back" | "quit"> {
+async function configureFishTts(): Promise<"back" | "configured" | "quit"> {
   while (true) {
     const config = loadConfig();
     const answer = await promptFishNumberedSurface(4, (selected, options) => renderFishTtsSetupSurface(config, selected, options));
@@ -877,14 +885,14 @@ async function configureFishTts(): Promise<"back" | "quit"> {
     if (answer === 4) {
       const next = await testFishTtsSetup();
       if (next === "choose") {
-        await chooseFishVoiceForEngine("fish");
+        return await chooseFishVoiceForEngine("fish") ? "configured" : "back";
       }
       return "back";
     }
   }
 }
 
-async function configureFishApiTts(): Promise<"back" | "quit"> {
+async function configureFishApiTts(): Promise<"back" | "configured" | "quit"> {
   while (true) {
     const config = loadConfig();
     const answer = await promptFishNumberedSurface(2, (selected, options) => renderFishApiCloudSetupSurface(config, selected, options));
@@ -898,27 +906,27 @@ async function configureFishApiTts(): Promise<"back" | "quit"> {
     if (answer === 2) {
       const result = await testFishApiTtsSetup(loadConfig().tts.fishVoice);
       if (result === "ready") {
-        await chooseFishVoiceForEngine("fish_api");
+        return await chooseFishVoiceForEngine("fish_api") ? "configured" : "back";
       }
       return "back";
     }
   }
 }
 
-async function chooseFishVoiceForEngine(provider: "fish" | "fish_api"): Promise<void> {
+async function chooseFishVoiceForEngine(provider: "fish" | "fish_api"): Promise<boolean> {
   const config = loadConfig();
   const engineLabel = provider === "fish_api" ? "Fish Audio Cloud" : "Fish Local Model";
   const answer = await promptFishNumberedSurface(2, (selected, options) =>
     renderFishVoiceChoiceSurface(engineLabel, config.tts.fishVoice, selected, options)
   );
   if (answer === "back" || answer === "quit") {
-    return;
+    return false;
   }
   const voice = answer === 1 ? "mina" : "nova";
   if (provider === "fish_api") {
     saveTtsConfig({ provider: "fish_api", fishVoice: voice });
     await pauseWithMessage(`Saved Fish Audio Cloud voice: ${formatFishVoiceLabel(voice)}.`);
-    return;
+    return true;
   }
   const preview = buildFishVoicePreview(voice, getPockedioHome());
   saveTtsConfig({
@@ -928,6 +936,7 @@ async function chooseFishVoiceForEngine(provider: "fish" | "fish_api"): Promise<
     fishReferenceText: fishReferenceText(voice)
   });
   await pauseWithMessage(`Saved Fish Local Model voice: ${formatFishVoiceLabel(voice)}.`);
+  return true;
 }
 
 async function testFishApiTtsSetup(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): Promise<"ready" | "return"> {
