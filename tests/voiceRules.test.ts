@@ -151,13 +151,16 @@ describe("Fish API adapter", () => {
     const config = makeConfig();
     config.tts.fishVoice = "mina";
     config.fishApi.referenceIds.mina = "mina-reference";
+    const referencePath = path.join(path.dirname(config.paths.djAudioDir), "previews", "mina.wav");
+    fs.mkdirSync(path.dirname(referencePath), { recursive: true });
+    fs.writeFileSync(referencePath, "wav-reference");
     let observedUrl = "";
     let observedHeaders: HeadersInit | undefined;
-    let observedBody: Record<string, unknown> | undefined;
+    let observedBody: BodyInit | null | undefined;
     const fetchImpl: FishApiFetch = async (url, init) => {
       observedUrl = String(url);
       observedHeaders = init?.headers;
-      observedBody = JSON.parse(String(init?.body));
+      observedBody = init?.body;
       return new Response(Buffer.from("mp3"), { status: 200 });
     };
 
@@ -170,16 +173,15 @@ describe("Fish API adapter", () => {
     expect(observedUrl).toBe("https://api.fish.audio/v1/tts");
     expect(observedHeaders).toMatchObject({
       Authorization: "Bearer fish-test-key",
-      "Content-Type": "application/json",
+      "Content-Type": "application/msgpack",
       model: "s2.1-pro-free"
     });
-    expect(observedBody).toMatchObject({
-      text: "Welcome back.",
-      reference_id: "mina-reference",
-      format: "mp3",
-      latency: "balanced",
-      chunk_length: 150
-    });
+    expect(Buffer.isBuffer(observedBody)).toBe(true);
+    const body = observedBody as Buffer;
+    expect(body.includes(Buffer.from("reference_id"))).toBe(false);
+    expect(body.includes(Buffer.from("references"))).toBe(true);
+    expect(body.includes(Buffer.from("wav-reference"))).toBe(true);
+    expect(body.includes(Buffer.from("Welcome back. I picked a warmer five-track set for this station."))).toBe(true);
     if (result.ok) {
       expect(result.audioPath).toMatch(/\.mp3$/);
       expect(fs.readFileSync(result.audioPath, "utf8")).toBe("mp3");

@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { encode } from "@msgpack/msgpack";
 import { ProxyAgent } from "undici";
 import { readLlmApiKey } from "../config/llmSecrets.js";
 import type { PockedioConfig } from "../config/schema.js";
 import type { FishAudioResult } from "./fishAudio.js";
+import { buildFishVoicePreview } from "./voiceSetup.js";
 
 export type FishApiFetch = typeof fetch;
 
@@ -32,8 +34,8 @@ export async function synthesizeFishApiAudio(
     return failed(startedAt, `Fish API key is missing: ${config.fishApi.apiKeyEnv}.`);
   }
 
-  const referenceId = getFishApiReferenceId(config);
-  if (!referenceId) {
+  const voiceReference = getFishApiVoiceReference(config);
+  if (!voiceReference) {
     return failed(startedAt, `Fish Audio Cloud voice is not configured for ${config.tts.fishVoice}.`);
   }
 
@@ -54,20 +56,15 @@ export async function synthesizeFishApiAudio(
   }
 
   try {
+    const requestBody = buildFishApiRequestBody(config, normalizedText, voiceReference);
     const response = await (options.fetchImpl ?? fetch)(`${config.fishApi.baseUrl.replace(/\/$/, "")}/v1/tts`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        "Content-Type": requestBody.contentType,
         model: config.fishApi.model
       },
-      body: JSON.stringify({
-        text: normalizedText,
-        reference_id: referenceId,
-        format: config.fishApi.format,
-        latency: config.fishApi.latency,
-        chunk_length: config.fishApi.chunkLength
-      }),
+      body: requestBody.body,
       signal: controller.signal,
       ...fishApiProxyOptions(config, env)
     } as RequestInit);
@@ -108,6 +105,60 @@ export async function synthesizeFishApiAudio(
 
 export function getFishApiReferenceId(config: PockedioConfig): string | undefined {
   return config.fishApi.referenceIds[config.tts.fishVoice]?.trim();
+}
+
+type FishApiVoiceReference =
+  | { type: "audio"; audio: Buffer; text: string }
+  | { type: "id"; referenceId: string };
+
+function getFishApiVoiceReference(config: PockedioConfig): FishApiVoiceReference | undefined {
+  const preview = buildFishVoicePreview(config.tts.fishVoice, getPockedioHomeFromConfig(config));
+  const referencePath = preview.args[0];
+  if (referencePath && fs.existsSync(referencePath)) {
+    return {
+      type: "audio",
+      audio: fs.readFileSync(referencePath),
+      text: preview.sampleText
+    };
+  }
+  const referenceId = getFishApiReferenceId(config);
+  return referenceId ? { type: "id", referenceId } : undefined;
+}
+
+function getPockedioHomeFromConfig(config: PockedioConfig): string {
+  return path.dirname(path.dirname(config.paths.djAudioDir));
+}
+
+function buildFishApiRequestBody(
+  config: PockedioConfig,
+  text: string,
+  voiceReference: FishApiVoiceReference
+): { contentType: "application/json"; body: string } | { contentType: "application/msgpack"; body: Buffer } {
+  const basePayload = {
+    text,
+    format: config.fishApi.format,
+    latency: config.fishApi.latency,
+    chunk_length: config.fishApi.chunkLength
+  };
+  if (voiceReference.type === "audio") {
+    return {
+      contentType: "application/msgpack",
+      body: Buffer.from(encode({
+        ...basePayload,
+        references: [{
+          audio: voiceReference.audio,
+          text: voiceReference.text
+        }]
+      }))
+    };
+  }
+  return {
+    contentType: "application/json",
+    body: JSON.stringify({
+      ...basePayload,
+      reference_id: voiceReference.referenceId
+    })
+  };
 }
 
 function fishApiProxyOptions(config: PockedioConfig, env: NodeJS.ProcessEnv): Partial<RequestInit> {
