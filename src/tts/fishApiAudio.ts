@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { ProxyAgent } from "undici";
+import { readLlmApiKey } from "../config/llmSecrets.js";
 import type { PockedioConfig } from "../config/schema.js";
 import type { FishAudioResult } from "./fishAudio.js";
 
@@ -26,7 +27,7 @@ export async function synthesizeFishApiAudio(
   }
 
   const env = options.env ?? process.env;
-  const apiKey = env[config.fishApi.apiKeyEnv]?.trim();
+  const apiKey = env[config.fishApi.apiKeyEnv]?.trim() || readLlmApiKey(config, config.fishApi.apiKeyEnv);
   if (!apiKey) {
     return failed(startedAt, `Fish API key is missing: ${config.fishApi.apiKeyEnv}.`);
   }

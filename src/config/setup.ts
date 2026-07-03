@@ -69,7 +69,6 @@ type SetupAnswers = {
   fishAudioPythonPath: string;
   fishAudioScriptPath: string;
   fishAudioModelDir: string;
-  fishApiKeyEnv?: string;
   djLanguage: string;
   djDisplayName: string;
   djProgramLength: DjProgramLength;
@@ -1125,12 +1124,6 @@ export async function promptForAdvancedSetup(current: PockedioConfig): Promise<S
     },
     {
       type: "input",
-      name: "fishApiKeyEnv",
-      message: "Voice - Fish API key environment variable",
-      default: current.fishApi.apiKeyEnv
-    },
-    {
-      type: "input",
       name: "djLanguage",
       message: "DJ preference - spoken and terminal language",
       default: current.dj.language
@@ -1353,10 +1346,7 @@ export function buildConfigFromAnswers(current: PockedioConfig, answers: SetupAn
       scriptPath: answers.fishAudioScriptPath,
       modelDir: answers.fishAudioModelDir
     },
-    fishApi: {
-      ...current.fishApi,
-      apiKeyEnv: answers.fishApiKeyEnv ?? current.fishApi.apiKeyEnv
-    },
+    fishApi: current.fishApi,
     dj: {
       language: answers.djLanguage,
       displayName: answers.djDisplayName,

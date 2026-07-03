@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ensureRuntimeDirs, loadConfig } from "../src/config/load.js";
 import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { importTaste } from "../src/taste/importTaste.js";
-import { applyContextSetupKey, applyDjVoiceChooserKey, applyDjVoiceChooserNumberInput, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveContextSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderContextSetupSurface, renderDjVoiceChooserSurface, renderFishApiCloudSetupSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderTasteSummarySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
+import { applyContextSetupKey, applyDjVoiceChooserKey, applyDjVoiceChooserNumberInput, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveContextSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderContextSetupSurface, renderDjVoiceChooserSurface, renderFishApiCloudSetupSurface, renderFishVoiceChoiceSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderTasteSummarySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-tui-test-"));
@@ -391,7 +391,7 @@ describe("MOLE-inspired welcome hub", () => {
     });
   });
 
-  it("keeps Fish Audio Cloud setup focused on API key only", () => {
+  it("keeps Fish Audio Cloud setup focused on API key and engine test only", () => {
     const { config, env } = makeConfig();
     const cloud = renderFishApiCloudSetupSurface(config, 1, {}, env);
 
@@ -400,14 +400,29 @@ describe("MOLE-inspired welcome hub", () => {
     expect(cloud).toContain("Missing: FISH_API_KEY");
     expect(cloud).toContain("Voice models");
     expect(cloud).toContain("Built in");
-    expect(cloud).toContain("1. Set API key");
-    expect(cloud).toContain("2. Use Mina");
-    expect(cloud).toContain("3. Use Nova");
-    expect(cloud).toContain("4. Test current voice");
+    expect(cloud).toContain("1. Paste API key");
+    expect(cloud).toContain("2. Test Fish Audio Cloud");
+    expect(cloud).not.toContain("Use Mina");
+    expect(cloud).not.toContain("Use Nova");
     expect(cloud).not.toContain("reference id");
     expect(cloud).not.toContain("Advanced Fish API settings");
     expect(cloud).not.toContain("Base URL");
-    expect(cloud).toContain("1-4 Open");
+    expect(cloud).toContain("1-2 Open");
+  });
+
+  it("renders a Fish-only Mina/Nova picker after engine setup", () => {
+    const picker = renderFishVoiceChoiceSurface("Fish Audio Cloud", "mina", 2);
+
+    expect(picker).toContain("CHOOSE FISH AUDIO CLOUD VOICE");
+    expect(picker).toContain("VOICES");
+    expect(picker).toContain("1. Mina");
+    expect(picker).toContain("current");
+    expect(picker).toContain("▌ > 2. Nova");
+    expect(picker).toContain("available");
+    expect(picker).not.toContain("BUILT-IN VOICES");
+    expect(picker).not.toContain("FAST LOCAL VOICES");
+    expect(picker).not.toContain("STUDIO VOICES");
+    expect(picker).toContain("1-2 Save");
   });
 
   it("renders the combined DJ voice chooser and routes preview/save keys", () => {

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
+import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { shouldUseSpokenDjAudio } from "../src/dj/voiceRules.js";
 import { synthesizeFishAudio, type FishAudioProcessRunner } from "../src/tts/fishAudio.js";
 import { synthesizeFishApiAudio, type FishApiFetch } from "../src/tts/fishApiAudio.js";
@@ -202,6 +203,27 @@ describe("Fish API adapter", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("FISH_API_KEY");
     expect(called).toBe(false);
+  });
+
+  it("uses a pasted local Fish API key when the shell env is absent", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    saveLlmApiKey(config, "FISH_API_KEY", "fish-local-key");
+    let observedHeaders: HeadersInit | undefined;
+    const fetchImpl: FishApiFetch = async (_url, init) => {
+      observedHeaders = init?.headers;
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: {}
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedHeaders).toMatchObject({
+      Authorization: "Bearer fish-local-key"
+    });
   });
 
   it("returns safe HTTP failure details from Fish API", async () => {

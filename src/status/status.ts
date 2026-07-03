@@ -228,11 +228,11 @@ export function getFishAudioStatus(config: PockedioConfig): StatusReport["fishAu
 }
 
 export function getFishApiStatus(config: PockedioConfig, env: PockedioEnv = process.env): StatusReport["fishApi"] {
-  const apiKeyPresent = Boolean(env[config.fishApi.apiKeyEnv]?.trim());
+  const apiKeyPresent = Boolean(env[config.fishApi.apiKeyEnv]?.trim() || hasLocalLlmApiKey(config, config.fishApi.apiKeyEnv));
   const proxyPresent = Boolean(env[config.fishApi.proxyEnv]?.trim());
   const referenceIdPresent = Boolean(getFishApiReferenceId(config));
   const missing = [
-    apiKeyPresent ? undefined : `api key env: ${config.fishApi.apiKeyEnv}`,
+    apiKeyPresent ? undefined : `api key: ${config.fishApi.apiKeyEnv}`,
     referenceIdPresent ? undefined : `built-in voice id: ${config.tts.fishVoice}`
   ].filter((item): item is string => Boolean(item));
 

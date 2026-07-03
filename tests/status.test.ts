@@ -296,7 +296,7 @@ describe("status report", () => {
     expect(report.fishApi.ready).toBe(false);
     expect(report.voice.summary).toBe("Nova, Fish API needs setup");
     expect(text).toContain("Fish API missing:");
-    expect(text).toContain("- api key env: FISH_API_KEY");
+    expect(text).toContain("- api key: FISH_API_KEY");
     expect(text).not.toContain("reference id");
   });
 });

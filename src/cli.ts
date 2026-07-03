@@ -62,6 +62,7 @@ import {
   promptWelcomeHub,
   promptVoiceSetup,
   renderFishApiCloudSetupSurface,
+  renderFishVoiceChoiceSurface,
   renderTasteImportResultSurface,
   renderTasteMemorySurface,
   renderTasteSummarySurface,
@@ -876,7 +877,7 @@ async function configureFishTts(): Promise<"back" | "quit"> {
     if (answer === 4) {
       const next = await testFishTtsSetup();
       if (next === "choose") {
-        await chooseDjVoice(`fish:${loadConfig().tts.fishVoice}`);
+        await chooseFishVoiceForEngine("fish");
       }
       return "back";
     }
@@ -886,39 +887,47 @@ async function configureFishTts(): Promise<"back" | "quit"> {
 async function configureFishApiTts(): Promise<"back" | "quit"> {
   while (true) {
     const config = loadConfig();
-    const answer = await promptFishNumberedSurface(4, (selected, options) => renderFishApiCloudSetupSurface(config, selected, options));
+    const answer = await promptFishNumberedSurface(2, (selected, options) => renderFishApiCloudSetupSurface(config, selected, options));
     if (answer === "back" || answer === "quit") {
       return answer;
     }
     if (answer === 1) {
-      const apiKeyEnv = await askLineWithBack("Fish Audio API key environment variable", config.fishApi.apiKeyEnv);
-      if (apiKeyEnv !== "back") {
-        saveFishApiConfig({ apiKeyEnv: apiKeyEnv || config.fishApi.apiKeyEnv });
-      }
+      await pasteFishApiKey();
       continue;
     }
     if (answer === 2) {
-      await configureFishApiVoice("mina");
-      continue;
-    }
-    if (answer === 3) {
-      await configureFishApiVoice("nova");
-      continue;
-    }
-    if (answer === 4) {
-      await testFishApiTtsSetup(loadConfig().tts.fishVoice);
-      continue;
+      const result = await testFishApiTtsSetup(loadConfig().tts.fishVoice);
+      if (result === "ready") {
+        await chooseFishVoiceForEngine("fish_api");
+      }
+      return "back";
     }
   }
 }
 
-async function configureFishApiVoice(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): Promise<void> {
-  const result = await testFishApiTtsSetup(voice);
-  if (result !== "ready") {
+async function chooseFishVoiceForEngine(provider: "fish" | "fish_api"): Promise<void> {
+  const config = loadConfig();
+  const engineLabel = provider === "fish_api" ? "Fish Audio Cloud" : "Fish Local Model";
+  const answer = await promptFishNumberedSurface(2, (selected, options) =>
+    renderFishVoiceChoiceSurface(engineLabel, config.tts.fishVoice, selected, options)
+  );
+  if (answer === "back" || answer === "quit") {
     return;
   }
-  saveTtsConfig({ provider: "fish_api", fishVoice: voice });
-  await pauseWithMessage(`Saved Fish API voice: ${formatFishVoiceLabel(voice)}.`);
+  const voice = answer === 1 ? "mina" : "nova";
+  if (provider === "fish_api") {
+    saveTtsConfig({ provider: "fish_api", fishVoice: voice });
+    await pauseWithMessage(`Saved Fish Audio Cloud voice: ${formatFishVoiceLabel(voice)}.`);
+    return;
+  }
+  const preview = buildFishVoicePreview(voice, getPockedioHome());
+  saveTtsConfig({
+    provider: "fish",
+    fishVoice: voice,
+    fishReferenceAudioPath: preview.args[0],
+    fishReferenceText: fishReferenceText(voice)
+  });
+  await pauseWithMessage(`Saved Fish Local Model voice: ${formatFishVoiceLabel(voice)}.`);
 }
 
 async function testFishApiTtsSetup(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): Promise<"ready" | "return"> {
@@ -1340,8 +1349,8 @@ function formatFishTtsMissingMessage(): string {
 
 function formatFishApiMissingMessage(config = loadConfig()): string {
   const missing: string[] = [];
-  if (!process.env[config.fishApi.apiKeyEnv]?.trim()) {
-    missing.push(`API key env is missing: ${config.fishApi.apiKeyEnv}`);
+  if (!process.env[config.fishApi.apiKeyEnv]?.trim() && !hasLocalLlmApiKey(config, config.fishApi.apiKeyEnv)) {
+    missing.push(`API key is missing: ${config.fishApi.apiKeyEnv}`);
   }
   if (!config.fishApi.referenceIds[config.tts.fishVoice]?.trim()) {
     missing.push(`Reference id is missing for ${formatFishVoiceLabel(config.tts.fishVoice)}.`);
@@ -1350,7 +1359,7 @@ function formatFishApiMissingMessage(config = loadConfig()): string {
     "Fish API is not ready.",
     ...missing.map((item) => `- ${item}`),
     "",
-    "Open Fish Audio Cloud setup, set the API key environment variable, then test the voice."
+    "Open Fish Audio Cloud setup, paste the API key, then test the cloud engine."
   ].join("\n");
 }
 
@@ -2118,6 +2127,20 @@ async function pasteLlmApiKey(apiKeyEnv = loadConfig().llm.apiKeyEnv): Promise<v
   }
   saveLlmApiKey(config, apiKeyEnv, apiKey);
   await pauseWithMessage(`Saved local secret for ${apiKeyEnv}. Choose Test connection to verify it.`);
+}
+
+async function pasteFishApiKey(): Promise<void> {
+  const config = loadConfig();
+  const apiKey = (await askHiddenLine("Paste Fish Audio API key [Esc to back]: ")).trim();
+  if (isBackInput(apiKey)) {
+    return;
+  }
+  if (!apiKey) {
+    await pauseWithMessage("No Fish Audio API key saved.");
+    return;
+  }
+  saveLlmApiKey(config, config.fishApi.apiKeyEnv, apiKey);
+  await pauseWithMessage("Saved Fish Audio API key. Choose Test Fish Audio Cloud to verify it.");
 }
 
 async function askHiddenLine(message: string): Promise<string> {
