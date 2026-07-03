@@ -135,7 +135,7 @@ describe("status report", () => {
       fishAudio: { pythonPath: "", scriptPath: "", modelDir: "", pathsPresent: false, missing: [] },
       fishApi: {
         baseUrl: "https://api.fish.audio",
-        model: "s2-pro",
+        model: "s2.1-pro-free",
         apiKeyEnv: "FISH_API_KEY",
         apiKeyPresent: false,
         proxyEnv: "POCKEDIO_FISH_PROXY",
@@ -191,7 +191,7 @@ describe("status report", () => {
       },
       fishApi: {
         baseUrl: "https://api.fish.audio",
-        model: "s2-pro",
+        model: "s2.1-pro-free",
         apiKeyEnv: "FISH_API_KEY",
         apiKeyPresent: true,
         proxyEnv: "POCKEDIO_FISH_PROXY",

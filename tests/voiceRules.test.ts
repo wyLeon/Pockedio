@@ -171,7 +171,7 @@ describe("Fish API adapter", () => {
     expect(observedHeaders).toMatchObject({
       Authorization: "Bearer fish-test-key",
       "Content-Type": "application/json",
-      model: "s2-pro"
+      model: "s2.1-pro-free"
     });
     expect(observedBody).toMatchObject({
       text: "Welcome back.",

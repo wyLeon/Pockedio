@@ -99,7 +99,7 @@ describe("config load and save", () => {
       baseUrl: "https://api.fish.audio",
       apiKeyEnv: "FISH_API_KEY",
       proxyEnv: "POCKEDIO_FISH_PROXY",
-      model: "s2-pro",
+      model: "s2.1-pro-free",
       format: "mp3",
       latency: "balanced",
       chunkLength: 150,
@@ -174,6 +174,17 @@ describe("config load and save", () => {
     expect(config.fishApi.apiKeyEnv).toBe("POCKEDIO_TEST_FISH_KEY");
     expect(config.fishApi.model).toBe("s2.1-pro");
     expect(config.fishApi.referenceIds.mina).toBe("mina-reference");
+  });
+
+  it("migrates the previous paid Fish API default to the free cloud model", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+    current.fishApi.model = "s2-pro";
+
+    saveConfig(current, env);
+    const config = loadConfig(env);
+
+    expect(config.fishApi.model).toBe("s2.1-pro-free");
   });
 
   it("stores NetEase account cookies outside normal config", () => {

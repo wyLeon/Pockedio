@@ -24,6 +24,7 @@ const scheduledDjProgramSchema = z.object({
 });
 
 export const fishAudioModelDir = ".cache/fishaudio-s2-pro-8bit-mlx";
+export const fishApiDefaultModel = "s2.1-pro-free";
 export const fishApiDefaultReferenceIds = {
   mina: "20f9a738ef5a4b0396b320fc2a5693c2",
   nova: "20f9a738ef5a4b0396b320fc2a5693c2"
@@ -98,7 +99,7 @@ export const pockedioConfigSchema = z.object({
     baseUrl: z.string().url().default("https://api.fish.audio"),
     apiKeyEnv: z.string().min(1).default("FISH_API_KEY"),
     proxyEnv: z.string().min(1).default("POCKEDIO_FISH_PROXY"),
-    model: z.string().min(1).default("s2-pro"),
+    model: z.string().min(1).default(fishApiDefaultModel),
     format: z.enum(["mp3", "wav", "pcm", "opus"]).default("mp3"),
     latency: z.enum(["low", "balanced", "normal"]).default("balanced"),
     chunkLength: z.number().int().min(100).max(300).default(150),
