@@ -108,17 +108,28 @@ export function getFishApiReferenceId(config: PockedioConfig): string | undefine
 }
 
 type FishApiVoiceReference =
-  | { type: "audio"; audio: Buffer; text: string }
+  | { type: "audio"; references: Array<{ audio: Buffer; text: string }> }
   | { type: "id"; referenceId: string };
 
 function getFishApiVoiceReference(config: PockedioConfig): FishApiVoiceReference | undefined {
+  const pockedioHome = getPockedioHomeFromConfig(config);
   const preview = buildFishVoicePreview(config.tts.fishVoice, getPockedioHomeFromConfig(config));
   const referencePath = preview.args[0];
   if (referencePath && fs.existsSync(referencePath)) {
-    return {
-      type: "audio",
+    const references = [{
       audio: fs.readFileSync(referencePath),
       text: preview.sampleText
+    }];
+    const secondaryMinaReferencePath = path.join(pockedioHome, "audio", "previews", "mina-fish-ref.wav");
+    if (config.tts.fishVoice === "mina" && fs.existsSync(secondaryMinaReferencePath)) {
+      references.push({
+        audio: fs.readFileSync(secondaryMinaReferencePath),
+        text: "Mina is here. Soft lights, warm songs, and room to breathe."
+      });
+    }
+    return {
+      type: "audio",
+      references
     };
   }
   const referenceId = getFishApiReferenceId(config);
@@ -135,7 +146,7 @@ function buildFishApiRequestBody(
   voiceReference: FishApiVoiceReference
 ): { contentType: "application/json"; body: string } | { contentType: "application/msgpack"; body: Buffer } {
   const basePayload = {
-    text,
+    text: formatFishApiSynthesisText(config, text, voiceReference),
     format: config.fishApi.format,
     latency: config.fishApi.latency,
     chunk_length: config.fishApi.chunkLength
@@ -145,10 +156,7 @@ function buildFishApiRequestBody(
       contentType: "application/msgpack",
       body: Buffer.from(encode({
         ...basePayload,
-        references: [{
-          audio: voiceReference.audio,
-          text: voiceReference.text
-        }]
+        references: voiceReference.references
       }))
     };
   }
@@ -159,6 +167,13 @@ function buildFishApiRequestBody(
       reference_id: voiceReference.referenceId
     })
   };
+}
+
+function formatFishApiSynthesisText(config: PockedioConfig, text: string, voiceReference: FishApiVoiceReference): string {
+  if (voiceReference.type === "audio" && config.tts.fishVoice === "mina") {
+    return `[soft young voice][warm tone][low volume] ${text}`;
+  }
+  return text;
 }
 
 function fishApiProxyOptions(config: PockedioConfig, env: NodeJS.ProcessEnv): Partial<RequestInit> {

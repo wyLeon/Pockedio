@@ -151,9 +151,12 @@ describe("Fish API adapter", () => {
     const config = makeConfig();
     config.tts.fishVoice = "mina";
     config.fishApi.referenceIds.mina = "mina-reference";
-    const referencePath = path.join(path.dirname(config.paths.djAudioDir), "previews", "mina.wav");
-    fs.mkdirSync(path.dirname(referencePath), { recursive: true });
+    const previewDir = path.join(path.dirname(config.paths.djAudioDir), "previews");
+    const referencePath = path.join(previewDir, "mina.wav");
+    const fishReferencePath = path.join(previewDir, "mina-fish-ref.wav");
+    fs.mkdirSync(previewDir, { recursive: true });
     fs.writeFileSync(referencePath, "wav-reference");
+    fs.writeFileSync(fishReferencePath, "fish-ref-reference");
     let observedUrl = "";
     let observedHeaders: HeadersInit | undefined;
     let observedBody: BodyInit | null | undefined;
@@ -181,7 +184,10 @@ describe("Fish API adapter", () => {
     expect(body.includes(Buffer.from("reference_id"))).toBe(false);
     expect(body.includes(Buffer.from("references"))).toBe(true);
     expect(body.includes(Buffer.from("wav-reference"))).toBe(true);
+    expect(body.includes(Buffer.from("fish-ref-reference"))).toBe(true);
+    expect(body.includes(Buffer.from("[soft young voice][warm tone][low volume] Welcome back."))).toBe(true);
     expect(body.includes(Buffer.from("Welcome back. I picked a warmer five-track set for this station."))).toBe(true);
+    expect(body.includes(Buffer.from("Mina is here. Soft lights, warm songs, and room to breathe."))).toBe(true);
     if (result.ok) {
       expect(result.audioPath).toMatch(/\.mp3$/);
       expect(fs.readFileSync(result.audioPath, "utf8")).toBe("mp3");
