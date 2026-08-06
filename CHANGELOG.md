@@ -2,6 +2,18 @@
 
 All notable public release changes are documented here.
 
+## 0.5.0 - 2026-08-06
+
+Fish Audio Cloud and runtime resilience release.
+
+- Add Fish Audio Cloud as an alternative to the local Fish model for Mina and Nova DJ voices, with guided cloud/local setup, built-in voice references, status reporting, and optional proxy support.
+- Use the local Mina and Nova voice references for Cloud Fish synthesis, and retry transient Cloud Fish network and server failures before falling back.
+- Make Cloud Fish setup use the default free model and complete the full setup flow after a voice is selected.
+- Keep recommendation replies useful when an LLM is unavailable by deriving listening hints from diary context and summarizing saved `taste.md` signals.
+- Bound interactive LLM requests to 45 seconds without implicit retries so temporary provider failures do not stall the CLI.
+- Prevent duplicate playback when automatic advance races with a manual track change, and clean up played or orphaned DJ audio files.
+- Render long interactive input as explicit terminal rows so editing multi-line text does not leave stale characters in the terminal.
+
 ## 0.4.0 - 2026-06-02
 
 Context heartbeat, DJ handoff, and continuation release.

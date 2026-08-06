@@ -281,6 +281,7 @@ function isLyricsRequestText(text: string): boolean {
 
 function isMusicRecommendationText(text: string): boolean {
   return /\b(what music should i listen to|what music would .*suggest|what should i listen to|what should i play|recommend music|recommend some music|suggest music|suggest some music|suggest something|what .*music.*suggest)\b/.test(text)
+    || /\b(random\s+)?(music|musics|songs|tracks|playlist|station|set)\b.{0,40}\b(based on|for|around)\b.{0,24}\b(my|this|the)?\s*(mood|taste|context|day|moment|vibe)\b/.test(text)
     || /\b(i'?m|i am|feeling|feel)\b.*\b(exhausted|tired|stressed|grumpy|sad|anxious)\b.*\b(relax|relaxation|calm|rest|unwind)\b/.test(text)
     || /(应该|适合).{0,8}听什么|听什么.{0,8}(好|合适|适合)|推荐.{0,8}(音乐|歌|歌曲)|建议.{0,8}(音乐|歌|歌曲)/.test(text);
 }

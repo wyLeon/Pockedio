@@ -98,6 +98,13 @@ Latest automated pass on 2026-05-28:
 
 ## Current Evidence
 
+- Automated release-candidate verification passed on 2026-08-06 for `0.5.0` (not tagged):
+  - `npm test`: 466 tests passed across 25 files.
+  - `npm run typecheck`: passed.
+  - `npm run build`: passed.
+  - `git diff --check`: passed.
+  - Isolated `POCKEDIO_HOME=/tmp/pockedio-release-check-20260806 node dist/cli.js status` showed only the disposable local data path.
+  - Remaining release checks: a fresh-clone `npm ci` smoke, real Fish Audio Cloud synthesis using a release-safe account, and merge/CI evidence on `main`.
 - Automated release-prep verification passed on 2026-05-27:
   - `npm run typecheck`: passed.
   - `npm test`: 381 tests passed across 23 files.

@@ -34,6 +34,7 @@ import {
   voicePreviewText
 } from "./tts/voiceSetup.js";
 import { synthesizeFishAudio } from "./tts/fishAudio.js";
+import { synthesizeFishApiAudio } from "./tts/fishApiAudio.js";
 import { synthesizeKokoroAudio } from "./tts/kokoroAudio.js";
 import {
   buildFishSetupInstallCommands,
@@ -49,6 +50,7 @@ import {
 } from "./tts/kokoroSetup.js";
 import {
   buildWelcomeReadiness,
+  isFishApiReady,
   isFishTtsReady,
   isKokoroTtsReady,
   promptDjVoiceChooser,
@@ -59,6 +61,8 @@ import {
   promptTasteMemory,
   promptWelcomeHub,
   promptVoiceSetup,
+  renderFishApiCloudSetupSurface,
+  renderFishVoiceChoiceSurface,
   renderTasteImportResultSurface,
   renderTasteMemorySurface,
   renderTasteSummarySurface,
@@ -534,8 +538,19 @@ async function runVoiceSetupAction(
   if (action === "kokoro_tts") {
     return await configureKokoroTts() === "quit" ? "quit" : "continue";
   }
+  if (action === "fish_api_tts") {
+    const outcome = await configureFishApiTts();
+    if (outcome === "quit") {
+      return "quit";
+    }
+    return outcome === "configured" && options.returnOnConfigured ? "done" : "continue";
+  }
   if (action === "fish_tts") {
-    return await configureFishTts() === "quit" ? "quit" : "continue";
+    const outcome = await configureFishTts();
+    if (outcome === "quit") {
+      return "quit";
+    }
+    return outcome === "configured" && options.returnOnConfigured ? "done" : "continue";
   }
   if (action === "text_only") {
     saveTtsConfig({ provider: "text" });
@@ -603,6 +618,19 @@ async function previewDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
     await previewKokoroVoice(parsed.voice);
     return;
   }
+  const config = loadConfig();
+  const fishApiConfig = {
+    ...config,
+    tts: {
+      ...config.tts,
+      provider: "fish_api" as const,
+      fishVoice: parsed.voice
+    }
+  };
+  if (config.tts.provider === "fish_api" && isFishApiReady(fishApiConfig)) {
+    await testFishApiTtsSetup(parsed.voice);
+    return;
+  }
   if (!isFishTtsReady(loadConfig())) {
     await pauseWithMessage(formatFishTtsMissingMessage());
     return;
@@ -642,11 +670,25 @@ async function saveDjVoiceChoice(choice: DjVoiceChoiceId): Promise<void> {
     await pauseWithMessage(`Saved fast local voice: ${formatKokoroVoiceName(parsed.voice)}`);
     return;
   }
+  const config = loadConfig();
+  const fishApiConfig = {
+    ...config,
+    tts: {
+      ...config.tts,
+      provider: "fish_api" as const,
+      fishVoice: parsed.voice
+    }
+  };
+  if (config.tts.provider === "fish_api" && isFishApiReady(fishApiConfig)) {
+    saveTtsConfig({ provider: "fish_api", fishVoice: parsed.voice });
+    await pauseWithMessage(`Saved Fish API voice: ${formatFishVoiceLabel(parsed.voice)}`);
+    return;
+  }
   if (!isFishTtsReady(loadConfig())) {
     await pauseWithMessage([
-      "Configure Fish TTS before saving Mina or Nova.",
+      "Configure Fish API or local Fish TTS before saving Mina or Nova.",
       "",
-      formatFishTtsMissingMessage()
+      "Use Configure Fish API for cloud voices, or Configure local Fish TTS for local model synthesis."
     ].join("\n"));
     return;
   }
@@ -821,7 +863,7 @@ async function testKokoroTtsSetup(): Promise<"choose" | "return" | "keep"> {
   return "return";
 }
 
-async function configureFishTts(): Promise<"back" | "quit"> {
+async function configureFishTts(): Promise<"back" | "configured" | "quit"> {
   while (true) {
     const config = loadConfig();
     const answer = await promptFishNumberedSurface(4, (selected, options) => renderFishTtsSetupSurface(config, selected, options));
@@ -843,11 +885,80 @@ async function configureFishTts(): Promise<"back" | "quit"> {
     if (answer === 4) {
       const next = await testFishTtsSetup();
       if (next === "choose") {
-        await chooseDjVoice(`fish:${loadConfig().tts.fishVoice}`);
+        return await chooseFishVoiceForEngine("fish") ? "configured" : "back";
       }
       return "back";
     }
   }
+}
+
+async function configureFishApiTts(): Promise<"back" | "configured" | "quit"> {
+  while (true) {
+    const config = loadConfig();
+    const answer = await promptFishNumberedSurface(2, (selected, options) => renderFishApiCloudSetupSurface(config, selected, options));
+    if (answer === "back" || answer === "quit") {
+      return answer;
+    }
+    if (answer === 1) {
+      await pasteFishApiKey();
+      continue;
+    }
+    if (answer === 2) {
+      const result = await testFishApiTtsSetup(loadConfig().tts.fishVoice);
+      if (result === "ready") {
+        return await chooseFishVoiceForEngine("fish_api") ? "configured" : "back";
+      }
+      return "back";
+    }
+  }
+}
+
+async function chooseFishVoiceForEngine(provider: "fish" | "fish_api"): Promise<boolean> {
+  const config = loadConfig();
+  const engineLabel = provider === "fish_api" ? "Fish Audio Cloud" : "Fish Local Model";
+  const answer = await promptFishNumberedSurface(2, (selected, options) =>
+    renderFishVoiceChoiceSurface(engineLabel, config.tts.fishVoice, selected, options)
+  );
+  if (answer === "back" || answer === "quit") {
+    return false;
+  }
+  const voice = answer === 1 ? "mina" : "nova";
+  if (provider === "fish_api") {
+    saveTtsConfig({ provider: "fish_api", fishVoice: voice });
+    await pauseWithMessage(`Saved Fish Audio Cloud voice: ${formatFishVoiceLabel(voice)}.`);
+    return true;
+  }
+  const preview = buildFishVoicePreview(voice, getPockedioHome());
+  saveTtsConfig({
+    provider: "fish",
+    fishVoice: voice,
+    fishReferenceAudioPath: preview.args[0],
+    fishReferenceText: fishReferenceText(voice)
+  });
+  await pauseWithMessage(`Saved Fish Local Model voice: ${formatFishVoiceLabel(voice)}.`);
+  return true;
+}
+
+async function testFishApiTtsSetup(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): Promise<"ready" | "return"> {
+  const config = {
+    ...loadConfig(),
+    tts: {
+      ...loadConfig().tts,
+      provider: "fish_api" as const,
+      fishVoice: voice
+    }
+  };
+  if (!isFishApiReady(config)) {
+    await pauseWithMessage(formatFishApiMissingMessage(config));
+    return "return";
+  }
+  const result = await withCliProgress(`Testing Fish API ${formatFishVoiceLabel(voice)}...`, () => synthesizeFishApiAudio(config, voicePreviewText, { timeoutMs: 120_000 }));
+  if (!result.ok) {
+    await pauseWithMessage(`Fish API test failed:\n${result.error}`);
+    return "return";
+  }
+  await previewGeneratedFishAudio(result.audioPath);
+  return "ready";
 }
 
 async function installFishTtsLocally(): Promise<void> {
@@ -1032,6 +1143,25 @@ async function previewGeneratedFishAudio(audioPath: string): Promise<void> {
   const result = await runProcess("afplay", [audioPath], 12_000);
   if (!result.ok) {
     await pauseWithMessage(`Generated audio, but preview playback failed: ${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
+    return;
+  }
+  cleanupPreviewDjAudio(audioPath);
+}
+
+function cleanupPreviewDjAudio(audioPath: string, env: NodeJS.ProcessEnv = process.env): void {
+  if (/^(1|true|yes)$/i.test(env.POCKEDIO_KEEP_DJ_AUDIO?.trim() ?? "")) {
+    return;
+  }
+  const config = loadConfig();
+  const resolvedAudioPath = path.resolve(audioPath);
+  const resolvedDjAudioDir = path.resolve(config.paths.djAudioDir);
+  if (resolvedAudioPath !== resolvedDjAudioDir && !resolvedAudioPath.startsWith(`${resolvedDjAudioDir}${path.sep}`)) {
+    return;
+  }
+  try {
+    fs.unlinkSync(audioPath);
+  } catch {
+    // Best-effort cache cleanup must not interrupt setup.
   }
 }
 
@@ -1070,7 +1200,7 @@ function renderKokoroTtsSetupSurface(config: ReturnType<typeof loadConfig>, sele
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(4), options)
   ].join("\n");
 }
 
@@ -1091,7 +1221,7 @@ function renderUseExistingKokoroSurface(detection: ReturnType<typeof detectKokor
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(3), options)
   ].join("\n");
 }
 
@@ -1110,7 +1240,7 @@ function renderKokoroManualPathSurface(config: ReturnType<typeof loadConfig>, se
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(4), options)
   ].join("\n");
 }
 
@@ -1128,7 +1258,7 @@ function renderKokoroTtsSuccessSurface(selected = 1, options: TuiRenderOptions =
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open", options)
+    renderTuiFooter(formatMenuFooter(3), options)
   ].join("\n");
 }
 
@@ -1153,7 +1283,7 @@ function renderFishTtsSetupSurface(config: ReturnType<typeof loadConfig>, select
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(4), options)
   ].join("\n");
 }
 
@@ -1174,7 +1304,7 @@ function renderUseExistingFishTtsSurface(detection: ReturnType<typeof detectFish
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(3), options)
   ].join("\n");
 }
 
@@ -1196,7 +1326,7 @@ function renderFishTtsManualPathSurface(config: ReturnType<typeof loadConfig>, s
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit", options)
+    renderTuiFooter(formatMenuFooter(6), options)
   ].join("\n");
 }
 
@@ -1214,8 +1344,12 @@ function renderFishTtsSuccessSurface(selected = 1, options: TuiRenderOptions = {
     renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
     ...actions.map((action, index) => formatPromptAction(selected === index + 1, index + 1, action.label, action.description, options)),
     "",
-    renderTuiFooter("↑↓ Select  |  Enter Open  |  1-3 Open", options)
+    renderTuiFooter(formatMenuFooter(3), options)
   ].join("\n");
+}
+
+function formatMenuFooter(actionCount: number, actionVerb = "Open"): string {
+  return `↑↓ Select  |  Enter ${actionVerb}  |  1-${actionCount} ${actionVerb}  |  B/Esc Back  |  Q Quit`;
 }
 
 function formatFishTtsMissingMessage(): string {
@@ -1242,6 +1376,22 @@ function formatFishTtsMissingMessage(): string {
     ...missing.map((item) => `- ${item}`),
     "",
     "Open Configure Fish TTS. Install or detect the runtime, then choose Edit paths to generate missing Mina/Nova references."
+  ].join("\n");
+}
+
+function formatFishApiMissingMessage(config = loadConfig()): string {
+  const missing: string[] = [];
+  if (!process.env[config.fishApi.apiKeyEnv]?.trim() && !hasLocalLlmApiKey(config, config.fishApi.apiKeyEnv)) {
+    missing.push(`API key is missing: ${config.fishApi.apiKeyEnv}`);
+  }
+  if (!config.fishApi.referenceIds[config.tts.fishVoice]?.trim()) {
+    missing.push(`Reference id is missing for ${formatFishVoiceLabel(config.tts.fishVoice)}.`);
+  }
+  return [
+    "Fish API is not ready.",
+    ...missing.map((item) => `- ${item}`),
+    "",
+    "Open Fish Audio Cloud setup, paste the API key, then test the cloud engine."
   ].join("\n");
 }
 
@@ -1403,6 +1553,35 @@ function saveFishAudioConfig(input: {
   });
 }
 
+function saveFishApiConfig(input: {
+  apiKeyEnv?: string;
+  proxyEnv?: string;
+  baseUrl?: string;
+  model?: string;
+  minaReferenceId?: string;
+  novaReferenceId?: string;
+}): void {
+  const config = loadConfig();
+  saveConfig({
+    ...config,
+    fishApi: {
+      ...config.fishApi,
+      apiKeyEnv: input.apiKeyEnv?.trim() || config.fishApi.apiKeyEnv,
+      proxyEnv: input.proxyEnv?.trim() || config.fishApi.proxyEnv,
+      baseUrl: input.baseUrl?.trim() || config.fishApi.baseUrl,
+      model: input.model?.trim() || config.fishApi.model,
+      referenceIds: {
+        mina: input.minaReferenceId !== undefined
+          ? input.minaReferenceId.trim() || config.fishApi.referenceIds.mina
+          : config.fishApi.referenceIds.mina,
+        nova: input.novaReferenceId !== undefined
+          ? input.novaReferenceId.trim() || config.fishApi.referenceIds.nova
+          : config.fishApi.referenceIds.nova
+      }
+    }
+  });
+}
+
 function saveKokoroAudioConfig(input: {
   pythonPath?: string;
   modelPath?: string;
@@ -1418,6 +1597,10 @@ function saveKokoroAudioConfig(input: {
       voicesPath: input.voicesPath?.trim() || config.kokoroAudio.voicesPath
     }
   });
+}
+
+function formatFishVoiceLabel(voice: ReturnType<typeof loadConfig>["tts"]["fishVoice"]): string {
+  return fishVoiceOptions.find((candidate) => candidate.id === voice)?.label ?? voice;
 }
 
 function saveTtsConfig(input: {
@@ -1878,7 +2061,7 @@ async function askLineWithBack(message: string, defaultValue?: string): Promise<
 
 function isBackInput(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
-  return normalized === "b" || normalized === "back";
+  return normalized === "b" || normalized === "back" || normalized === "esc" || normalized === "escape";
 }
 
 async function withCliProgress<T>(message: string, action: () => Promise<T>): Promise<T> {
@@ -1940,7 +2123,7 @@ function promptFishNumberedSurface(max: number, renderSurface: (selected: number
         cleanup(selected);
         return;
       }
-      if (key.name === "b") {
+      if (key.name === "b" || key.name === "escape") {
         cleanup("back");
         return;
       }
@@ -1976,6 +2159,20 @@ async function pasteLlmApiKey(apiKeyEnv = loadConfig().llm.apiKeyEnv): Promise<v
   }
   saveLlmApiKey(config, apiKeyEnv, apiKey);
   await pauseWithMessage(`Saved local secret for ${apiKeyEnv}. Choose Test connection to verify it.`);
+}
+
+async function pasteFishApiKey(): Promise<void> {
+  const config = loadConfig();
+  const apiKey = (await askHiddenLine("Paste Fish Audio API key [Esc to back]: ")).trim();
+  if (isBackInput(apiKey)) {
+    return;
+  }
+  if (!apiKey) {
+    await pauseWithMessage("No Fish Audio API key saved.");
+    return;
+  }
+  saveLlmApiKey(config, config.fishApi.apiKeyEnv, apiKey);
+  await pauseWithMessage("Saved Fish Audio API key. Choose Test Fish Audio Cloud to verify it.");
 }
 
 async function askHiddenLine(message: string): Promise<string> {
@@ -2028,5 +2225,5 @@ async function askHiddenLine(message: string): Promise<string> {
 async function pauseWithMessage(message: string): Promise<void> {
   console.log(message);
   console.log("");
-  await askLine("Press Enter to return.");
+  await askLine("Enter Continue");
 }

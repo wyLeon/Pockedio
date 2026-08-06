@@ -11,7 +11,7 @@ import {
   getTastePath,
   type PockedioEnv
 } from "./paths.js";
-import { pockedioConfigSchema, type PockedioConfig } from "./schema.js";
+import { fishApiDefaultModel, pockedioConfigSchema, type PockedioConfig } from "./schema.js";
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
@@ -51,7 +51,20 @@ export function loadConfig(env: PockedioEnv = process.env): PockedioConfig {
   const rawConfig = fs.existsSync(configPath)
     ? JSON.parse(fs.readFileSync(configPath, "utf8")) as unknown
     : {};
-  return pockedioConfigSchema.parse(mergeConfig(defaultConfigInput(env), rawConfig));
+  return normalizeLoadedConfig(pockedioConfigSchema.parse(mergeConfig(defaultConfigInput(env), rawConfig)));
+}
+
+function normalizeLoadedConfig(config: PockedioConfig): PockedioConfig {
+  if (config.fishApi.model === "s2-pro") {
+    return {
+      ...config,
+      fishApi: {
+        ...config.fishApi,
+        model: fishApiDefaultModel
+      }
+    };
+  }
+  return config;
 }
 
 export function saveConfig(config: PockedioConfig, env: PockedioEnv = process.env): void {

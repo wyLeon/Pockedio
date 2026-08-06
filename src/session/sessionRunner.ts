@@ -67,6 +67,7 @@ type SynthesizeFishAudio = (config: PockedioConfig, text: string, options?: Fish
 
 const EXPLICIT_DJ_AUDIO_TIMEOUT_MS = 240_000;
 const PLAYBACK_URL_REFRESH_RETRY_ATTEMPTS = 3;
+const PLAYBACK_TRANSITION_SUPERSEDED = "__pockedio_playback_transition_superseded__";
 
 type StoredPlaybackTrack = {
   dbId: string;
@@ -174,6 +175,7 @@ export type InteractivePlaybackState = {
   activePlaybackPaused?: boolean;
   lastIntroPlaybackResult?: PlayerResult;
   consecutivePlaybackFailures?: number;
+  playbackGeneration?: number;
   djProgram?: DjProgramPlaybackState;
   startUrlPlayback?: StartUrlPlayback;
   startDuckedIntroPlayback?: StartDuckedIntroPlayback;
@@ -275,7 +277,7 @@ export function formatInteractiveStartupGuide(displayName = "Pockedio", setupNot
 }
 
 export function formatInteractiveStartupDisplayName(config: PockedioConfig, platform: NodeJS.Platform = process.platform): string {
-  if (config.tts.provider === "fish") {
+  if (config.tts.provider === "fish" || config.tts.provider === "fish_api") {
     return formatFishVoiceName(config.tts.fishVoice);
   }
   if (config.tts.provider === "kokoro") {
@@ -291,7 +293,7 @@ export function formatInteractiveStartupDisplayName(config: PockedioConfig, plat
 }
 
 export function formatRuntimeDjDisplayName(config: PockedioConfig, platform: NodeJS.Platform = process.platform): string {
-  if (config.tts.provider === "fish") {
+  if (config.tts.provider === "fish" || config.tts.provider === "fish_api") {
     return formatFishVoiceName(config.tts.fishVoice);
   }
   if (config.tts.provider === "kokoro") {
@@ -324,6 +326,13 @@ function hasTasteSignals(tastePath: string): boolean {
   }
   const content = fs.readFileSync(tastePath, "utf8");
   return /^- .+/m.test(content);
+}
+
+function readTasteMarkdown(config: PockedioConfig | undefined): string {
+  if (!config || !fs.existsSync(config.paths.taste)) {
+    return "";
+  }
+  return fs.readFileSync(config.paths.taste, "utf8").trim();
 }
 
 export async function runSessionTurn(input: SessionTurnInput): Promise<SessionTurnResult> {
@@ -1633,15 +1642,63 @@ export function formatInteractiveLivePromptBox(text = "", options: TuiRenderOpti
 }
 
 function formatInteractiveLivePromptArea(text = "", options: TuiRenderOptions = {}): string {
-  const rule = formatInteractiveLivePromptRule(options);
-  const box = formatInteractiveLivePromptBox(text, options);
-  return rule ? `${rule}\n${box}\n${rule}` : box;
+  return createInteractiveLivePromptLayout(text, text.length, options).area;
 }
 
-function getInteractiveLivePromptColumn(line: string, cursor: number, options: TuiRenderOptions = {}): number {
-  void options;
+type InteractiveLivePromptLayout = {
+  area: string;
+  inputRows: number;
+  cursorRow: number;
+  cursorColumn: number;
+};
+
+function createInteractiveLivePromptLayout(text: string, cursor: number, options: TuiRenderOptions = {}): InteractiveLivePromptLayout {
+  const width = Math.max(0, options.width ?? (options.color ? 32 : 0));
+  const prompt = formatInteractiveLivePrompt(options);
   const promptWidth = 2;
-  return Math.max(0, promptWidth + promptDisplayWidth(line.slice(0, cursor)));
+  if (!options.color || width <= promptWidth) {
+    return {
+      area: `${prompt}${text}`,
+      inputRows: 1,
+      cursorRow: 0,
+      cursorColumn: Math.max(0, promptWidth + promptDisplayWidth(text.slice(0, cursor)))
+    };
+  }
+
+  const rows: Array<{ text: string; width: number }> = [{ text: prompt, width: promptWidth }];
+  let consumed = 0;
+  let cursorRow = 0;
+  let cursorColumn = promptWidth;
+  const setCursor = () => {
+    cursorRow = rows.length - 1;
+    cursorColumn = rows.at(-1)!.width;
+  };
+
+  for (const char of text) {
+    if (consumed === cursor) {
+      setCursor();
+    }
+    const charWidth = promptDisplayWidth(char);
+    let row = rows.at(-1)!;
+    if (row.width > promptWidth && row.width + charWidth > width) {
+      row = { text: "  ", width: promptWidth };
+      rows.push(row);
+    }
+    row.text += char;
+    row.width += charWidth;
+    consumed += char.length;
+  }
+  if (consumed === cursor) {
+    setCursor();
+  }
+
+  const rule = formatInteractiveLivePromptRule(options);
+  return {
+    area: `${rule}\n${rows.map((row) => `${row.text}${" ".repeat(Math.max(0, width - row.width))}`).join("\n")}\n${rule}`,
+    inputRows: rows.length,
+    cursorRow,
+    cursorColumn
+  };
 }
 
 function promptDisplayWidth(value: string): number {
@@ -1691,13 +1748,16 @@ export async function questionWithInteractiveFrame(
     });
     const render = () => {
       if (hasRenderedPrompt) {
-        clearInteractiveLivePromptBox(output);
+        clearInteractiveLivePromptBox(output, promptView);
       }
       const currentOptions = renderOptions();
-      output.write(formatInteractiveLivePromptArea(promptView.line, currentOptions));
+      const layout = createInteractiveLivePromptLayout(promptView.line, promptView.cursor, currentOptions);
+      output.write(layout.area);
+      promptView.renderedRows = layout.inputRows;
+      promptView.cursorRow = layout.cursorRow;
       hasRenderedPrompt = true;
-      moveCursor(output, 0, -1);
-      cursorTo(output, getInteractiveLivePromptColumn(promptView.line, promptView.cursor, currentOptions));
+      moveCursor(output, 0, -(layout.inputRows - layout.cursorRow));
+      cursorTo(output, layout.cursorColumn);
     };
     const onResize = () => {
       render();
@@ -1715,7 +1775,7 @@ export async function questionWithInteractiveFrame(
     };
     const onKeypress = (value: string, key: Key) => {
       if (key.ctrl && key.name === "c") {
-        clearInteractiveLivePromptBox(output);
+        clearInteractiveLivePromptBox(output, promptView);
         cleanup();
         onInterrupt();
         reject(new Error("readline was closed"));
@@ -1793,12 +1853,28 @@ export function formatInteractiveSubmittedUserTurn(input: string, options: { col
   return `\n${renderTuiUserTurn(userText, options)}\n\n`;
 }
 
-export function clearInteractiveSubmittedInputEcho(output: TerminalOutput): void {
-  clearInteractiveLivePromptBox(output);
+export function clearInteractiveSubmittedInputEcho(output: TerminalOutput, promptView?: ReadlinePromptView): void {
+  clearInteractiveLivePromptBox(output, promptView);
 }
 
-function clearInteractiveLivePromptBox(output: TerminalOutput): void {
+function clearInteractiveLivePromptBox(output: TerminalOutput, promptView?: ReadlinePromptView): void {
   if (!output.isTTY) {
+    return;
+  }
+  if (promptView) {
+    const inputRows = Math.max(1, promptView.renderedRows ?? 1);
+    const cursorRow = Math.max(0, Math.min(inputRows - 1, promptView.cursorRow ?? 0));
+    const totalRows = inputRows + 2;
+    moveCursor(output, 0, -(cursorRow + 1));
+    for (let index = 0; index < totalRows; index += 1) {
+      clearLine(output, 0);
+      cursorTo(output, 0);
+      if (index < totalRows - 1) {
+        moveCursor(output, 0, 1);
+      }
+    }
+    moveCursor(output, 0, -(totalRows - 1));
+    cursorTo(output, 0);
     return;
   }
   clearLine(output, 0);
@@ -1816,6 +1892,8 @@ function clearInteractiveLivePromptBox(output: TerminalOutput): void {
 type ReadlinePromptView = {
   line: string;
   cursor: number;
+  renderedRows?: number;
+  cursorRow?: number;
 };
 
 type TerminalOutput = NodeJS.WritableStream & {
@@ -1839,12 +1917,15 @@ export function createPromptSafeOutputWriter(
 
     const line = rl.line;
     const cursor = rl.cursor;
-    clearInteractiveSubmittedInputEcho(output);
+    clearInteractiveLivePromptBox(output, rl);
     output.write(`${text}\n`);
     const options = { color: true, width: output.columns };
-    output.write(formatInteractiveLivePromptArea(line, options));
-    moveCursor(output, 0, -1);
-    cursorTo(output, getInteractiveLivePromptColumn(line, cursor, options));
+    const layout = createInteractiveLivePromptLayout(line, cursor, options);
+    output.write(layout.area);
+    rl.renderedRows = layout.inputRows;
+    rl.cursorRow = layout.cursorRow;
+    moveCursor(output, 0, -(layout.inputRows - layout.cursorRow));
+    cursorTo(output, layout.cursorColumn);
   };
 }
 
@@ -2114,8 +2195,8 @@ export function formatFavoriteListChoiceSurface(selection: PendingFavoriteListSe
     ...(window.hiddenBelow > 0 ? [`... ${window.hiddenBelow} more below`] : []),
     "",
     selection.mode === "remove"
-      ? "↑↓ Select  |  Enter Delete  |  B Back  |  Esc Cancel"
-      : "↑↓ Select  |  Enter Play  |  D Delete  |  Esc Close"
+      ? "↑↓ Select  |  Enter Delete  |  B/Esc Back"
+      : "↑↓ Select  |  Enter Play  |  D Delete  |  B/Esc Close"
   ];
   return lines.join("\n");
 }
@@ -2397,8 +2478,8 @@ function formatSingleTrackChoiceSurface(selection: PendingSingleTrackSelection, 
     }),
     "",
     isVersionSelection
-      ? "↑↓ Select  |  Enter Switch  |  B Back  |  Esc Cancel"
-      : "↑↓ Select  |  Enter Play  |  B Back  |  Esc Cancel"
+      ? "↑↓ Select  |  Enter Switch  |  B/Esc Back"
+      : "↑↓ Select  |  Enter Play  |  B/Esc Back"
   ].join("\n");
 }
 
@@ -2417,7 +2498,7 @@ function formatSongOrStationChoiceSurface(selection: PendingSongOrStationSelecti
       width: defaultOutput.columns
     }),
     "",
-    "↑↓ Select  |  Enter Choose  |  B Back  |  Esc Cancel"
+    "↑↓ Select  |  Enter Choose  |  B/Esc Back"
   ].join("\n");
 }
 
@@ -2462,7 +2543,7 @@ function formatQueueToneChangeChoiceSurface(selection: PendingQueueToneChangeSel
       width: defaultOutput.columns
     }),
     "",
-    "↑↓ Select  |  Enter Choose  |  B Back  |  Esc Cancel"
+    "↑↓ Select  |  Enter Choose  |  B/Esc Back"
   ].join("\n");
 }
 
@@ -2998,6 +3079,7 @@ async function generateMusicRecommendationResponse(input: {
     `Weather listening hint: ${input.context?.weather?.listeningHint ?? "not available"}`,
     `Diary summary: ${input.context?.diary?.summary ?? "not available"}`,
     `Diary listening hint: ${input.context?.diary?.listeningHint ?? "not available"}`,
+    formatConversationTasteContext(input.config, input.userText),
     formatConversationPlaybackContext(input.playbackState),
     `User: ${input.userText}`
   ].join("\n");
@@ -3013,6 +3095,16 @@ async function generateMusicRecommendationResponse(input: {
       return appendPendingStationChoicePrompt(formatDjNoteSurface(text, input.config));
     }
     return appendPendingStationChoicePrompt(formatDjNoteSurface(formatTimeSafeRecommendationFallback(input.config), input.config));
+  }
+
+  const diaryBasedFallback = formatDiaryBasedRecommendationFallback(input.context, input.userText);
+  if (diaryBasedFallback) {
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(diaryBasedFallback, input.config));
+  }
+
+  const tasteBasedFallback = formatTasteBasedRecommendationFallback(input.config, input.userText);
+  if (tasteBasedFallback) {
+    return appendPendingStationChoicePrompt(formatDjNoteSurface(tasteBasedFallback, input.config));
   }
 
   return appendPendingStationChoicePrompt(formatDjNoteSurface([
@@ -3293,7 +3385,7 @@ async function handlePendingStationFollowup(input: {
     return appendPendingStationChoicePrompt(formatDjNoteSurface(sanitizeGeneratedDjCopy(result.value.trim(), input.config), input.config));
   }
 
-  return appendPendingStationChoicePrompt(formatDjNoteSurface(`Got it. I’ll shape it around: ${input.userText.trim()}.\n\nPlay this version?`, input.config));
+  return appendPendingStationChoicePrompt(formatDjNoteSurface(`${formatPendingStationRefinementFallback(input.userText)}\n\nPlay this version?`, input.config));
 }
 
 function isPendingStationQuestion(text: string): boolean {
@@ -3455,6 +3547,7 @@ function formatConversationPrompt(
     "Normal conversation is the default. Do not turn a question into playback unless the user explicitly asks you to play, start, queue, skip, pause, resume, or stop.",
     "For current-track questions, resolve references like 'the singer', 'this artist', 'she', 'he', 'they', 'this song', and 'this track' from the Current playback facts below.",
     "For artist or song background questions, answer from the current metadata and your general music knowledge. If you are not sure, say what is known from the listed metadata instead of inventing details.",
+    "For direct questions about the listener's taste, base the answer on Taste context and describe the style or listening pattern when taste context exists.",
     "For lyric requests, do not provide full copyrighted lyrics or offer to continue lyrics. You may provide a brief non-lyric summary, or at most one very short excerpt under 10 words when useful.",
     config ? formatLanguageInstruction(config) : "Reply in English by default, even if the user writes in another language. Preserve song titles and artist names as written.",
     "Do not act as a therapist, diagnose the user, or give life advice.",
@@ -3634,12 +3727,12 @@ function escapeRegExp(value: string): string {
 }
 
 function formatConversationTasteContext(config: PockedioConfig | undefined, userText: string): string {
-  if (!config || !isTasteInsightQuestion(userText) || !fs.existsSync(config.paths.taste)) {
+  if (!shouldUseTasteContext(userText)) {
     return "";
   }
 
-  const taste = fs.readFileSync(config.paths.taste, "utf8").trim();
-  if (!taste || !hasTasteSignals(config.paths.taste)) {
+  const taste = readTasteMarkdown(config);
+  if (!taste || !config || !hasTasteSignals(config.paths.taste)) {
     return "Taste context: no imported taste signals yet.";
   }
 
@@ -3711,6 +3804,20 @@ function isTasteInsightQuestion(text: string): boolean {
     && /\b(my taste|my music taste|taste for music|music taste|listening taste|what i like|what do i like)\b/.test(normalized);
 }
 
+function isTasteBasedListeningRequest(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return /\b(my taste|my music taste|music taste|listening taste|taste\.md|based on .*taste)\b/.test(normalized)
+    && /\b(suggest|recommend|what should i listen|listen to|music|songs|tracks|station|playlist|play)\b/.test(normalized);
+}
+
+function isDiaryBasedListeningRequest(text: string): boolean {
+  return /\b(mood|context|day|moment|vibe)\b/i.test(text);
+}
+
+function shouldUseTasteContext(text: string): boolean {
+  return isTasteInsightQuestion(text) || isTasteBasedListeningRequest(text);
+}
+
 function formatConversationPlaybackContext(playbackState: InteractivePlaybackState | undefined): string {
   const storedTracks = playbackState?.storedTracks ?? [];
   const currentIndex = playbackState?.currentIndex;
@@ -3739,6 +3846,11 @@ function formatConversationFallback(userText: string, playbackState: Interactive
       "I can still build stations, play music, control playback, show the queue, and make spoken DJ station versions if voice is configured.",
       "Deeper conversation and personal context may be limited until the LLM is available."
     ].join(" ");
+  }
+
+  const tasteInsight = formatTasteInsightFallback(config, userText);
+  if (tasteInsight) {
+    return tasteInsight;
   }
 
   const current = playbackState?.currentIndex === undefined
@@ -3772,6 +3884,141 @@ function formatConversationFallback(userText: string, playbackState: Interactive
     return "I hear that. I will treat it as part of your listening taste, especially when you ask for a station later.";
   }
   return "I hear you. I can keep talking about the music, help shape a station, or respond to what this listening moment brings up.";
+}
+
+function formatTasteInsightFallback(config: PockedioConfig | undefined, userText: string): string | null {
+  if (!isTasteInsightQuestion(userText)) {
+    return null;
+  }
+
+  const summary = buildTasteStyleSummary(config);
+  if (!summary) {
+    return "I do not have enough saved taste data yet. Import a playlist or react during playback, then I can describe your listening style from taste.md.";
+  }
+
+  return `Based on taste.md, ${summary.styleSentence}.${summary.anchorSentence ? ` ${summary.anchorSentence}` : ""}`;
+}
+
+function formatTasteBasedRecommendationFallback(config: PockedioConfig, userText: string): string | null {
+  if (!isTasteBasedListeningRequest(userText)) {
+    return null;
+  }
+
+  const summary = buildTasteStyleSummary(config);
+  if (!summary) {
+    return [
+      "I do not have enough saved taste data yet, so I would start with a gentle discovery station.",
+      "",
+      "Want me to build that station?"
+    ].join("\n");
+  }
+
+  return [
+    `Based on taste.md, ${summary.styleSentence}.`,
+    "I would start with a warm, low-pressure station that keeps those anchors in view instead of jumping to a random genre.",
+    "",
+    "Want me to build that station?"
+  ].join("\n");
+}
+
+function formatDiaryBasedRecommendationFallback(
+  context: Partial<PockedioContext> | undefined,
+  userText: string
+): string | null {
+  if (!isDiaryBasedListeningRequest(userText)) {
+    return null;
+  }
+
+  const hint = context?.diary?.listeningHint?.trim();
+  if (!hint || /^diary listening hint unavailable/i.test(hint)) {
+    return null;
+  }
+
+  return [
+    `I’m using the diary signal from your recent entry: ${hint}`,
+    "I’d build a five-track station around that mood.",
+    "",
+    "Want me to build that station?"
+  ].join("\n");
+}
+
+function buildTasteStyleSummary(config: PockedioConfig | undefined): { styleSentence: string; anchorSentence: string } | null {
+  const taste = readTasteMarkdown(config);
+  if (!taste || !config || !hasTasteSignals(config.paths.taste)) {
+    return null;
+  }
+
+  const style = inferTasteStyleDescriptors(taste);
+  const anchors = extractTasteAnchors(taste);
+  const styleSentence = style.length > 0
+    ? `your saved taste leans toward ${formatNaturalList(style)}`
+    : "your saved taste is anchored by the artists and tracks in taste.md";
+  const anchorSentence = anchors.length > 0
+    ? `Anchors I see: ${anchors.join("; ")}.`
+    : "";
+  return { styleSentence, anchorSentence };
+}
+
+function inferTasteStyleDescriptors(markdown: string): string[] {
+  const normalized = markdown.toLowerCase();
+  const descriptors: Array<[string, RegExp]> = [
+    ["spacious instrumental music", /\b(instrumental|sakamoto|r[a-z]*yuichi|piano|composer|classical)\b/],
+    ["ambient texture", /\b(ambient|brian eno|eno|ascent|drone|soundscape)\b/],
+    ["cinematic or reflective pieces", /\b(cinematic|film|score|soundtrack|christmas mr\.? lawrence|reflective)\b/],
+    ["soft jazz or bossa colors", /\b(jazz|bossa|lisa ono|小野リサ)\b/],
+    ["warm soul and R&B", /\b(soul|r&b|rnb|leon bridges|mick)\b/],
+    ["low-pressure focus listening", /\b(focus|work|reading|study|deep work|low-pressure|patient)\b/],
+    ["downtempo electronic mood", /\b(downtempo|electronic|lo-fi|lofi|trip hop)\b/]
+  ];
+  return descriptors
+    .filter(([, pattern]) => pattern.test(normalized))
+    .map(([label]) => label)
+    .slice(0, 4);
+}
+
+function extractTasteAnchors(markdown: string): string[] {
+  const explicitAnchors = markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.replace(/^- /, "").trim())
+    .filter((line) => line && !/^no\s+/i.test(line))
+    .filter((line) => !/^last import:/i.test(line))
+    .filter((line) => !/^imported tracks:\s*\d+/i.test(line))
+    .filter((line) => !/^generated from/i.test(line))
+    .filter((line) => !/^add durable/i.test(line))
+    .filter((line) => !/^add negative/i.test(line))
+    .filter((line) => !/^add situational/i.test(line))
+    .map((line) => line.replace(/\s+\([^)]*\)$/u, "").trim())
+    .filter(Boolean);
+
+  return [...new Set(explicitAnchors)].slice(0, 4);
+}
+
+function formatNaturalList(values: string[]): string {
+  if (values.length <= 1) {
+    return values[0] ?? "";
+  }
+  if (values.length === 2) {
+    return `${values[0]} and ${values[1]}`;
+  }
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
+}
+
+function formatPendingStationRefinementFallback(userText: string): string {
+  const normalized = userText
+    .trim()
+    .replace(/[.。！？!?]+$/u, "")
+    .replace(/\brandom musics\b/gi, "random music")
+    .replace(/\bbased on my mood\b/gi, "based on your mood")
+    .replace(/\bbased on my taste\b/gi, "based on your taste");
+  if (/\bbased on your mood\b/i.test(normalized)) {
+    return "Got it. I’ll shape this around your mood.";
+  }
+  if (/\bbased on your taste\b/i.test(normalized)) {
+    return "Got it. I’ll shape this around your taste.";
+  }
+  return `Got it. I’ll shape it around: ${normalized}.`;
 }
 
 function maybeStorePendingStationFromConversationOffer(
@@ -3926,6 +4173,8 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
   playbackState.writeOutput = createPromptSafeOutputWriter(livePromptView, defaultOutput, () => playbackState.isAwaitingInput === true);
   runMigrations(config);
   const store = new MemoryStore(config);
+  store.cleanupExpiredDjAudioCache();
+  store.cleanupOrphanedDjAudioFiles(config.paths.djAudioDir);
   const sessionId = store.createSession("conversation", "interactive session");
   const startingTasteSignalCount = store.getTasteSignalCount();
   store.close();
@@ -3964,7 +4213,7 @@ export async function runInteractiveSession(config: PockedioConfig = loadConfig(
           width: defaultOutput.columns
         });
         if (!usesSingleTrackInlinePicker && !usesSongOrStationInlinePicker && !usesQueueToneChangeInlinePicker && !usesFavoriteListInlinePicker) {
-          clearInteractiveSubmittedInputEcho(defaultOutput);
+          clearInteractiveSubmittedInputEcho(defaultOutput, livePromptView);
         }
         if (submittedTurn) {
           defaultOutput.write(submittedTurn);
@@ -4683,10 +4932,12 @@ async function generateStationDjProgramIntro(input: {
   }
 
   const playback = await input.playFile(djAudio.audioPath);
-  input.store.recordDjAudio(input.sessionId, "explicit", null, text, djAudio.audioPath, playback.ok ? "played" : "failed", {
+  const fileSizeBytes = getFileSize(djAudio.audioPath);
+  const storedAudioPath = releasePlayedDjAudioPath(djAudio.audioPath, playback.ok);
+  input.store.recordDjAudio(input.sessionId, "explicit", null, text, storedAudioPath, playback.ok ? "played" : "failed", {
     cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
     latencyMs: djAudio.latencyMs,
-    fileSizeBytes: getFileSize(djAudio.audioPath)
+    fileSizeBytes
   });
 
   return {
@@ -4695,9 +4946,9 @@ async function generateStationDjProgramIntro(input: {
       playback.ok ? "" : `Playback detail: ${playback.error ?? "DJ intro playback failed."}`
     ].filter(Boolean).join("\n"),
     rawText: text,
-    audioPath: playback.ok ? undefined : djAudio.audioPath,
+    audioPath: playback.ok ? undefined : storedAudioPath ?? undefined,
     latencyMs: djAudio.latencyMs,
-    fileSizeBytes: getFileSize(djAudio.audioPath)
+    fileSizeBytes
   };
 }
 
@@ -4711,6 +4962,32 @@ type GeneratedDjProgramIntro = {
 
 function getExplicitDjAudioCacheExpiresAt(): string {
   return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function releasePlayedDjAudioPath(audioPath: string, played: boolean, env: NodeJS.ProcessEnv = process.env): string | null {
+  if (!played || shouldKeepDjAudioFiles(env)) {
+    return audioPath;
+  }
+  try {
+    fs.unlinkSync(audioPath);
+    return null;
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+    return audioPath;
+  }
+}
+
+function shouldKeepDjAudioFiles(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(1|true|yes)$/i.test(env.POCKEDIO_KEEP_DJ_AUDIO?.trim() ?? "");
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
 function getFileSize(filePath: string): number | null {
@@ -4834,6 +5111,7 @@ function stopActivePlayback(playbackState: InteractivePlaybackState, store: Memo
   if (!playbackState.activePlayback) {
     return;
   }
+  invalidatePlaybackGeneration(playbackState);
   const activePlayback = playbackState.activePlayback;
   playbackState.activePlayback = undefined;
   if (playbackState.currentTrackId) {
@@ -4845,6 +5123,18 @@ function stopActivePlayback(playbackState: InteractivePlaybackState, store: Memo
   playbackState.currentStartedAt = undefined;
   playbackState.recentSingleTrackSelection = undefined;
   activePlayback.stop();
+}
+
+function invalidatePlaybackGeneration(playbackState: InteractivePlaybackState): void {
+  playbackState.playbackGeneration = (playbackState.playbackGeneration ?? 0) + 1;
+}
+
+function isPlaybackGenerationSuperseded(
+  playbackState: InteractivePlaybackState,
+  expectedPlaybackGeneration: number | undefined
+): boolean {
+  return expectedPlaybackGeneration !== undefined
+    && playbackState.playbackGeneration !== expectedPlaybackGeneration;
 }
 
 function cancelDjProgramPreparations(playbackState: InteractivePlaybackState | undefined): void {
@@ -4867,6 +5157,7 @@ async function advancePlayback(
   provider: MusicProvider,
   startUrlPlayback: StartUrlPlayback
 ): Promise<string> {
+  invalidatePlaybackGeneration(playbackState);
   const nextIndex = findNextPlayableIndex(playbackState, playbackState.currentIndex ?? -1);
   const activePlayback = playbackState.activePlayback;
   playbackState.activePlayback = undefined;
@@ -4916,6 +5207,7 @@ async function retreatPlayback(
     return "No previous track is available right now.";
   }
 
+  invalidatePlaybackGeneration(playbackState);
   const activePlayback = playbackState.activePlayback;
   playbackState.activePlayback = undefined;
   playbackState.activePlaybackPaused = undefined;
@@ -4942,6 +5234,7 @@ async function playQueuedTrackAt(
     return "That queue position is not playable right now.";
   }
 
+  invalidatePlaybackGeneration(playbackState);
   const activePlayback = playbackState.activePlayback;
   playbackState.activePlayback = undefined;
   playbackState.activePlaybackPaused = undefined;
@@ -4973,6 +5266,7 @@ async function replayCurrentTrack(
     return "The current track is not playable right now.";
   }
 
+  invalidatePlaybackGeneration(playbackState);
   const activePlayback = playbackState.activePlayback;
   playbackState.activePlayback = undefined;
   playbackState.activePlaybackPaused = undefined;
@@ -5053,8 +5347,12 @@ async function startTrackAt(
     startDuckedIntroPlayback?: StartDuckedIntroPlayback;
     preserveFailureCount?: boolean;
     skipUrlRefreshFailures?: boolean;
+    expectedPlaybackGeneration?: number;
   } = {}
 ): Promise<string> {
+  if (isPlaybackGenerationSuperseded(playbackState, options.expectedPlaybackGeneration)) {
+    return PLAYBACK_TRANSITION_SUPERSEDED;
+  }
   const storedTracks = playbackState.storedTracks ?? [];
   const nextIndex = storedTracks.findIndex((entry, index) => index >= startIndex && entry.track.playable.available);
   if (nextIndex === -1) {
@@ -5093,6 +5391,9 @@ async function startTrackAt(
     return startTrackAt(playbackState, config, store, provider, nextIndex + 1, startUrlPlayback, now, options);
   }
   entry.track.playable = refreshed;
+  if (isPlaybackGenerationSuperseded(playbackState, options.expectedPlaybackGeneration)) {
+    return PLAYBACK_TRANSITION_SUPERSEDED;
+  }
 
   let handle: PlaybackHandle;
   try {
@@ -5109,6 +5410,10 @@ async function startTrackAt(
     playbackState.activePlaybackPaused = undefined;
     return formatTrackStartFailure(entry.track, reason);
   }
+  if (isPlaybackGenerationSuperseded(playbackState, options.expectedPlaybackGeneration)) {
+    handle.stop();
+    return PLAYBACK_TRANSITION_SUPERSEDED;
+  }
   playbackState.lastIntroPlaybackResult = handle.introResult;
   if (options.intro?.audioPath) {
     recordDjProgramIntroPlayback(store, playbackState.djProgram?.sessionId, options.intro, handle.introResult);
@@ -5118,6 +5423,8 @@ async function startTrackAt(
   playbackState.currentStartedAt = now();
   playbackState.activePlayback = handle;
   playbackState.activePlaybackPaused = false;
+  const playbackGeneration = playbackState.playbackGeneration ?? 0;
+  playbackState.playbackGeneration = playbackGeneration;
   if (!options.preserveFailureCount) {
     playbackState.consecutivePlaybackFailures = 0;
   }
@@ -5126,7 +5433,7 @@ async function startTrackAt(
   }
   prepareNextDjIntro(playbackState, config, nextIndex + 1);
   handle.done.then((result) => {
-    if (playbackState.activePlayback !== handle) {
+    if (playbackState.activePlayback !== handle || playbackState.playbackGeneration !== playbackGeneration) {
       return;
     }
     if (playbackState.activePlaybackPaused) {
@@ -5138,7 +5445,7 @@ async function startTrackAt(
       return;
     }
     playbackState.consecutivePlaybackFailures = 0;
-    void autoAdvancePlayback(playbackState, config, provider, entry.dbId, nextIndex + 1, startUrlPlayback);
+    void autoAdvancePlayback(playbackState, config, provider, entry.dbId, nextIndex + 1, startUrlPlayback, playbackGeneration);
   }).catch(() => undefined);
   updateStoredTrackPlayback(store, entry, "playing");
   return [
@@ -5240,17 +5547,25 @@ async function autoAdvancePlayback(
   provider: MusicProvider,
   completedTrackId: string,
   startIndex: number,
-  startUrlPlayback: StartUrlPlayback
+  startUrlPlayback: StartUrlPlayback,
+  expectedPlaybackGeneration: number
 ): Promise<void> {
   const store = new MemoryStore(config);
   try {
+    if (isPlaybackGenerationSuperseded(playbackState, expectedPlaybackGeneration)) {
+      return;
+    }
     updateStoredTrackPlaybackById(playbackState, store, completedTrackId, "played");
     const preparedIntro = getPreparedDjIntro(playbackState, startIndex);
     const response = await startTrackAt(playbackState, config, store, provider, startIndex, startUrlPlayback, () => new Date(), {
       intro: preparedIntro,
       startDuckedIntroPlayback: playbackState.startDuckedIntroPlayback,
-      skipUrlRefreshFailures: true
+      skipUrlRefreshFailures: true,
+      expectedPlaybackGeneration
     });
+    if (response === PLAYBACK_TRANSITION_SUPERSEDED) {
+      return;
+    }
     if (!responseReachedNoPlayableTracks(response)) {
       storePlaybackOutputMessage(store, playbackState, response);
       emitPlaybackOutput(playbackState, response);
@@ -5531,7 +5846,8 @@ function recordDjProgramIntroPlayback(
   if (!sessionId || !intro.audioPath) {
     return;
   }
-  store.recordDjAudio(sessionId, "explicit", null, intro.rawText, intro.audioPath, playback?.ok ? "played" : "failed", {
+  const storedAudioPath = releasePlayedDjAudioPath(intro.audioPath, playback?.ok === true);
+  store.recordDjAudio(sessionId, "explicit", null, intro.rawText, storedAudioPath, playback?.ok ? "played" : "failed", {
     cacheExpiresAt: getExplicitDjAudioCacheExpiresAt(),
     latencyMs: intro.latencyMs,
     fileSizeBytes: intro.fileSizeBytes

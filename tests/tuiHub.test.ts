@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ensureRuntimeDirs, loadConfig } from "../src/config/load.js";
 import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { importTaste } from "../src/taste/importTaste.js";
-import { applyContextSetupKey, applyDjVoiceChooserKey, applyDjVoiceChooserNumberInput, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveContextSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderContextSetupSurface, renderDjVoiceChooserSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderTasteSummarySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
+import { applyContextSetupKey, applyDjVoiceChooserKey, applyDjVoiceChooserNumberInput, applyLlmProviderKey, applyLlmSetupKey, applyTasteMemoryKey, applyVoiceSetupKey, buildWelcomeReadiness, inferLlmSetupAction, resolveContextSetupAction, resolveDefaultEntryMode, resolveLlmProviderAction, resolveLlmSetupAction, resolveSetupConnectionsAction, resolveTasteMemoryAction, resolveVoiceSetupAction, resolveWelcomeHubAction, renderContextSetupSurface, renderDjVoiceChooserSurface, renderFishApiCloudSetupSurface, renderFishVoiceChoiceSurface, renderLlmProviderSurface, renderLlmSetupSurface, renderSetupConnectionsSurface, renderTasteImportResultSurface, renderTasteMemorySurface, renderTasteSummarySurface, renderVoiceSetupSurface, renderWelcomeHub } from "../src/tui/welcomeHub.js";
 
 function makeConfig() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-tui-test-"));
@@ -80,7 +80,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(text).toContain("POCKEDIO");
     expect(text).toContain("https://github.com/wyLeon/Pockedio");
     expect(text).toContain("Music tuned to the moment.");
-    expect(text).toContain("v0.4.0");
+    expect(text).toContain("v0.5.0");
     expect(text).toContain("Session Flow");
     expect(text).toContain("> 1. Enter DJ Session");
     expect(text).toContain("2. Setup & Connections");
@@ -109,7 +109,7 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(stripAnsi(hub)).toContain("POCKEDIO");
     expect(stripAnsi(hub)).toContain("https://github.com/wyLeon/Pockedio");
-    expect(stripAnsi(hub)).toContain("v0.4.0");
+    expect(stripAnsi(hub)).toContain("v0.5.0");
     expect(stripAnsi(hub)).not.toContain("█");
     expect(stripAnsi(hub)).toContain("SESSION FLOW");
     expect(hub).toMatch(/\u001b\[[0-9;]*38;5;116mREADINESS\u001b\[0m/);
@@ -180,8 +180,8 @@ describe("MOLE-inspired welcome hub", () => {
     expect(voice).toContain("Voice");
     expect(voice).toContain("Provider        Built-in macOS voice");
     expect(voice).toContain("Voice           Vale");
-    expect(voice).toContain("> 1. Choose DJ voice");
-    expect(voice).toContain("Configure Fish TTS");
+    expect(voice).toContain("1. Fish Audio Cloud");
+    expect(voice).toContain("2. Fish Local Model");
   });
 
   it("moves the visible cursor inside setup actions and routes setup shortcuts", () => {
@@ -192,7 +192,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(setup).toContain("▌ > 3. Configure Voice");
     expect(setup).toContain("\x1B[7m▌ > 3. Configure Voice");
     expect(setup).toContain("    6. Configure Scheduled DJ");
-    expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
+    expect(setup).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveSetupConnectionsAction("1")).toBe("full_setup");
     expect(resolveSetupConnectionsAction("2")).toBe("llm_setup");
     expect(resolveSetupConnectionsAction("3")).toBe("voice_setup");
@@ -201,6 +201,10 @@ describe("MOLE-inspired welcome hub", () => {
     expect(resolveSetupConnectionsAction("6")).toBe("scheduler_setup");
     expect(resolveSetupConnectionsAction("schedule")).toBe("scheduler_setup");
     expect(resolveSetupConnectionsAction("b")).toBe("back");
+    expect(applyContextSetupKey("weather", { name: "escape" })).toEqual({
+      selectedAction: "back",
+      submittedAction: "back"
+    });
   });
 
   it("renders real Context setup actions for calendar, weather, and diary", () => {
@@ -220,7 +224,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(context).toContain("    1. Configure Calendar");
     expect(context).toContain("▌ > 2. Configure Weather");
     expect(context).toContain("3. Configure Diary");
-    expect(context).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B Back  |  Q Quit");
+    expect(context).toContain("↑↓ Select  |  Enter Open  |  1-3 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveContextSetupAction("1")).toBe("calendar");
     expect(resolveContextSetupAction("2")).toBe("weather");
     expect(resolveContextSetupAction("3")).toBe("diary");
@@ -241,7 +245,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(llm).toContain("▌ > 4. Use local vLLM");
     expect(llm).toContain("CURRENT");
     expect(llm).toContain("OpenAI-compatible");
-    expect(llm).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B Back  |  Q Quit");
+    expect(llm).toContain("↑↓ Select  |  Enter Open  |  1-6 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveLlmSetupAction("1")).toBe("openai");
     expect(resolveLlmSetupAction("2")).toBe("deepseek");
     expect(resolveLlmSetupAction("3")).toBe("openrouter");
@@ -266,7 +270,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(openai).toContain("3. Change model");
     expect(openai).toContain("4. Test connection");
     expect(openai).not.toContain("5. Back");
-    expect(openai).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit");
+    expect(openai).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveLlmProviderAction("1", "openai")).toBe("paste_key");
     expect(resolveLlmProviderAction("2", "openai")).toBe("use_shell_env");
     expect(resolveLlmProviderAction("3", "openai")).toBe("change_model");
@@ -370,22 +374,63 @@ describe("MOLE-inspired welcome hub", () => {
 
   it("moves and submits Voice setup actions", () => {
     const { config } = makeConfig();
-    const voice = renderVoiceSetupSurface({ config, platform: "darwin" }, { selectedAction: "kokoro_tts" });
+    const voice = renderVoiceSetupSurface({ config, platform: "darwin" }, { selectedAction: "fish_tts" });
 
-    expect(voice).toContain("    1. Choose DJ voice");
-    expect(voice).toContain("▌ > 2. Configure Kokoro TTS");
-    expect(voice).toContain("    3. Configure Fish TTS");
-    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-4 Open  |  B Back  |  Q Quit");
-    expect(resolveVoiceSetupAction("1")).toBe("choose_voice");
-    expect(resolveVoiceSetupAction("2")).toBe("kokoro_tts");
-    expect(resolveVoiceSetupAction("3")).toBe("fish_tts");
-    expect(resolveVoiceSetupAction("4")).toBe("text_only");
-    expect(resolveVoiceSetupAction("5")).toBeUndefined();
-    expect(applyVoiceSetupKey("choose_voice", { name: "down" })).toEqual({ selectedAction: "kokoro_tts" });
-    expect(applyVoiceSetupKey("fish_tts", { name: "return" })).toEqual({
-      selectedAction: "fish_tts",
-      submittedAction: "fish_tts"
+    expect(voice).toContain("    1. Fish Audio Cloud");
+    expect(voice).toContain("▌ > 2. Fish Local Model");
+    expect(voice).not.toContain("Choose DJ voice");
+    expect(voice).not.toContain("Configure Kokoro TTS");
+    expect(voice).not.toContain("Use text-only DJ copy");
+    expect(voice).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B/Esc Back  |  Q Quit");
+    expect(resolveVoiceSetupAction("1")).toBe("fish_api_tts");
+    expect(resolveVoiceSetupAction("2")).toBe("fish_tts");
+    expect(resolveVoiceSetupAction("3")).toBeUndefined();
+    expect(resolveVoiceSetupAction("fish api")).toBe("fish_api_tts");
+    expect(resolveVoiceSetupAction("cloud")).toBe("fish_api_tts");
+    expect(resolveVoiceSetupAction("local")).toBe("fish_tts");
+    expect(applyVoiceSetupKey("fish_api_tts", { name: "down" })).toEqual({ selectedAction: "fish_tts" });
+    expect(applyVoiceSetupKey("fish_api_tts", { name: "return" })).toEqual({
+      selectedAction: "fish_api_tts",
+      submittedAction: "fish_api_tts"
     });
+    expect(applyVoiceSetupKey("fish_api_tts", { name: "escape" })).toEqual({
+      selectedAction: "back",
+      submittedAction: "back"
+    });
+  });
+
+  it("keeps Fish Audio Cloud setup focused on API key and engine test only", () => {
+    const { config, env } = makeConfig();
+    const cloud = renderFishApiCloudSetupSurface(config, 1, {}, env);
+
+    expect(cloud).toContain("FISH AUDIO CLOUD");
+    expect(cloud).toContain("API key");
+    expect(cloud).toContain("Missing: FISH_API_KEY");
+    expect(cloud).toContain("Voice models");
+    expect(cloud).toContain("Built in");
+    expect(cloud).toContain("1. Paste API key");
+    expect(cloud).toContain("2. Test Fish Audio Cloud");
+    expect(cloud).not.toContain("Use Mina");
+    expect(cloud).not.toContain("Use Nova");
+    expect(cloud).not.toContain("reference id");
+    expect(cloud).not.toContain("Advanced Fish API settings");
+    expect(cloud).not.toContain("Base URL");
+    expect(cloud).toContain("1-2 Open");
+  });
+
+  it("renders a Fish-only Mina/Nova picker after engine setup", () => {
+    const picker = renderFishVoiceChoiceSurface("Fish Audio Cloud", "mina", 2);
+
+    expect(picker).toContain("CHOOSE FISH AUDIO CLOUD VOICE");
+    expect(picker).toContain("VOICES");
+    expect(picker).toContain("1. Mina");
+    expect(picker).toContain("current");
+    expect(picker).toContain("▌ > 2. Nova");
+    expect(picker).toContain("available");
+    expect(picker).not.toContain("BUILT-IN VOICES");
+    expect(picker).not.toContain("FAST LOCAL VOICES");
+    expect(picker).not.toContain("STUDIO VOICES");
+    expect(picker).toContain("1-2 Save");
   });
 
   it("renders the combined DJ voice chooser and routes preview/save keys", () => {
@@ -401,7 +446,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(chooser).toContain("STUDIO VOICES");
     expect(chooser).toContain("▌ > 14. Mina");
     expect(chooser).toContain("needs Fish TTS setup");
-    expect(chooser).toContain("Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B Back");
+    expect(chooser).toContain("Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B/Esc Back");
     expect(applyDjVoiceChooserKey("macos:vale", { name: "down" })).toEqual({ selectedVoice: "macos:sol" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "space" })).toEqual({ selectedVoice: "macos:vale", submit: "preview" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "return" })).toEqual({ selectedVoice: "macos:vale", submit: "save" });
@@ -409,6 +454,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(applyDjVoiceChooserNumberInput("14")).toBe("fish:mina");
     expect(applyDjVoiceChooserKey("macos:vale", { name: "k" })).toEqual({ selectedVoice: "macos:vale", submit: "kokoro_setup" });
     expect(applyDjVoiceChooserKey("macos:vale", { name: "f" })).toEqual({ selectedVoice: "macos:vale", submit: "fish_setup" });
+    expect(applyDjVoiceChooserKey("macos:vale", { name: "escape" })).toEqual({ selectedVoice: "macos:vale", submit: "back" });
   });
 
   it("renders selected voice provider and voice from TTS config", () => {
@@ -440,10 +486,21 @@ describe("MOLE-inspired welcome hub", () => {
         fishVoice: "mina" as const
       }
     };
+    const fishApiConfig = {
+      ...config,
+      tts: {
+        provider: "fish_api" as const,
+        macosVoice: "vale" as const,
+        kokoroVoice: "af_nicole" as const,
+        fishVoice: "mina" as const
+      }
+    };
 
     expect(renderVoiceSetupSurface({ config: macosConfig, platform: "darwin" })).toContain("Voice           Sable");
     expect(renderVoiceSetupSurface({ config: kokoroConfig, platform: "darwin" })).toContain("Voice           George");
     expect(renderVoiceSetupSurface({ config: textConfig, platform: "darwin" })).toContain("Provider        Text-only DJ copy");
+    expect(renderVoiceSetupSurface({ config: fishApiConfig, platform: "darwin" })).toContain("Provider        Fish API");
+    expect(renderVoiceSetupSurface({ config: fishApiConfig, platform: "darwin" })).toContain("Voice           Mina");
   });
 
   it("renders Taste & Memory summary and post-import result surfaces", () => {
@@ -463,7 +520,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(imported).not.toContain("Taste profile needs refresh");
     expect(imported).not.toContain("Rebuild taste profile");
     expect(imported).not.toContain("Start station");
-    expect(imported).toContain("Press Enter to return to Taste & Memory.");
+    expect(imported).toContain("Enter Continue");
 
     const summary = renderTasteSummarySurface({ config });
     expect(summary).toContain("TASTE SUMMARY");
@@ -491,7 +548,7 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(taste).toContain("    1. Import playlist");
     expect(taste).toContain("▌ > 2. Show taste summary");
-    expect(taste).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B Back  |  Q Quit");
+    expect(taste).toContain("↑↓ Select  |  Enter Open  |  1-2 Open  |  B/Esc Back  |  Q Quit");
     expect(resolveTasteMemoryAction("1")).toBe("import");
     expect(resolveTasteMemoryAction("2")).toBe("show_summary");
     expect(resolveTasteMemoryAction("3")).toBeUndefined();

@@ -21,6 +21,7 @@ Pockedio sends data outside your machine only when you configure or enable featu
 
 - LLM provider: conversation text, station planning prompts, DJ copy prompts, and enabled context summaries.
 - NetEase adapter: search terms, track IDs, and account-backed cookie requests if you configure account playback.
+- Fish Audio API: DJ spoken text when `tts.provider` is set to `fish_api`.
 - Open-Meteo: weather location lookup when weather context is enabled.
 - Apple Calendar and diary access: read locally first; summaries may be included in LLM prompts when the related feature is enabled.
 

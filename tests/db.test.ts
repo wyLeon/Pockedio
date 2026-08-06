@@ -477,6 +477,36 @@ describe("database migrations", () => {
     });
   });
 
+  it("cleans old orphaned DJ audio files without deleting referenced or fresh files", () => {
+    const config = makeConfig();
+    fs.mkdirSync(config.paths.djAudioDir, { recursive: true });
+    const orphanPath = path.join(config.paths.djAudioDir, "orphan.mp3");
+    const referencedPath = path.join(config.paths.djAudioDir, "referenced.mp3");
+    const freshPath = path.join(config.paths.djAudioDir, "fresh.mp3");
+    fs.writeFileSync(orphanPath, "orphan");
+    fs.writeFileSync(referencedPath, "referenced");
+    fs.writeFileSync(freshPath, "fresh");
+    const oldDate = new Date("2026-05-17T00:00:00.000Z");
+    fs.utimesSync(orphanPath, oldDate, oldDate);
+    fs.utimesSync(referencedPath, oldDate, oldDate);
+
+    withDatabase(config, (db) => {
+      const store = new MemoryStore(db);
+      const sessionId = store.createSession("explicit_dj_audio", "make me a DJ intro");
+      store.recordDjAudio(sessionId, "explicit", null, "Keep this file.", referencedPath, "played");
+
+      const result = store.cleanupOrphanedDjAudioFiles(config.paths.djAudioDir, {
+        now: new Date("2026-05-19T00:00:00.000Z"),
+        minAgeMs: 24 * 60 * 60 * 1000
+      });
+
+      expect(result).toEqual({ filesDeleted: 1 });
+      expect(fs.existsSync(orphanPath)).toBe(false);
+      expect(fs.existsSync(referencedPath)).toBe(true);
+      expect(fs.existsSync(freshPath)).toBe(true);
+    });
+  });
+
   it("rejects orphan messages through foreign key constraints", () => {
     const config = makeConfig();
     const db = openDatabase(config);

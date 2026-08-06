@@ -3,8 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/load.js";
+import { saveLlmApiKey } from "../src/config/llmSecrets.js";
 import { shouldUseSpokenDjAudio } from "../src/dj/voiceRules.js";
 import { synthesizeFishAudio, type FishAudioProcessRunner } from "../src/tts/fishAudio.js";
+import { synthesizeFishApiAudio, type FishApiFetch } from "../src/tts/fishApiAudio.js";
 import { synthesizeDjAudio, type DjAudioProcessRunner } from "../src/tts/djAudio.js";
 import { synthesizeKokoroAudio, type KokoroAudioProcessRunner } from "../src/tts/kokoroAudio.js";
 
@@ -144,6 +146,198 @@ describe("KokoroAudio adapter", () => {
   });
 });
 
+describe("Fish API adapter", () => {
+  it("writes generated MP3 bytes when Fish API succeeds", async () => {
+    const config = makeConfig();
+    config.tts.fishVoice = "mina";
+    config.fishApi.referenceIds.mina = "mina-reference";
+    const previewDir = path.join(path.dirname(config.paths.djAudioDir), "previews");
+    const referencePath = path.join(previewDir, "mina.wav");
+    const fishReferencePath = path.join(previewDir, "mina-fish-ref.wav");
+    fs.mkdirSync(previewDir, { recursive: true });
+    fs.writeFileSync(referencePath, "wav-reference");
+    fs.writeFileSync(fishReferencePath, "fish-ref-reference");
+    let observedUrl = "";
+    let observedHeaders: HeadersInit | undefined;
+    let observedBody: BodyInit | null | undefined;
+    const fetchImpl: FishApiFetch = async (url, init) => {
+      observedUrl = String(url);
+      observedHeaders = init?.headers;
+      observedBody = init?.body;
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedUrl).toBe("https://api.fish.audio/v1/tts");
+    expect(observedHeaders).toMatchObject({
+      Authorization: "Bearer fish-test-key",
+      "Content-Type": "application/msgpack",
+      model: "s2.1-pro-free"
+    });
+    expect(Buffer.isBuffer(observedBody)).toBe(true);
+    const body = observedBody as Buffer;
+    expect(body.includes(Buffer.from("reference_id"))).toBe(false);
+    expect(body.includes(Buffer.from("references"))).toBe(true);
+    expect(body.includes(Buffer.from("wav-reference"))).toBe(true);
+    expect(body.includes(Buffer.from("fish-ref-reference"))).toBe(true);
+    expect(body.includes(Buffer.from("[soft young voice][warm tone][low volume] Welcome back."))).toBe(true);
+    expect(body.includes(Buffer.from("Welcome back. I picked a warmer five-track set for this station."))).toBe(true);
+    expect(body.includes(Buffer.from("Mina is here. Soft lights, warm songs, and room to breathe."))).toBe(true);
+    if (result.ok) {
+      expect(result.audioPath).toMatch(/\.mp3$/);
+      expect(fs.readFileSync(result.audioPath, "utf8")).toBe("mp3");
+    }
+  });
+
+  it("fails before the network call when the Fish API key is missing", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let called = false;
+    const fetchImpl: FishApiFetch = async () => {
+      called = true;
+      return new Response("should not happen", { status: 500 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: {}
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("FISH_API_KEY");
+    expect(called).toBe(false);
+  });
+
+  it("uses a pasted local Fish API key when the shell env is absent", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    saveLlmApiKey(config, "FISH_API_KEY", "fish-local-key");
+    let observedHeaders: HeadersInit | undefined;
+    const fetchImpl: FishApiFetch = async (_url, init) => {
+      observedHeaders = init?.headers;
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: {}
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedHeaders).toMatchObject({
+      Authorization: "Bearer fish-local-key"
+    });
+  });
+
+  it("returns safe HTTP failure details from Fish API", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    const fetchImpl: FishApiFetch = async () => new Response("payment required", { status: 402 });
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("HTTP 402");
+    expect(result.error).toContain("payment required");
+  });
+
+  it("retries transient Fish API fetch failures before falling back", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let calls = 0;
+    const fetchImpl: FishApiFetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error("fetch failed");
+      }
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" },
+      retryDelayMs: () => 0,
+      sleep: async () => undefined
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("retries transient Fish API HTTP 5xx failures", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let calls = 0;
+    const fetchImpl: FishApiFetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response("temporary outage", { status: 502 });
+      }
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" },
+      retryDelayMs: () => 0,
+      sleep: async () => undefined
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("does not retry Fish API authorization failures", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let calls = 0;
+    const fetchImpl: FishApiFetch = async () => {
+      calls += 1;
+      return new Response("unauthorized", { status: 401 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" },
+      retryDelayMs: () => 0,
+      sleep: async () => undefined
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("HTTP 401");
+    expect(calls).toBe(1);
+  });
+
+  it("reports repeated transient Fish API failures with the attempt count", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let calls = 0;
+    const fetchImpl: FishApiFetch = async () => {
+      calls += 1;
+      throw new Error("fetch failed");
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" },
+      retryDelayMs: () => 0,
+      sleep: async () => undefined
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("fetch failed after 3 attempts");
+    expect(calls).toBe(3);
+  });
+});
+
 describe("DJ audio provider resolution", () => {
   it("uses text fallback when TTS provider is text", async () => {
     const config = makeConfig();
@@ -200,6 +394,32 @@ describe("DJ audio provider resolution", () => {
     expect(observedText).toBe("Here's \"Sway It Hula Girl\" by 小野リサ.");
     if (result.ok) {
       expect(result.audioPath).toMatch(/\.wav$/);
+    }
+  });
+
+  it("uses Fish API when cloud Fish TTS is selected", async () => {
+    const config = makeConfig();
+    config.tts.provider = "fish_api";
+    config.tts.fishVoice = "nova";
+    config.fishApi.referenceIds.nova = "nova-reference";
+    let observedBody: Record<string, unknown> | undefined;
+    const fetchImpl: FishApiFetch = async (_url, init) => {
+      observedBody = JSON.parse(String(init?.body));
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeDjAudio(config, "Here's \"Sway It Hula Girl\" by 小野リサ.", {
+      fishApiFetch: fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedBody).toMatchObject({
+      text: "Here's \"Sway It Hula Girl\" by 小野リサ.",
+      reference_id: "nova-reference"
+    });
+    if (result.ok) {
+      expect(result.audioPath).toMatch(/\.mp3$/);
     }
   });
 

@@ -21,7 +21,7 @@ See [CHANGELOG.md](CHANGELOG.md) for public release notes.
 - Imports NetEase playlists into a local taste profile.
 - Supports built-in macOS voices with no model install.
 - Supports optional Kokoro TTS for fast local DJ voices if you install the local runtime and model.
-- Supports optional Fish TTS for Mina/Nova DJ voices if you already use or install Fish locally.
+- Supports optional Fish API voices for cloud Mina/Nova DJ audio, or local Fish TTS if you already use or install Fish locally.
 - Stores local memory in SQLite and a human-editable `taste.md`.
 
 ## Requirements
@@ -37,7 +37,7 @@ Optional:
 
 - macOS for built-in `say` voices and Apple Calendar context.
 - `mpv` for stronger pause/resume control. Pockedio falls back to macOS `afplay` where available.
-- Fish TTS for local Mina/Nova voice synthesis.
+- Fish API for cloud Mina/Nova voice synthesis, or Fish TTS for local Mina/Nova voice synthesis.
 - Apple Calendar permission.
 - Diary folder access.
 - Weather lookup through Open-Meteo.
@@ -134,7 +134,9 @@ The lowest-friction path is the built-in macOS voice option. It needs no model d
 
 Kokoro TTS is optional. Use it if you want fast local spoken DJ audio and are comfortable installing a small local Python runtime plus the Kokoro ONNX model and voices file. Pockedio can help detect an existing Kokoro install or guide a local install.
 
-Fish TTS is optional. Use it if you want the local Mina/Nova voice path and are comfortable installing the local runtime and model. Pockedio can help detect an existing Fish install or guide a local install.
+Fish API is optional. Use it if you want cloud-generated Mina/Nova DJ audio without waiting for local model synthesis. Configure `FISH_API_KEY`; Pockedio includes the Fish voice settings for Mina and Nova. Set `POCKEDIO_FISH_PROXY` only if your network needs a Fish-specific HTTP proxy.
+
+Local Fish TTS remains optional. Use it if you want the local Mina/Nova voice path and are comfortable installing the local runtime and model. Pockedio can help detect an existing Fish install or guide a local install.
 
 ### Diary Path Tip
 
@@ -237,6 +239,7 @@ External services may receive data when enabled:
 - LLM provider: conversation, station-planning, and DJ-copy prompts.
 - NetEase adapter: music search and playable URL requests.
 - Open-Meteo: configured city/location.
+- Fish API: DJ spoken text is sent to Fish Audio when configured as the voice provider.
 - Fish TTS: local text/audio synthesis only when configured locally.
 
 Pockedio does not run a hosted backend, create user accounts, or store your memory remotely.

@@ -4,6 +4,8 @@ import type { PockedioConfig } from "../config/schema.js";
 import type { LlmClient, LlmRequestOptions, LlmResult } from "./llmClient.js";
 import { UnavailableLlmClient } from "./llmClient.js";
 
+const INTERACTIVE_LLM_TIMEOUT_MS = 45_000;
+
 export function createLlmClient(config: PockedioConfig, env: NodeJS.ProcessEnv = process.env): LlmClient {
   const apiKey = env[config.llm.apiKeyEnv] ?? readLlmApiKey(config, config.llm.apiKeyEnv);
   if (!apiKey) {
@@ -18,7 +20,12 @@ export class OpenAiLlmClient implements LlmClient {
   private readonly model: string;
 
   constructor(config: PockedioConfig, apiKey: string) {
-    this.client = new OpenAI({ apiKey, baseURL: config.llm.baseUrl });
+    this.client = new OpenAI({
+      apiKey,
+      baseURL: config.llm.baseUrl,
+      timeout: INTERACTIVE_LLM_TIMEOUT_MS,
+      maxRetries: 0
+    });
     this.model = config.llm.model;
   }
 

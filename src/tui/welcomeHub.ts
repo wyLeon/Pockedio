@@ -43,7 +43,7 @@ export type SetupConnectionsAction = "full_setup" | "llm_setup" | "voice_setup" 
 export type LlmProviderId = "openai" | "deepseek" | "openrouter" | "local_vllm" | "custom";
 export type LlmSetupAction = LlmProviderId | "test_connection" | "back" | "quit";
 export type LlmProviderAction = "paste_key" | "use_shell_env" | "change_model" | "change_base_url" | "change_api_key_env" | "check_server" | "discover_models" | "test_connection" | "back" | "quit";
-export type VoiceSetupAction = "choose_voice" | "kokoro_tts" | "fish_tts" | "text_only" | "back" | "quit";
+export type VoiceSetupAction = "choose_voice" | "kokoro_tts" | "fish_api_tts" | "fish_tts" | "text_only" | "back" | "quit";
 export type ContextSetupAction = "calendar" | "weather" | "diary" | "back" | "quit";
 export type DjVoiceChoiceId =
   | `macos:${PockedioConfig["tts"]["macosVoice"]}`
@@ -132,10 +132,8 @@ const localVllmProviderEntries: Array<{ action: LlmProviderAction; label: string
 ];
 
 const voiceSetupEntries: Array<{ action: VoiceSetupAction; label: string; description: string }> = [
-  { action: "choose_voice", label: "Choose DJ voice", description: "preview built-in, fast local, or studio voices" },
-  { action: "kokoro_tts", label: "Configure Kokoro TTS", description: "enable fast local voices" },
-  { action: "fish_tts", label: "Configure Fish TTS", description: "enable generated Mina or Nova audio" },
-  { action: "text_only", label: "Use text-only DJ copy", description: "keep DJ notes without spoken audio" }
+  { action: "fish_api_tts", label: "Fish Audio Cloud", description: "fast cloud Mina or Nova voice" },
+  { action: "fish_tts", label: "Fish Local Model", description: "offline Mina or Nova voice from local model" }
 ];
 
 const contextSetupEntries: Array<{ action: ContextSetupAction; label: string; description: string }> = [
@@ -224,6 +222,14 @@ function formatWelcomeFooter(hasUpdate: boolean): string {
   return entries.join("  |  ");
 }
 
+function formatMenuFooter(actionCount: number, actionVerb = "Open"): string {
+  return `↑↓ Select  |  Enter ${actionVerb}  |  1-${actionCount} ${actionVerb}  |  B/Esc Back  |  Q Quit`;
+}
+
+function formatDjVoiceChooserFooter(): string {
+  return "↑↓ Select  |  Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B/Esc Back";
+}
+
 export function renderSetupConnectionsSurface(
   options: WelcomeReadinessOptions,
   renderOptions: HubRenderOptions<SetupConnectionsAction> = {}
@@ -252,7 +258,7 @@ export function renderSetupConnectionsSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${setupConnectionsEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(setupConnectionsEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -280,7 +286,7 @@ export function renderContextSetupSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${contextSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(contextSetupEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -315,7 +321,7 @@ export function renderLlmSetupSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${llmSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(llmSetupEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -357,7 +363,7 @@ export function renderLlmProviderSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${entries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(entries.length), renderOptions)
   ].join("\n");
 }
 
@@ -367,6 +373,7 @@ export function renderVoiceSetupSurface(
 ): string {
   const platform = options.platform ?? process.platform;
   const fishConfigured = isFishTtsReady(options.config);
+  const fishApiConfigured = isFishApiReady(options.config);
   const kokoroConfigured = isKokoroTtsReady(options.config);
   const provider = formatVoiceProvider(options.config, platform, fishConfigured, kokoroConfigured);
   const voice = formatConfiguredVoice(options.config, platform);
@@ -379,7 +386,7 @@ export function renderVoiceSetupSurface(
     renderTuiSectionLabel("CURRENT", { ...renderOptions, accent: "playback" }),
     formatSetupLine("Provider", provider, renderOptions),
     formatSetupLine("Voice", voice, renderOptions),
-    formatSetupLine("Advanced", formatVoiceSetupAdvancedStatus(fishConfigured, kokoroConfigured), renderOptions),
+    formatSetupLine("Advanced", formatVoiceSetupAdvancedStatus(fishConfigured, fishApiConfigured, kokoroConfigured), renderOptions),
     "",
     renderTuiSectionLabel("ACTIONS", { ...renderOptions, accent: "playback" }),
     ...voiceSetupEntries.map((entry, index) => formatSetupConnectionAction(
@@ -390,7 +397,56 @@ export function renderVoiceSetupSurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${voiceSetupEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(voiceSetupEntries.length), renderOptions)
+  ].join("\n");
+}
+
+export function renderFishApiCloudSetupSurface(
+  config: PockedioConfig,
+  selected = 1,
+  options: TuiRenderOptions = {},
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const actions = [
+    { label: "Paste API key", description: config.fishApi.apiKeyEnv },
+    { label: "Test Fish Audio Cloud", description: "verify cloud synthesis before choosing a voice" }
+  ];
+  const hasKey = Boolean(env[config.fishApi.apiKeyEnv]?.trim() || hasLocalLlmApiKey(config, config.fishApi.apiKeyEnv));
+  return [
+    renderTuiPageTitle("FISH AUDIO CLOUD", options),
+    "",
+    renderTuiBulletLine("Fish Audio Cloud uses Pockedio's built-in Mina and Nova voices. You only need an API key.", options),
+    "",
+    renderTuiSectionLabel("STATUS", { ...options, accent: "playback" }),
+    renderTuiKeyValue("API key", hasKey ? `Present: ${config.fishApi.apiKeyEnv}` : `Missing: ${config.fishApi.apiKeyEnv}`, 15, options),
+    renderTuiKeyValue("Voice models", "Built in", 15, options),
+    renderTuiKeyValue("Network", env[config.fishApi.proxyEnv]?.trim() ? `Proxy: ${config.fishApi.proxyEnv}` : "Default", 15, options),
+    "",
+    renderTuiSectionLabel("ACTIONS", { ...options, accent: "playback" }),
+    ...actions.map((action, index) => formatSetupConnectionAction(selected === index + 1, index + 1, action.label, action.description, options)),
+    "",
+    renderTuiFooter(formatMenuFooter(2), options)
+  ].join("\n");
+}
+
+export function renderFishVoiceChoiceSurface(
+  engineLabel: string,
+  currentVoice: PockedioConfig["tts"]["fishVoice"],
+  selected = 1,
+  options: TuiRenderOptions = {}
+): string {
+  return [
+    renderTuiPageTitle(`CHOOSE ${engineLabel.toUpperCase()} VOICE`, options),
+    "",
+    renderTuiBulletLine("Pick the Mina or Nova voice after the selected Fish engine is ready.", options),
+    "",
+    renderTuiSectionLabel("VOICES", { ...options, accent: "playback" }),
+    ...fishVoiceOptions.map((voice, index) => {
+      const status = voice.id === currentVoice ? "current" : "available";
+      return formatVoiceChoiceLine(selected === index + 1, index + 1, voice.label, status, voice.description, options);
+    }),
+    "",
+    renderTuiFooter(formatMenuFooter(2, "Save"), options)
   ].join("\n");
 }
 
@@ -431,7 +487,7 @@ export function renderDjVoiceChooserSurface(
       return formatVoiceChoiceLine(id === selectedVoice, index + 1 + macosVoiceOptions.length + kokoroVoiceOptions.length, voice.label, status, voice.description, renderOptions);
     }),
     "",
-    renderTuiFooter("↑↓ Select  |  Space Preview  |  Enter Save  |  K Kokoro setup  |  F Fish setup  |  B Back", renderOptions)
+    renderTuiFooter(formatDjVoiceChooserFooter(), renderOptions)
   ].join("\n");
 }
 
@@ -463,7 +519,7 @@ export function renderTasteMemorySurface(
       renderOptions
     )),
     "",
-    renderTuiFooter(`↑↓ Select  |  Enter Open  |  1-${tasteMemoryEntries.length} Open  |  B Back  |  Q Quit`, renderOptions)
+    renderTuiFooter(formatMenuFooter(tasteMemoryEntries.length), renderOptions)
   ].join("\n");
 }
 
@@ -483,7 +539,7 @@ export function renderTasteImportResultSurface(result: TasteImportResult, option
     "  Imported taste signals",
     "  Taste memory",
     "",
-    renderTuiFooter("Press Enter to return to Taste & Memory.", options)
+    renderTuiFooter("Enter Continue", options)
   ].join("\n");
 }
 
@@ -501,7 +557,7 @@ export function renderTasteSummarySurface(
       "",
       "Import a NetEase playlist first, then Pockedio can summarize your listening signals.",
       "",
-      renderTuiFooter("Press Enter to return to Taste & Memory.", renderOptions)
+      renderTuiFooter("Enter Continue", renderOptions)
     ].join("\n");
   }
 
@@ -525,7 +581,7 @@ export function renderTasteSummarySurface(
     renderTuiSectionLabel("SAMPLE TRACKS", { ...renderOptions, accent: "playback" }),
     ...formatPlainList(details.sampleTracks, "No imported tracks yet.", 6),
     "",
-    renderTuiFooter("Press Enter to return to Taste & Memory.", renderOptions)
+    renderTuiFooter("Enter Continue", renderOptions)
   ].join("\n");
 }
 
@@ -849,7 +905,7 @@ export function applyDjVoiceChooserKey(
   if (key.name === "k") {
     return { selectedVoice, submit: "kokoro_setup" };
   }
-  if (key.name === "b") {
+  if (key.name === "b" || key.name === "escape") {
     return { selectedVoice, submit: "back" };
   }
   if (key.name === "q" || (key.ctrl && key.name === "c")) {
@@ -966,7 +1022,7 @@ function applySelectableKey<TAction extends string>(input: {
     const action = input.entries[numericIndex]!.action;
     return { selectedAction: action, submittedAction: action };
   }
-  if (input.key.name === "b" && input.backAction) {
+  if ((input.key.name === "b" || input.key.name === "escape") && input.backAction) {
     return { selectedAction: input.backAction, submittedAction: input.backAction };
   }
   if ((input.key.name === "q" || (input.key.ctrl && input.key.name === "c")) && input.quitAction) {
@@ -1160,12 +1216,15 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction | undef
     return undefined;
   }
   if (normalized === "" || normalized === "enter" || normalized === "choose" || normalized === "voice") {
-    return "choose_voice";
+    return "fish_api_tts";
   }
   if (normalized === "kokoro" || normalized === "fast") {
-    return "kokoro_tts";
+    return undefined;
   }
-  if (normalized === "fish") {
+  if (normalized === "fish api" || normalized === "fish_api" || normalized === "cloud" || normalized === "api") {
+    return "fish_api_tts";
+  }
+  if (normalized === "fish" || normalized === "local" || normalized === "local fish") {
     return "fish_tts";
   }
   if (normalized === "text") {
@@ -1177,7 +1236,7 @@ export function resolveVoiceSetupAction(input: string): VoiceSetupAction | undef
   if (normalized === "q" || normalized === "quit") {
     return "quit";
   }
-  return "choose_voice";
+  return undefined;
 }
 
 export function resolveTasteMemoryAction(input: string): TasteMemoryAction | undefined {
@@ -1269,8 +1328,11 @@ function buildVoiceReadiness(config: PockedioConfig, platform: NodeJS.Platform):
   if (config.tts.provider === "text") {
     return { label: "Voice", value: "Text-only DJ copy", ok: true };
   }
+  if (config.tts.provider === "fish_api") {
+    return { label: "Voice", value: `${formatFishVoiceName(config.tts.fishVoice)}, Fish API`, ok: isFishApiReady(config) };
+  }
   if (config.tts.provider === "fish") {
-    return { label: "Voice", value: `${formatFishVoiceName(config.tts.fishVoice)}, Fish TTS`, ok: true };
+    return { label: "Voice", value: `${formatFishVoiceName(config.tts.fishVoice)}, local Fish TTS`, ok: true };
   }
   if (config.fishAudio.referenceAudioPath && fs.existsSync(config.fishAudio.referenceAudioPath)) {
     return { label: "Voice", value: "Fish TTS configured", ok: true };
@@ -1363,8 +1425,13 @@ function formatVoiceSetupSummaryLine(
   if (config.tts.provider === "text") {
     return renderTuiBulletLine("Spoken DJ audio is off. Pockedio can still write DJ notes.", options);
   }
+  if (config.tts.provider === "fish_api") {
+    return renderTuiBulletLine(isFishApiReady(config)
+      ? "Fish API is ready for cloud Mina or Nova voice."
+      : "Fish Audio Cloud needs an API key before cloud DJ audio works.", options);
+  }
   if (fishConfigured || config.tts.provider === "fish") {
-    return renderTuiBulletLine("Fish TTS is ready for generated Mina or Nova voice.", options);
+    return renderTuiBulletLine("Local Fish TTS is ready for generated Mina or Nova voice.", options);
   }
   if (kokoroConfigured || config.tts.provider === "kokoro") {
     return renderTuiBulletLine("Kokoro TTS is ready for fast local voices.", options);
@@ -1452,8 +1519,11 @@ function formatVoiceProvider(config: PockedioConfig, platform: NodeJS.Platform, 
   if (config.tts.provider === "text") {
     return "Text-only DJ copy";
   }
+  if (config.tts.provider === "fish_api") {
+    return "Fish API";
+  }
   if (config.tts.provider === "fish") {
-    return "Fish TTS";
+    return "Local Fish TTS";
   }
   if (config.tts.provider === "kokoro") {
     return "Kokoro TTS";
@@ -1462,7 +1532,7 @@ function formatVoiceProvider(config: PockedioConfig, platform: NodeJS.Platform, 
     return platform === "darwin" ? "Built-in macOS voice" : "macOS voice unavailable here";
   }
   if (fishConfigured) {
-    return "Fish TTS";
+    return "Local Fish TTS";
   }
   if (kokoroConfigured) {
     return "Kokoro TTS";
@@ -1474,7 +1544,7 @@ function formatConfiguredVoice(config: PockedioConfig, platform: NodeJS.Platform
   if (config.tts.provider === "text") {
     return "None";
   }
-  if (config.tts.provider === "fish") {
+  if (config.tts.provider === "fish" || config.tts.provider === "fish_api") {
     return formatFishVoiceName(config.tts.fishVoice);
   }
   if (config.tts.provider === "kokoro") {
@@ -1486,17 +1556,16 @@ function formatConfiguredVoice(config: PockedioConfig, platform: NodeJS.Platform
   return "None";
 }
 
-function formatVoiceSetupAdvancedStatus(fishConfigured: boolean, kokoroConfigured: boolean): string {
-  if (fishConfigured && kokoroConfigured) {
-    return "Fish TTS and Kokoro TTS configured";
+function formatVoiceSetupAdvancedStatus(fishConfigured: boolean, fishApiConfigured: boolean, kokoroConfigured: boolean): string {
+  const configured = [
+    fishApiConfigured ? "Fish API" : undefined,
+    fishConfigured ? "local Fish TTS" : undefined,
+    kokoroConfigured ? "Kokoro TTS" : undefined
+  ].filter((item): item is string => Boolean(item));
+  if (configured.length > 0) {
+    return `${configured.join(", ")} configured`;
   }
-  if (fishConfigured) {
-    return "Fish TTS configured";
-  }
-  if (kokoroConfigured) {
-    return "Kokoro TTS configured";
-  }
-  return "Local generated voices not configured";
+  return "Generated voices not configured";
 }
 
 export function isFishTtsReady(config: PockedioConfig): boolean {
@@ -1554,6 +1623,9 @@ function getCurrentVoiceChoice(
   if (config.tts.provider === "fish" && fishReady) {
     return `fish:${config.tts.fishVoice}`;
   }
+  if (config.tts.provider === "fish_api" && isFishApiReady(config)) {
+    return `fish:${config.tts.fishVoice}`;
+  }
   if (config.tts.provider === "kokoro" && kokoroReady) {
     return `kokoro:${config.tts.kokoroVoice}`;
   }
@@ -1570,12 +1642,22 @@ function currentVoiceLabel(
 ): string {
   const isCurrent = (id.startsWith("macos:")
     && config.tts.provider !== "fish"
+    && config.tts.provider !== "fish_api"
     && config.tts.provider !== "kokoro"
     && config.tts.provider !== "text"
     && id === `macos:${config.tts.macosVoice}`)
     || (id.startsWith("kokoro:") && config.tts.provider === "kokoro" && id === `kokoro:${config.tts.kokoroVoice}`)
-    || (id.startsWith("fish:") && config.tts.provider === "fish" && id === `fish:${config.tts.fishVoice}`);
+    || (id.startsWith("fish:")
+      && (config.tts.provider === "fish" || config.tts.provider === "fish_api")
+      && id === `fish:${config.tts.fishVoice}`);
   return isCurrent ? `${status}, current` : status;
+}
+
+export function isFishApiReady(config: PockedioConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(
+    (env[config.fishApi.apiKeyEnv]?.trim() || hasLocalLlmApiKey(config, config.fishApi.apiKeyEnv))
+    && config.fishApi.referenceIds[config.tts.fishVoice]?.trim()
+  );
 }
 
 function formatTasteLine(label: string, value: string, width: number, options: TuiRenderOptions = {}): string {

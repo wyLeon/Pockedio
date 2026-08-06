@@ -133,8 +133,19 @@ describe("status report", () => {
         apiKeySource: "missing"
       },
       fishAudio: { pythonPath: "", scriptPath: "", modelDir: "", pathsPresent: false, missing: [] },
+      fishApi: {
+        baseUrl: "https://api.fish.audio",
+        model: "s2.1-pro-free",
+        apiKeyEnv: "FISH_API_KEY",
+        apiKeyPresent: false,
+        proxyEnv: "POCKEDIO_FISH_PROXY",
+        proxyPresent: false,
+        referenceIdPresent: false,
+        ready: false,
+        missing: []
+      },
       kokoroAudio: { pythonPath: "", modelPath: "", voicesPath: "", pathsPresent: false, missing: [] },
-      voice: { summary: "Text-only DJ copy", showFishMissing: false, showKokoroMissing: false },
+      voice: { summary: "Text-only DJ copy", showFishMissing: false, showFishApiMissing: false, showKokoroMissing: false },
       calendar: { enabled: false },
       weather: { enabled: false },
       taste: { path: "/tmp/taste.md", present: false },
@@ -178,6 +189,17 @@ describe("status report", () => {
         pathsPresent: true,
         missing: []
       },
+      fishApi: {
+        baseUrl: "https://api.fish.audio",
+        model: "s2.1-pro-free",
+        apiKeyEnv: "FISH_API_KEY",
+        apiKeyPresent: true,
+        proxyEnv: "POCKEDIO_FISH_PROXY",
+        proxyPresent: false,
+        referenceIdPresent: true,
+        ready: true,
+        missing: []
+      },
       kokoroAudio: {
         pythonPath: "/kokoro-python",
         modelPath: "/kokoro.onnx",
@@ -188,6 +210,7 @@ describe("status report", () => {
       voice: {
         summary: "Mina, Fish TTS ready",
         showFishMissing: false,
+        showFishApiMissing: false,
         showKokoroMissing: false
       },
       calendar: { enabled: true },
@@ -229,6 +252,52 @@ describe("status report", () => {
     expect(text).toContain("LOCAL DATA");
     expect(text).toContain("Local     /tmp");
     expect(text).toContain("External  NetEase, configured LLM, weather, and diary summaries may leave this machine when used.");
+  });
+
+  it("reports Fish API readiness without making a synthesis call", async () => {
+    const home = makeHome();
+    const env = { POCKEDIO_HOME: home, FISH_API_KEY: "fish-test-key" };
+    const config = loadConfig(env);
+    config.tts.provider = "fish_api";
+    config.tts.fishVoice = "mina";
+    config.fishApi.referenceIds.mina = "mina-reference";
+    ensureRuntimeDirs(config, env);
+    saveConfig(config, env);
+
+    const report = await getStatusReport({
+      env,
+      fetchImpl: async () => {
+        throw new Error("music offline");
+      }
+    });
+
+    expect(report.fishApi.ready).toBe(true);
+    expect(report.voice.summary).toBe("Mina, Fish API ready");
+    expect(formatStatusReport(report)).toContain("Voice     Mina, Fish API ready");
+  });
+
+  it("reports missing Fish API key for the selected cloud voice", async () => {
+    const home = makeHome();
+    const env = { POCKEDIO_HOME: home };
+    const config = loadConfig(env);
+    config.tts.provider = "fish_api";
+    config.tts.fishVoice = "nova";
+    ensureRuntimeDirs(config, env);
+    saveConfig(config, env);
+
+    const report = await getStatusReport({
+      env,
+      fetchImpl: async () => {
+        throw new Error("music offline");
+      }
+    });
+    const text = formatStatusReport(report);
+
+    expect(report.fishApi.ready).toBe(false);
+    expect(report.voice.summary).toBe("Nova, Fish API needs setup");
+    expect(text).toContain("Fish API missing:");
+    expect(text).toContain("- api key: FISH_API_KEY");
+    expect(text).not.toContain("reference id");
   });
 });
 

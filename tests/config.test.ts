@@ -95,6 +95,21 @@ describe("config load and save", () => {
       modelPath: ".cache/kokoro-spike/kokoro-v1.0.onnx",
       voicesPath: ".cache/kokoro-spike/voices-v1.0.bin"
     });
+    expect(config.fishApi).toEqual({
+      baseUrl: "https://api.fish.audio",
+      apiKeyEnv: "FISH_API_KEY",
+      proxyEnv: "POCKEDIO_FISH_PROXY",
+      model: "s2.1-pro-free",
+      format: "mp3",
+      latency: "balanced",
+      chunkLength: 150,
+      referenceIds: {
+        mina: expect.any(String),
+        nova: expect.any(String)
+      }
+    });
+    expect(config.fishApi.referenceIds.mina).toHaveLength(32);
+    expect(config.fishApi.referenceIds.nova).toHaveLength(32);
     expect(config.dj.language).toBe("English");
     expect(config.dj.displayName).toBe("Pockedio");
     expect(config.dj.programLength).toBe("standard");
@@ -142,6 +157,34 @@ describe("config load and save", () => {
 
     expect(config.fishAudio.referenceAudioPath).toBe("/tmp/mina.wav");
     expect(config.fishAudio.referenceText).toBe("Mina is here.");
+  });
+
+  it("loads Fish API voice settings", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+    current.tts.provider = "fish_api";
+    current.fishApi.apiKeyEnv = "POCKEDIO_TEST_FISH_KEY";
+    current.fishApi.model = "s2.1-pro";
+    current.fishApi.referenceIds.mina = "mina-reference";
+
+    saveConfig(current, env);
+    const config = loadConfig(env);
+
+    expect(config.tts.provider).toBe("fish_api");
+    expect(config.fishApi.apiKeyEnv).toBe("POCKEDIO_TEST_FISH_KEY");
+    expect(config.fishApi.model).toBe("s2.1-pro");
+    expect(config.fishApi.referenceIds.mina).toBe("mina-reference");
+  });
+
+  it("migrates the previous paid Fish API default to the free cloud model", () => {
+    const env = makeEnv();
+    const current = loadConfig(env);
+    current.fishApi.model = "s2-pro";
+
+    saveConfig(current, env);
+    const config = loadConfig(env);
+
+    expect(config.fishApi.model).toBe("s2.1-pro-free");
   });
 
   it("stores NetEase account cookies outside normal config", () => {

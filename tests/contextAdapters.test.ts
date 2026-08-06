@@ -325,11 +325,11 @@ describe("diary adapter", () => {
     expect(first?.listeningHint).toContain("low-pressure");
   });
 
-  it("falls back to metadata diary summary when LLM summary is unavailable", async () => {
+  it("derives a local listening hint when LLM diary summarization is unavailable", async () => {
     const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
     tempDirs.push(diaryDir);
     const entry = path.join(diaryDir, "entry.md");
-    fs.writeFileSync(entry, "private text");
+    fs.writeFileSync(entry, "I felt exhausted after a heavy workday.");
     const entryDate = new Date("2026-05-18T10:00:00.000Z");
     fs.utimesSync(entry, entryDate, entryDate);
     const config = makeConfig({ diary: { enabled: true, path: diaryDir } });
@@ -343,8 +343,38 @@ describe("diary adapter", () => {
       filePath: entry,
       sourceMtime: "2026-05-18T10:00:00.000Z",
       summary: "Latest diary file: entry.md, modified 2026-05-18T10:00:00.000Z.",
-      listeningHint: "Diary listening hint unavailable; do not overfit music to diary context."
+      listeningHint: "Choose low-pressure, warm, emotionally steady music; avoid harsh textures, hype language, or dense vocals."
     });
+  });
+
+  it("replaces a cached unavailable diary hint with a local listening hint", async () => {
+    const diaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "pockedio-diary-"));
+    tempDirs.push(diaryDir);
+    const entry = path.join(diaryDir, "entry.md");
+    fs.writeFileSync(entry, "今天压力很大，感觉很累。");
+    const entryDate = new Date("2026-05-18T10:00:00.000Z");
+    fs.utimesSync(entry, entryDate, entryDate);
+    const config = makeConfig({ diary: { enabled: true, path: diaryDir } });
+    runMigrations(config);
+    const store = new MemoryStore(config);
+    store.upsertDiarySummary({
+      sourceFile: entry,
+      sourceMtime: "2026-05-18T10:00:00.000Z",
+      summary: [
+        "Summary: Latest diary file: entry.md, modified 2026-05-18T10:00:00.000Z.",
+        "Listening hint: Diary listening hint unavailable; do not overfit music to diary context."
+      ].join("\n")
+    });
+    store.close();
+
+    const context = await readDiaryContextWithLlmSummary(config, {
+      generateJson: async () => ({ ok: false as const, errorCode: "llm_unavailable" as const, error: "unused" }),
+      generateText: async () => {
+        throw new Error("should use the local cached fallback");
+      }
+    });
+
+    expect(context?.listeningHint).toContain("low-pressure");
   });
 
   it("backfills historical diary files as summary-only durable memories", async () => {
