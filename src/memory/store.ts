@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { openDatabase } from "../db/database.js";
 import type { PockedioConfig } from "../config/schema.js";
 
@@ -635,10 +636,54 @@ export class MemoryStore {
 
     return { rowsCleared: rows.length, filesDeleted };
   }
+
+  cleanupOrphanedDjAudioFiles(
+    djAudioDir: string,
+    options: { now?: Date; minAgeMs?: number } = {}
+  ): { filesDeleted: number } {
+    if (!fs.existsSync(djAudioDir)) {
+      return { filesDeleted: 0 };
+    }
+    const nowMs = (options.now ?? new Date()).getTime();
+    const minAgeMs = options.minAgeMs ?? 24 * 60 * 60 * 1000;
+    const referencedPaths = new Set(
+      (this.db.prepare("SELECT audio_path as audioPath FROM dj_audio WHERE audio_path IS NOT NULL").all() as Array<{ audioPath: string }>)
+        .map((row) => row.audioPath)
+    );
+
+    let filesDeleted = 0;
+    for (const entry of fs.readdirSync(djAudioDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !isDjAudioCacheFile(entry.name)) {
+        continue;
+      }
+      const audioPath = path.join(djAudioDir, entry.name);
+      if (referencedPaths.has(audioPath)) {
+        continue;
+      }
+      try {
+        const stats = fs.statSync(audioPath);
+        if (nowMs - stats.mtimeMs < minAgeMs) {
+          continue;
+        }
+        fs.unlinkSync(audioPath);
+        filesDeleted += 1;
+      } catch (error) {
+        if (!isMissingFileError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    return { filesDeleted };
+  }
 }
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function isDjAudioCacheFile(fileName: string): boolean {
+  return /\.(mp3|wav|aiff|opus|pcm)$/i.test(fileName);
 }
 
 function parseFavoriteTrackTarget(value: string): { title: string; artist: string } | null {

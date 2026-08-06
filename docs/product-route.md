@@ -25,7 +25,7 @@ The CLI version should define the product contract for the later web app. It sho
 
 The first CLI MVP should include real playback rather than a simulated playlist. The intended music source is NetEase Cloud Music through an API integration. Because this is likely to depend on unofficial or changing interfaces, the implementation plan must include a short validation step for login, search, playable URL retrieval, playback reliability, and rate-limit or account constraints.
 
-DJ voice output should use the Fish TTS model that is already installed locally. The CLI should treat voice generation as a local capability: generate concise DJ speech, synthesize it through Fish TTS, and play it before or between music segments when appropriate. The first version should keep spoken segments short so the station remains music-first.
+DJ voice output can use Fish Audio Cloud or a locally installed Fish TTS model. The CLI should keep those providers distinct: Cloud Fish sends concise DJ speech to the configured Fish API, while local Fish synthesizes on the user's machine. Both paths should preserve the Mina/Nova voice choice and keep spoken segments short so the station remains music-first.
 
 DJ output should speak in English by default. Scheduled DJ moments should choose a persona from a fixed day-based schedule so different days can have different DJ styles.
 
@@ -40,7 +40,7 @@ The web app should be built after the CLI proves the product loop. It should pre
 ## Open Decisions
 
 - Exact NetEase Cloud Music API approach, authentication method, and playback constraints.
-- Local Fish TTS invocation path, model name, voice preset, and expected audio output format.
+- Cloud Fish API availability and quota behavior, plus the local Fish TTS invocation path, model name, voice preset, and expected audio output format.
 - Exact Apple Calendar integration path and permission model.
 - How much personalization data is explicit onboarding versus learned from feedback.
 - What success means for the first CLI demo.

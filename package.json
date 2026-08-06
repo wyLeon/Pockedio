@@ -1,6 +1,6 @@
 {
   "name": "pockedio",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "CLI-first personal AI DJ for context-aware listening.",
   "license": "MIT",
@@ -38,7 +38,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/db/schema.sql dist/db/schema.sql",
-    "dev": "tsx src/cli.ts",
+    "dev": "npm run build && node dist/cli.js",
+    "dev:src": "tsx src/cli.ts",
+    "start": "npm run build && node dist/cli.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

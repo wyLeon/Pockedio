@@ -79,7 +79,7 @@ export async function refreshDiaryHistoryMemory(
         const result = await llm.generateText(buildDiarySummaryPrompt(filePath));
         const context = result.ok
           ? parseDiarySummaryPayload(result.value.trim())
-          : metadataDiarySummary(filePath, sourceMtime);
+          : localDiaryFallbackContext(filePath, sourceMtime);
         store.upsertDiarySummary({
           sourceFile: filePath,
           sourceMtime,
@@ -131,6 +131,19 @@ export async function readDiaryContextWithLlmSummary(
     const cached = store.getDiarySummary(latest.filePath, latest.sourceMtime);
     if (cached) {
       const parsed = parseDiarySummaryPayload(cached.summary);
+      if (hasUnavailableDiaryListeningHint(parsed.listeningHint)) {
+        const fallback = localDiaryFallbackContext(latest.filePath, latest.sourceMtime);
+        store.upsertDiarySummary({
+          sourceFile: latest.filePath,
+          sourceMtime: latest.sourceMtime,
+          summary: formatDiarySummaryPayload(fallback)
+        });
+        return {
+          filePath: latest.filePath,
+          sourceMtime: latest.sourceMtime,
+          ...fallback
+        };
+      }
       return {
         filePath: latest.filePath,
         sourceMtime: latest.sourceMtime,
@@ -141,12 +154,20 @@ export async function readDiaryContextWithLlmSummary(
 
     const result = await llm.generateText(buildDiarySummaryPrompt(latest.filePath));
     if (!result.ok) {
-      return metadataDiaryContext(latest.filePath);
+      return {
+        filePath: latest.filePath,
+        sourceMtime: latest.sourceMtime,
+        ...localDiaryFallbackContext(latest.filePath, latest.sourceMtime)
+      };
     }
 
     const parsed = parseDiarySummaryPayload(result.value.trim());
     if (!parsed.summary) {
-      return metadataDiaryContext(latest.filePath);
+      return {
+        filePath: latest.filePath,
+        sourceMtime: latest.sourceMtime,
+        ...localDiaryFallbackContext(latest.filePath, latest.sourceMtime)
+      };
     }
 
     store.upsertDiarySummary({
@@ -242,6 +263,24 @@ function metadataDiaryContext(filePath: string): DiaryContext {
   };
 }
 
+function localDiaryFallbackContext(filePath: string, sourceMtime: string): Omit<DiaryContext, "filePath"> {
+  const metadata = metadataDiarySummary(filePath, sourceMtime);
+  let content = "";
+  try {
+    content = fs.readFileSync(filePath, "utf8").slice(0, 8_000);
+  } catch {
+    return metadata;
+  }
+  return {
+    summary: metadata.summary,
+    listeningHint: deriveDiaryListeningHint(content)
+  };
+}
+
+function hasUnavailableDiaryListeningHint(hint: string): boolean {
+  return /^diary listening hint unavailable/i.test(hint.trim());
+}
+
 function buildDiarySummaryPrompt(filePath: string): string {
   const content = fs.readFileSync(filePath, "utf8").slice(0, 8_000);
   return [
@@ -285,16 +324,16 @@ function formatDiarySummaryPayload(input: Omit<DiaryContext, "filePath">): strin
 
 function deriveDiaryListeningHint(summary: string): string {
   const text = summary.toLowerCase();
-  if (/\b(exhausted|tired|drained|overloaded|burned out|heavy work|pressure|stress|stressed)\b/.test(text)) {
+  if (/\b(exhausted|tired|drained|overloaded|burned out|heavy work|pressure|stress|stressed)\b|累|疲惫|疲劳|压力|焦虑|忙|熬夜|失眠|生病|不舒服|崩溃|低落|难过|烦躁/.test(text)) {
     return "Choose low-pressure, warm, emotionally steady music; avoid harsh textures, hype language, or dense vocals.";
   }
-  if (/\b(peaceful|calm|quiet|relieved|gentle)\b/.test(text)) {
+  if (/\b(peaceful|calm|quiet|relieved|gentle)\b|平静|轻松|安静|舒缓|放松|自在/.test(text)) {
     return "Support the calm with gentle pacing and uncluttered textures.";
   }
-  if (/\b(excited|celebrat|energized|momentum|breakthrough)\b/.test(text)) {
+  if (/\b(excited|celebrat|energized|momentum|breakthrough)\b|开心|兴奋|期待|顺利|突破|进展|庆祝/.test(text)) {
     return "Allow brighter momentum while keeping the set personal rather than generic hype.";
   }
-  if (/\b(reflective|nostalg|transition|closure|miss|memory)\b/.test(text)) {
+  if (/\b(reflective|nostalg|transition|closure|miss|memory)\b|反思|怀念|回忆|告别|转折|想念|感慨/.test(text)) {
     return "Favor reflective, warm, and spacious music that can hold memory without becoming too heavy.";
   }
   return "Use diary context lightly; choose music that fits the user's recent emotional energy without over-explaining it.";

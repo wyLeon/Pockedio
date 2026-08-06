@@ -80,7 +80,7 @@ describe("MOLE-inspired welcome hub", () => {
     expect(text).toContain("POCKEDIO");
     expect(text).toContain("https://github.com/wyLeon/Pockedio");
     expect(text).toContain("Music tuned to the moment.");
-    expect(text).toContain("v0.4.0");
+    expect(text).toContain("v0.5.0");
     expect(text).toContain("Session Flow");
     expect(text).toContain("> 1. Enter DJ Session");
     expect(text).toContain("2. Setup & Connections");
@@ -109,7 +109,7 @@ describe("MOLE-inspired welcome hub", () => {
 
     expect(stripAnsi(hub)).toContain("POCKEDIO");
     expect(stripAnsi(hub)).toContain("https://github.com/wyLeon/Pockedio");
-    expect(stripAnsi(hub)).toContain("v0.4.0");
+    expect(stripAnsi(hub)).toContain("v0.5.0");
     expect(stripAnsi(hub)).not.toContain("█");
     expect(stripAnsi(hub)).toContain("SESSION FLOW");
     expect(hub).toMatch(/\u001b\[[0-9;]*38;5;116mREADINESS\u001b\[0m/);

@@ -15,7 +15,11 @@ export type FishApiAudioOptions = {
   signal?: AbortSignal;
   fetchImpl?: FishApiFetch;
   env?: NodeJS.ProcessEnv;
+  retryDelayMs?: (attempt: number) => number;
+  sleep?: (ms: number) => Promise<void>;
 };
+
+const FISH_API_RETRY_ATTEMPTS = 3;
 
 export async function synthesizeFishApiAudio(
   config: PockedioConfig,
@@ -57,26 +61,30 @@ export async function synthesizeFishApiAudio(
 
   try {
     const requestBody = buildFishApiRequestBody(config, normalizedText, voiceReference);
-    const response = await (options.fetchImpl ?? fetch)(`${config.fishApi.baseUrl.replace(/\/$/, "")}/v1/tts`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": requestBody.contentType,
-        model: config.fishApi.model
-      },
-      body: requestBody.body,
-      signal: controller.signal,
-      ...fishApiProxyOptions(config, env)
-    } as RequestInit);
-
-    const latencyMs = Date.now() - startedAt;
-    if (!response.ok) {
-      return {
-        ok: false,
-        latencyMs,
-        error: `Fish API returned HTTP ${response.status}: ${await safeErrorBody(response)}`
-      };
+    const responseResult = await fetchFishApiWithRetries({
+      url: `${config.fishApi.baseUrl.replace(/\/$/, "")}/v1/tts`,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": requestBody.contentType,
+          model: config.fishApi.model
+        },
+        body: requestBody.body,
+        signal: controller.signal,
+        ...fishApiProxyOptions(config, env)
+      } as RequestInit,
+      fetchImpl: options.fetchImpl ?? fetch,
+      retryDelayMs: options.retryDelayMs,
+      sleep: options.sleep,
+      signal: controller.signal
+    });
+    if (!responseResult.ok) {
+      return failed(startedAt, responseResult.error);
     }
+
+    const response = responseResult.response;
+    const latencyMs = Date.now() - startedAt;
 
     const audio = Buffer.from(await response.arrayBuffer());
     if (audio.length === 0) {
@@ -101,6 +109,69 @@ export async function synthesizeFishApiAudio(
     }
     options.signal?.removeEventListener("abort", abort);
   }
+}
+
+type FishApiFetchRetryResult =
+  | { ok: true; response: Response }
+  | { ok: false; error: string };
+
+async function fetchFishApiWithRetries(input: {
+  url: string;
+  init: RequestInit;
+  fetchImpl: FishApiFetch;
+  retryDelayMs?: (attempt: number) => number;
+  sleep?: (ms: number) => Promise<void>;
+  signal: AbortSignal;
+}): Promise<FishApiFetchRetryResult> {
+  let lastError = "Fish API request failed.";
+  for (let attempt = 1; attempt <= FISH_API_RETRY_ATTEMPTS; attempt += 1) {
+    if (input.signal.aborted) {
+      return { ok: false, error: "Fish API synthesis was cancelled." };
+    }
+    try {
+      const response = await input.fetchImpl(input.url, input.init);
+      if (response.ok) {
+        return { ok: true, response };
+      }
+      const body = await safeErrorBody(response);
+      const error = `Fish API returned HTTP ${response.status}: ${body}`;
+      if (!isTransientFishApiHttpStatus(response.status) || attempt === FISH_API_RETRY_ATTEMPTS) {
+        return { ok: false, error: attempt > 1 ? `${error} after ${attempt} attempts` : error };
+      }
+      lastError = error;
+    } catch (error) {
+      if (input.signal.aborted) {
+        return { ok: false, error: formatFishApiAbortReason(input.signal.reason) };
+      }
+      const message = error instanceof Error ? error.message : "Fish API request failed.";
+      if (!isTransientFishApiError(message) || attempt === FISH_API_RETRY_ATTEMPTS) {
+        return { ok: false, error: attempt > 1 ? `Fish API ${message} after ${attempt} attempts` : message };
+      }
+      lastError = message;
+    }
+    await (input.sleep ?? sleep)(input.retryDelayMs?.(attempt) ?? defaultFishApiRetryDelayMs(attempt));
+  }
+  return { ok: false, error: `Fish API ${lastError} after ${FISH_API_RETRY_ATTEMPTS} attempts` };
+}
+
+function isTransientFishApiHttpStatus(status: number): boolean {
+  return status >= 500 && status <= 599;
+}
+
+function isTransientFishApiError(message: string): boolean {
+  return /fetch failed|network|socket|timeout|timed out|aborted/i.test(message);
+}
+
+function defaultFishApiRetryDelayMs(attempt: number): number {
+  return attempt === 1 ? 300 : 800;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatFishApiAbortReason(reason: unknown): string {
+  return reason instanceof Error ? reason.message : "Fish API synthesis was cancelled.";
 }
 
 export function getFishApiReferenceId(config: PockedioConfig): string | undefined {

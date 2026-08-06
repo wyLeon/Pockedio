@@ -1143,6 +1143,25 @@ async function previewGeneratedFishAudio(audioPath: string): Promise<void> {
   const result = await runProcess("afplay", [audioPath], 12_000);
   if (!result.ok) {
     await pauseWithMessage(`Generated audio, but preview playback failed: ${result.error ?? `exit ${result.exitCode ?? "null"}`}`);
+    return;
+  }
+  cleanupPreviewDjAudio(audioPath);
+}
+
+function cleanupPreviewDjAudio(audioPath: string, env: NodeJS.ProcessEnv = process.env): void {
+  if (/^(1|true|yes)$/i.test(env.POCKEDIO_KEEP_DJ_AUDIO?.trim() ?? "")) {
+    return;
+  }
+  const config = loadConfig();
+  const resolvedAudioPath = path.resolve(audioPath);
+  const resolvedDjAudioDir = path.resolve(config.paths.djAudioDir);
+  if (resolvedAudioPath !== resolvedDjAudioDir && !resolvedAudioPath.startsWith(`${resolvedDjAudioDir}${path.sep}`)) {
+    return;
+  }
+  try {
+    fs.unlinkSync(audioPath);
+  } catch {
+    // Best-effort cache cleanup must not interrupt setup.
   }
 }
 

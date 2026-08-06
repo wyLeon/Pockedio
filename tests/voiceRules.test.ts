@@ -248,6 +248,94 @@ describe("Fish API adapter", () => {
     expect(result.error).toContain("HTTP 402");
     expect(result.error).toContain("payment required");
   });
+
+  it("retries transient Fish API fetch failures before falling back", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let calls = 0;
+    const fetchImpl: FishApiFetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error("fetch failed");
+      }
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" },
+      retryDelayMs: () => 0,
+      sleep: async () => undefined
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("retries transient Fish API HTTP 5xx failures", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let calls = 0;
+    const fetchImpl: FishApiFetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response("temporary outage", { status: 502 });
+      }
+      return new Response(Buffer.from("mp3"), { status: 200 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" },
+      retryDelayMs: () => 0,
+      sleep: async () => undefined
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("does not retry Fish API authorization failures", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let calls = 0;
+    const fetchImpl: FishApiFetch = async () => {
+      calls += 1;
+      return new Response("unauthorized", { status: 401 });
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" },
+      retryDelayMs: () => 0,
+      sleep: async () => undefined
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("HTTP 401");
+    expect(calls).toBe(1);
+  });
+
+  it("reports repeated transient Fish API failures with the attempt count", async () => {
+    const config = makeConfig();
+    config.fishApi.referenceIds.mina = "mina-reference";
+    let calls = 0;
+    const fetchImpl: FishApiFetch = async () => {
+      calls += 1;
+      throw new Error("fetch failed");
+    };
+
+    const result = await synthesizeFishApiAudio(config, "Welcome back.", {
+      fetchImpl,
+      env: { FISH_API_KEY: "fish-test-key" },
+      retryDelayMs: () => 0,
+      sleep: async () => undefined
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("fetch failed after 3 attempts");
+    expect(calls).toBe(3);
+  });
 });
 
 describe("DJ audio provider resolution", () => {
